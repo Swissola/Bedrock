@@ -12,9 +12,13 @@
 # Exit codes in the log (not the hook's own exit, which is always 0 so
 # git pull is never blocked): 0 = doc updated normally; 2 = ran but the
 # vault was unreachable; 3 = the run wrote to a vault path other than
-# DOC_TARGET (reverted automatically - doesn't trust the model's own
+# DOC_TARGET (cleaned up automatically - doesn't trust the model's own
 # report of what it touched, diffs the vault's actual working tree
-# before/after instead).
+# before/after instead. A brand-new untracked file is removed with `rm`;
+# an unexpected modification to an already-tracked file is reverted with
+# `git checkout --`, which only works on tracked content, confirmed
+# empirically that it silently fails and leaves an untracked file in
+# place otherwise).
 #
 # A successful (exit 0) doc update is auto-committed locally in the vault
 # repo - never pushed. Push stays a manual, human-reviewed step at end of
@@ -35,15 +39,21 @@ DOC_TARGET="repos/${REPO_NAME}/index.md"
 # absolute path to the vault's own checkout (e.g.
 # VAULT_ROOT="/Users/you/Projects/your-vault-repo") - REPO_NAME/DOC_TARGET
 # still derive correctly on their own from wherever this copy is installed.
-VAULT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-HOOK_LOG_DIR="$HOME/.claude/hook-logs"
-MCP_CONFIG="$HOME/.claude/hook-configs/obsidian-mcp-config.json"
-KILL_SWITCH="$HOOK_LOG_DIR/.${REPO_NAME}.disabled"
+# All of these accept an env-var override, the same pattern pre-push and
+# session-start-vault-check already use for VAULT_ROOT - needed so a test
+# harness can point this at an isolated temp directory and a short timeout
+# instead of touching this machine's real ~/.claude/hook-logs or waiting
+# out a real 15s retry delay.
+VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+HOOK_LOG_DIR="${HOOK_LOG_DIR:-$HOME/.claude/hook-logs}"
+MCP_CONFIG="${MCP_CONFIG:-$HOME/.claude/hook-configs/obsidian-mcp-config.json}"
+KILL_SWITCH="${KILL_SWITCH:-$HOOK_LOG_DIR/.${REPO_NAME}.disabled}"
 FAILURES_LOG="$HOOK_LOG_DIR/FAILURES.log"
 SEEN_MARKER="$HOOK_LOG_DIR/.failures-seen"
 REPO_LOG="$HOOK_LOG_DIR/${REPO_NAME}-post-merge.log"
 ALLOWED_TOOLS="Read Grep Glob mcp__obsidian__vault_read mcp__obsidian__vault_list mcp__obsidian__vault_write mcp__obsidian__vault_append"
-TIMEOUT_SECS=1800
+TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
+RETRY_DELAY="${RETRY_DELAY:-15}"
 # Pinned, not inherited: without an explicit --model flag this run silently
 # takes whatever model the pulling developer's own machine defaults to,
 # inconsistent behaviour and cost across a team pulling the same repo.
@@ -196,7 +206,7 @@ EOF
     exit_code=$?
 
     if [ "$exit_code" -eq 127 ]; then
-        sleep 15
+        sleep "$RETRY_DELAY"
         claude_bin=$(resolve_claude)
         timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
             --mcp-config "$MCP_CONFIG" --strict-mcp-config \
@@ -210,12 +220,36 @@ EOF
     unexpected_paths=""
     if [ -n "$VAULT_ROOT" ]; then
         post_state=$(git -C "$VAULT_ROOT" status --porcelain 2>/dev/null)
-        unexpected_paths=$(diff <(printf '%s\n' "$pre_state") <(printf '%s\n' "$post_state") \
-            | grep '^>' | sed -E 's/^> ..? //' | grep -vF "$DOC_TARGET")
-        if [ -n "$unexpected_paths" ]; then
-            echo "$unexpected_paths" | while IFS= read -r p; do
-                [ -n "$p" ] && git -C "$VAULT_ROOT" checkout -- "$p" 2>/dev/null
+        # Keep the porcelain status code (XY) attached to each path this
+        # time, rather than stripping it - `git checkout -- <path>` only
+        # restores a TRACKED file to its last-committed content, it does
+        # nothing for a brand-new file that was never tracked (`??` in
+        # porcelain output). Confirmed empirically: against an untracked
+        # path it errors "pathspec did not match any file(s) known to git"
+        # and leaves the file sitting there, the `2>/dev/null` on the old
+        # version of this line silently swallowed that error, so the file
+        # was never actually reverted despite the log claiming it was. An
+        # untracked path needs `rm`, a tracked-but-modified one still needs
+        # `git checkout --`.
+        unexpected_lines=$(diff <(printf '%s\n' "$pre_state") <(printf '%s\n' "$post_state") \
+            | grep '^>' | sed -E 's/^> //' | grep -vF "$DOC_TARGET")
+        if [ -n "$unexpected_lines" ]; then
+            echo "$unexpected_lines" | while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                code="${line:0:2}"
+                p="${line:3}"
+                if [ "$code" = "??" ]; then
+                    # -rf, not -f: an untracked NEW DIRECTORY (not just a
+                    # file) collapses into one porcelain line ending in
+                    # "/", e.g. "?? repos/other-thing/", `rm -f` on a
+                    # directory path silently no-ops without -r, found by
+                    # this suite's own test against exactly that case.
+                    rm -rf "$VAULT_ROOT/$p" 2>/dev/null
+                else
+                    git -C "$VAULT_ROOT" checkout -- "$p" 2>/dev/null
+                fi
             done
+            unexpected_paths=$(printf '%s\n' "$unexpected_lines" | sed -E 's/^.. //')
             exit_code=3
         fi
     fi
@@ -246,7 +280,7 @@ EOF
         echo "Changed files:"
         echo "$changed"
         if [ -n "$unexpected_paths" ]; then
-            echo "--- UNEXPECTED VAULT WRITES (reverted, outside $DOC_TARGET) ---"
+            echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; new files removed, modified tracked files reverted) ---"
             echo "$unexpected_paths"
         fi
         if [ "$committed" = "yes" ]; then
