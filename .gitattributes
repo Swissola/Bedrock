@@ -1,0 +1,6 @@
+# Force LF line endings for shell scripts regardless of a contributor's
+# local core.autocrlf setting - a CRLF shebang line breaks these outright
+# on macOS/Linux (and in git-bash without care), and this repo's hook
+# templates are meant to be cloned and run cross-platform.
+tools/hook-templates/* text eol=lf
+tools/*.sh text eol=lf

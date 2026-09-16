@@ -85,6 +85,35 @@ Because it needs to fire regardless of which repo you're actually in, it can't l
 
 Replace both `<path-to-your-vault-clone>` placeholders with your real, absolute vault path — this script can't derive it from the current working directory the way `post-merge` can, since it's designed to fire from sessions in *other* repos. Merge this into your existing settings file rather than overwriting it if you already have other hooks configured there. Requires a restart to take effect.
 
+### `session-start-vault-context` — auto-load a repo's own vault context
+
+**Not the same hook as `session-start-vault-check` above** — that one fires everywhere and only ever reminds you the vault has unpushed commits, it never loads content. This one auto-loads `repos/<this-repo-name>/index.md` plus the single most recent daily note (across every contributor, by actual file modification time — not a filename sort, which would pick the wrong note on any day with more than one written) at the start of a session in a *specific* repo you've deliberately opted in, so work resumes without asking for `/vault-context` every time.
+
+Opt-in **per repo**, the same model as `post-merge` — a repo asks for this deliberately, it isn't on by default anywhere. Unlike `post-merge` and `pre-push`, though, this isn't a native git hook (`SessionStart` is a Claude Code hook, not a git one, so there's no `.git/hooks/` copy step and no `chmod +x`). It's registered the same way as `session-start-vault-check` above, but in *that other repo's own* `.claude/settings.json` rather than your user-scope one, pointing straight at this file's path in your vault clone:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "VAULT_ROOT=\"<path-to-your-vault-clone>\" bash \"<path-to-your-vault-clone>/tools/hook-templates/session-start-vault-context\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Because Claude Code project settings **are** version-controlled (unlike `.git/hooks/`, which never are), this can genuinely be committed into that other repo's own tracked `.claude/settings.json` and shared with the whole team in one commit — but only if `VAULT_ROOT` resolves the same way on every contributor's machine (e.g. everyone clones the vault to the same path by convention). If your team's vault path isn't consistent across machines, keep this a manual per-machine step instead, the same as `session-start-vault-check`.
+
+Silent no-op until that repo already has a `repos/<name>/index.md` in the vault — bootstrap it first via `/vault-populate`, same precondition as `post-merge`. Also silently skips on a mid-session `/compact` (its own summary already carries whatever this injected earlier), and fails open — still injects — on malformed or missing stdin, rather than risk silently going dark on a genuine session start.
+
+Reads the vault directly off disk, same deliberate MCP-only exception as `session-start-vault-check`: this runs before the model's own tool-calling loop begins.
+
 ### `pre-push` — a nudge at the moment you're already pushing
 
 A genuine git `pre-push` hook: warns (never blocks) if the vault has unpushed commits sitting around, at the exact moment you push something else — on the theory that you're already in a "pushing" mindset right then, so the reminder is more likely to actually get acted on.

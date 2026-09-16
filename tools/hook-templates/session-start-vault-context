@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# SessionStart hook: auto-loads this repo's own vault context - repos/<name>/
+# index.md, plus the single most recent daily note across every contributor
+# - at the start of a session in THIS repo, so work resumes without
+# re-explaining anything or remembering to ask for /vault-context.
+#
+# This is a DIFFERENT hook from session-start-vault-check: that one fires
+# everywhere (user-scope) and only ever reminds you the vault has unpushed
+# commits, it never loads content. This one is opt-in PER REPO, same model
+# as post-merge - installed via that specific repo's own project-level
+# .claude/settings.json, not user scope, so it only fires in repos that have
+# deliberately asked for it. Install either, both, or neither; see
+# docs/automation.md.
+#
+# Because Claude Code project settings ARE version-controlled (unlike git
+# hooks, which never are), this can genuinely be committed into that other
+# repo's own tracked .claude/settings.json and shared with the whole team in
+# one commit - but only if VAULT_ROOT resolves the same way on every
+# contributor's machine (e.g. everyone clones the vault to the same path by
+# convention). If your team's vault path isn't consistent across machines,
+# keep this a manual per-machine step instead, the same as
+# session-start-vault-check already is.
+#
+# Reads the vault directly off disk rather than via mcp__obsidian__* tools -
+# a deliberate exception to the MCP-only convention in
+# obsidian-vault-conventions: this is plumbing that runs before the model's
+# own tool-calling loop begins, not an in-session action, and the vault is a
+# plain git clone on disk regardless of how the model itself is told to
+# access it.
+#
+# Silent no-op if this repo has no repos/<name>/index.md yet (not opted in,
+# or not bootstrapped) - same precondition as post-merge: run /vault-populate
+# (or ask your assistant directly) first.
+#
+# Skips entirely on a mid-session /compact. Claude Code passes
+# {"source": "startup"|"resume"|"clear"|"compact"|"fork", ...} on stdin; a
+# /compact's own summary already carries whatever this hook injected earlier
+# in the same session, so re-injecting here is pure duplication with no
+# fidelity gained. Fails open (still injects) on malformed or missing stdin
+# rather than risk silently skipping a genuine session start - the safer
+# failure mode for a hook whose entire job is not letting context go missing.
+#
+# The daily note is loaded trimmed to its two forward-looking sections only
+# ("## Context for Future Sessions", "## Open Questions / Next Steps", from
+# the template in runbooks/using-the-vault.md) - the historical sections
+# ("What Was Done", "Decisions Made", "Problems Solved", "Commands Used")
+# stay in the vault, reachable on request, not needed automatically every
+# session. Falls back to loading the full note if neither forward-looking
+# section is present (an older note, or one that's pure history), rather
+# than silently showing nothing.
+#
+# "Most recent daily note" is found by actual file modification time across
+# EVERY daily-notes/<person>/ subfolder, not by a filename or directory
+# sort - a plain per-directory `ls -t` can't compare mtimes across multiple
+# sibling subfolders, and a filename sort would be wrong on any day with
+# more than one note written (it sorts by topic slug text, not by which one
+# was actually written last).
+
+set -u
+
+STDIN_JSON=$(cat 2>/dev/null)
+SOURCE=$(printf '%s' "$STDIN_JSON" | grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)"$/\1/')
+[ "$SOURCE" = "compact" ] && exit 0
+
+# Must be passed in, not derived - unlike post-merge, this script's cwd is
+# always some OTHER repo, never the vault itself, so `git rev-parse
+# --show-toplevel` here would resolve to the wrong repo entirely.
+VAULT_ROOT="${VAULT_ROOT:-}"
+[ -z "$VAULT_ROOT" ] && exit 0
+
+REPO_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"
+[ -z "$REPO_NAME" ] && REPO_NAME="$(basename "$(pwd)")"
+INDEX_FILE="$VAULT_ROOT/repos/$REPO_NAME/index.md"
+
+[ -f "$INDEX_FILE" ] || exit 0
+
+DAILY_DIR="$VAULT_ROOT/daily-notes"
+LATEST_NOTE=""
+if [ -d "$DAILY_DIR" ]; then
+  LATEST_NOTE=$(find "$DAILY_DIR" -name '*.md' -type f -exec ls -t {} + 2>/dev/null | head -n1)
+fi
+
+echo "--- Vault context for $REPO_NAME (auto-loaded, see runbooks/using-the-vault.md in the vault) ---"
+echo
+echo "## repos/$REPO_NAME/index.md"
+cat "$INDEX_FILE"
+
+extract_section() {
+  awk -v h="$2" '
+    $0 == h { grabbing=1; print; next }
+    grabbing && /^## / { grabbing=0 }
+    grabbing { print }
+  ' "$1"
+}
+
+if [ -n "$LATEST_NOTE" ]; then
+  REL_NOTE="${LATEST_NOTE#"$VAULT_ROOT/"}"
+  CONTEXT_SECTION=$(extract_section "$LATEST_NOTE" "## Context for Future Sessions")
+  NEXT_STEPS_SECTION=$(extract_section "$LATEST_NOTE" "## Open Questions / Next Steps")
+
+  if [ -n "$CONTEXT_SECTION" ] || [ -n "$NEXT_STEPS_SECTION" ]; then
+    echo
+    echo "## Most recent daily note, any contributor: $REL_NOTE (forward-looking sections only; read the note itself, or ask, for full history)"
+    [ -n "$CONTEXT_SECTION" ] && { echo; echo "$CONTEXT_SECTION"; }
+    [ -n "$NEXT_STEPS_SECTION" ] && { echo; echo "$NEXT_STEPS_SECTION"; }
+  else
+    echo
+    echo "## Most recent daily note, any contributor: $REL_NOTE (no forward-looking sections, loading in full)"
+    cat "$LATEST_NOTE"
+  fi
+else
+  echo
+  echo "(No daily notes in the vault yet.)"
+fi
+
+exit 0

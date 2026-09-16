@@ -15,6 +15,7 @@ The vault only pays off if it's actually part of how you work, not a separate ch
 - Ask your assistant to *"read `index.md` and the most recent daily note"* before diving in — it picks up where you left off without you re-explaining it.
 - Resuming something specific? Name it: *"read the last daily note about the deploy pipeline."*
 - If you've installed the optional `/vault-context` command (see [`docs/automation.md`](../docs/automation.md)), it does exactly this in one step.
+- If a repo has the optional `session-start-vault-context` hook installed (opt-in per repo, see [`docs/automation.md`](../docs/automation.md)), this happens automatically at the start of every session there, no asking required.
 
 ## During the session
 

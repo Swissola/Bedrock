@@ -44,6 +44,18 @@ SEEN_MARKER="$HOOK_LOG_DIR/.failures-seen"
 REPO_LOG="$HOOK_LOG_DIR/${REPO_NAME}-post-merge.log"
 ALLOWED_TOOLS="Read Grep Glob mcp__obsidian__vault_read mcp__obsidian__vault_list mcp__obsidian__vault_write mcp__obsidian__vault_append"
 TIMEOUT_SECS=1800
+# Pinned, not inherited: without an explicit --model flag this run silently
+# takes whatever model the pulling developer's own machine defaults to,
+# inconsistent behaviour and cost across a team pulling the same repo.
+# Sonnet specifically, not a cheaper tier: --model haiku was evaluated
+# against this exact class of task (read a diff, update one vault doc) and
+# rejected - it silently dropped the written note's frontmatter on 3 of 4
+# test scenarios and once overwrote an entire existing doc with fabricated
+# content instead of reading and updating it, despite sound content-level
+# judgement throughout. Full evidence in the pinet-docs repo's
+# docs/superpowers/plans/2026-09-14-haiku-index-maintenance-eval.md - don't
+# retry a cheaper model here without re-deriving why this was pinned.
+MODEL="sonnet"
 
 mkdir -p "$HOOK_LOG_DIR"
 
@@ -89,8 +101,16 @@ if [ -z "$default_branch" ] || [ "$current_branch" != "$default_branch" ]; then
 fi
 
 # Step 3: filter the diff - strip noise files and secret-shaped filenames.
+# The tfstate/cache patterns below are deliberately two clauses each, not
+# one \.(lock|tfstate|cache|log|tmp)$ - that simpler form only matches a
+# filename literally ending in those suffixes, so it misses a real
+# Terraform backup file like foo.tfstate.backup, and it misses anything
+# living inside a .cache/ directory entirely (.cache/some-file.json doesn't
+# end in ".cache"). Found and fixed against exactly this gap.
 changed=$(git diff HEAD@{1} HEAD --name-only 2>/dev/null \
-    | grep -Ev '\.(lock|tfstate|cache|log|tmp)$' \
+    | grep -Ev '\.(lock|log|tmp)$' \
+    | grep -Ev '\.tfstate($|\.)' \
+    | grep -Ev '(^|/)\.cache(/|$)' \
     | grep -Ev '(^|/)\.gitignore$' \
     | grep -Ev '(^|/)\.git/|(^|/)\.terraform/|(^|/)\.ansible/' \
     | grep -Ev '(^|/)\.env($|\..*$)' \
@@ -171,7 +191,7 @@ EOF
 
     timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
         --mcp-config "$MCP_CONFIG" --strict-mcp-config \
-        --allowedTools "$ALLOWED_TOOLS" \
+        --allowedTools "$ALLOWED_TOOLS" --model "$MODEL" \
         --print "$prompt" > "$run_output" 2>&1
     exit_code=$?
 
@@ -180,7 +200,7 @@ EOF
         claude_bin=$(resolve_claude)
         timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
             --mcp-config "$MCP_CONFIG" --strict-mcp-config \
-            --allowedTools "$ALLOWED_TOOLS" \
+            --allowedTools "$ALLOWED_TOOLS" --model "$MODEL" \
             --print "$prompt" > "$run_output" 2>&1
         exit_code=$?
     fi
