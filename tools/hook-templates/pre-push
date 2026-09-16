@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Git pre-push hook: warns (never blocks) if the vault has unpushed
+# commits sitting around, at the exact moment you're already pushing
+# something else - a nudge to bundle the vault push in while you're at
+# it, not a gate.
+#
+# Auto-pushing the vault's own commits from a hook was considered and
+# rejected: it would remove the human review point the whole "no PR gate"
+# governance model relies on (see the Push policy section in
+# runbooks/using-the-vault.md), and risks unattended non-fast-forward
+# races with nobody there to resolve them. This keeps push manual for
+# everyone, including the vault itself, and only shrinks the window an
+# update can sit unpushed and unseen - it doesn't close that window
+# completely (someone who goes quiet on every repo for a long stretch is
+# still a blind spot).
+#
+# Installed copy lives at .git/hooks/pre-push (not tracked by git - hooks
+# never are). This file is the tracked source of truth; re-copy after
+# edits:
+#   cp tools/hook-templates/pre-push .git/hooks/pre-push
+#   chmod +x .git/hooks/pre-push
+#
+# Same portability caveat as the other vault-aware hooks: VAULT_ROOT
+# should become an explicit path (not the cwd-derived fallback below)
+# once this is installed in a repo that isn't the vault itself.
+
+set -u
+
+VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+VAULT_BRANCH="main"
+WARN_COOLDOWN_SECONDS=600
+STATE_DIR="$HOME/.claude/hook-logs"
+LAST_WARN_FILE="$STATE_DIR/.vault-prepush-last-warn"
+
+# git passes ref info on stdin for pre-push - not needed for this check,
+# but must be consumed so git doesn't treat a closed pipe as an error.
+cat >/dev/null 2>&1
+
+[ -z "$VAULT_ROOT" ] && exit 0
+
+# No value in warning when the repo actually being pushed IS the vault -
+# its own unpushed commits are exactly what this push is about to send,
+# not a separate, easy-to-forget thing sitting elsewhere.
+this_repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -n "$this_repo_root" ] && [ "$this_repo_root" = "$VAULT_ROOT" ]; then
+    exit 0
+fi
+
+git -C "$VAULT_ROOT" rev-parse --verify "$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
+git -C "$VAULT_ROOT" rev-parse --verify "origin/$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
+
+pending_hashes=$(git -C "$VAULT_ROOT" log "origin/${VAULT_BRANCH}..${VAULT_BRANCH}" --format='%h' 2>/dev/null)
+[ -z "$pending_hashes" ] && exit 0
+
+# Throttle repeated warnings on rapid successive pushes - a warning noisy
+# enough to get ignored is worse than no warning at all.
+mkdir -p "$STATE_DIR" 2>/dev/null
+if [ -f "$LAST_WARN_FILE" ]; then
+    last=$(stat -c %Y "$LAST_WARN_FILE" 2>/dev/null || stat -f %m "$LAST_WARN_FILE" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    if [ -n "$last" ] && [ $((now - last)) -lt "$WARN_COOLDOWN_SECONDS" ]; then
+        exit 0
+    fi
+fi
+touch "$LAST_WARN_FILE" 2>/dev/null
+
+count=$(printf '%s\n' "$pending_hashes" | grep -c .)
+
+{
+    echo ""
+    echo "Note: the vault at $VAULT_ROOT has $count unpushed commit(s) not yet on origin - while you're pushing, worth bundling that too:"
+    echo "  git -C \"$VAULT_ROOT\" push"
+    echo ""
+} >&2
+
+exit 0

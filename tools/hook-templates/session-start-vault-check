@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# SessionStart hook: surfaces unpushed vault commits at the start of a
+# session in ANY wired repo, not just the vault itself.
+#
+# The gap this closes: a post-merge hook running in a different repo can
+# auto-commit a doc update into the vault as a background side effect.
+# Nothing about "I finished working in repo X" naturally surfaces "repo Y
+# (the vault) now has an unpushed commit" - without this, it just sits
+# there, accurate locally, invisible to everyone else, for as long as
+# that person happens not to have a vault session of their own.
+#
+# Deliberately does NOT push anything itself - a human still decides when
+# to push, same reasoning as the post-merge hook's own auto-commit (local
+# only, never auto-pushed): the output-validation check in the post-merge
+# hook verifies which file was written, not whether the content is
+# actually correct, so this stays a reminder, not an auto-fix.
+#
+# Registered at USER scope (~/.claude/settings.json), not this repo's own
+# project-level settings - a project-level registration only fires for
+# sessions actually started in this repo, which defeats the entire point
+# (surfacing this regardless of which repo you're in). See docs/mcp-setup.md
+# / docs/automation.md for the exact one-time, per-machine registration
+# step, including the required VAULT_ROOT env var - unlike the post-merge
+# hook, this script cannot derive VAULT_ROOT from its own working
+# directory, since that directory will usually be some other repo
+# entirely, not the vault.
+#
+# A session-start-only reminder misses long sessions that never restart -
+# someone can go hours without a fresh SessionStart while a hook-generated
+# update sits unpushed. Auto-pushing was considered and rejected for the
+# same reason it's rejected in the pre-push hook (removes the human review
+# checkpoint the "no PR gate" governance model relies on, and risks
+# unattended non-fast-forward races with nobody watching); this instead
+# also registers the same script under PostToolUse, throttled so it nags
+# periodically rather than after every tool call. SessionStart itself is
+# never throttled - a fresh session start is exactly the moment this is
+# most useful.
+
+set -u
+
+# Must be passed in - deliberately NOT derived via `git rev-parse
+# --show-toplevel`, unlike the post-merge hook. That derivation is only
+# correct when the script's cwd already IS the vault, which defeats the
+# purpose here: this hook exists specifically to fire from sessions in
+# OTHER repos. Falls back to cwd-derivation only as a convenience for
+# testing this script directly from within the vault checkout.
+VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+VAULT_BRANCH="main"
+NUDGE_COOLDOWN_SECONDS=3600
+STATE_DIR="$HOME/.claude/hook-logs"
+LAST_CHECK_FILE="$STATE_DIR/.vault-nudge-last-check"
+
+# Fail open on missing/malformed stdin or a missing jq - skip only the
+# one case known to be pure waste (recompacting mid-session), never skip
+# a genuine check just because stdin was unreadable. A missing
+# hook_event_name (jq absent, or a field genuinely not present) is
+# treated as "not a throttled PostToolUse call", i.e. as if it were a
+# SessionStart - the safer direction to fail in, since it means checking
+# more often, not silently going quiet.
+input=$(cat 2>/dev/null)
+event=""
+source_field=""
+if command -v jq >/dev/null 2>&1; then
+    event=$(printf '%s' "$input" | jq -r '.hook_event_name // empty' 2>/dev/null)
+    source_field=$(printf '%s' "$input" | jq -r '.source // empty' 2>/dev/null)
+fi
+if [ "$source_field" = "compact" ]; then
+    exit 0
+fi
+
+# Throttle only the periodic (PostToolUse) trigger.
+if [ "$event" = "PostToolUse" ]; then
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    if [ -f "$LAST_CHECK_FILE" ]; then
+        last=$(stat -c %Y "$LAST_CHECK_FILE" 2>/dev/null || stat -f %m "$LAST_CHECK_FILE" 2>/dev/null || echo 0)
+        now=$(date +%s)
+        if [ -n "$last" ] && [ $((now - last)) -lt "$NUDGE_COOLDOWN_SECONDS" ]; then
+            exit 0
+        fi
+    fi
+fi
+
+[ -z "$VAULT_ROOT" ] && exit 0
+git -C "$VAULT_ROOT" rev-parse --verify "$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
+git -C "$VAULT_ROOT" rev-parse --verify "origin/$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
+
+# Commit subjects are attacker-influenceable the same way filenames are
+# (anyone who can commit to the vault picks the message) - shown context
+# only needs the count and short hashes to be actionable, so the message
+# text itself is deliberately never embedded here.
+pending_hashes=$(git -C "$VAULT_ROOT" log "origin/${VAULT_BRANCH}..${VAULT_BRANCH}" --format='%h' 2>/dev/null)
+
+# Record that a check actually happened, regardless of the outcome, so
+# the PostToolUse throttle above measures from the last real check.
+mkdir -p "$STATE_DIR" 2>/dev/null
+touch "$LAST_CHECK_FILE" 2>/dev/null
+
+[ -z "$pending_hashes" ] && exit 0
+
+count=$(printf '%s\n' "$pending_hashes" | grep -c .)
+
+cat <<EOF
+Note: the vault at $VAULT_ROOT has $count unpushed commit(s) on $VAULT_BRANCH not yet on origin (${pending_hashes//$'\n'/, }) - this can include doc updates a post-merge hook auto-committed in the background while you were working elsewhere.
+
+Review with: git -C "$VAULT_ROOT" log origin/$VAULT_BRANCH..$VAULT_BRANCH
+Push when ready: git -C "$VAULT_ROOT" push
+EOF

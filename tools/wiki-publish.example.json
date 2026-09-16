@@ -1,0 +1,14 @@
+{
+  "space": "YOUR-SPACE-KEY",
+  "documents": [
+    {
+      "source": "docs/mcp-setup.md",
+      "title": "Obsidian Set Up Guide"
+    },
+    {
+      "source": "runbooks/daily-workflow.md",
+      "title": "Obsidian Daily Workflow",
+      "parent": "Obsidian Set Up Guide"
+    }
+  ]
+}
