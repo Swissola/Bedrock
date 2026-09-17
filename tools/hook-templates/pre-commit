@@ -32,25 +32,15 @@
 #   cp tools/hook-templates/pre-commit .git/hooks/pre-commit
 #   chmod +x .git/hooks/pre-commit
 #
-# Detection engine: prefers `betterleaks` (https://betterleaks.com/) if it's
-# on PATH, falling back to `gitleaks` (https://github.com/gitleaks/gitleaks)
-# if only that's installed. Betterleaks is gitleaks' own successor from the
-# same team: CLI- and config-compatible (same `protect --staged` flags, same
-# .gitleaksignore/.gitleaks.toml format), but with substantially better
-# recall on real secrets (its token-efficiency detection scored around 98.6%
-# versus gitleaks' entropy-based 70.4% on the CredData benchmark), so it's
-# preferred when both are present.
-#
-# No hand-rolled regex fallback if neither is installed, deliberately. A
-# home-grown pattern set would be weaker than either real tool (the whole
-# reason betterleaks is preferred over gitleaks here is that regex/entropy
-# detection alone has poor recall), while adding real code and test surface
-# of its own, for a false sense of coverage that's arguably worse than
-# knowing plainly there's none. Instead, no scanner found means no scan at
-# all, just a loud, unthrottled reminder every commit to go install one.
-# That's a small enough cost per commit, and honest about the actual gap,
-# unlike a once-a-day nag that could let "we're not really checking
-# anything" go unnoticed for a while.
+# Detection engine: `betterleaks` (https://betterleaks.com/) only, no other
+# engine and no hand-rolled regex fallback. A home-grown pattern set would be
+# weaker than a real tool and would add its own code and test surface for a
+# false sense of coverage, arguably worse than knowing plainly there's none.
+# If betterleaks isn't on PATH, no scanner found means no scan at all, just a
+# loud, unthrottled reminder every commit to go install it. That's a small
+# enough cost per commit, and honest about the actual gap, unlike a
+# once-a-day nag that could let "we're not really checking anything" go
+# unnoticed for a while.
 
 set -u
 
@@ -60,25 +50,18 @@ STRICT="${PRECOMMIT_SECRET_SCAN_STRICT:-0}"
 staged_files=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
 [ -z "$staged_files" ] && exit 0
 
-scan_bin=""
-if command -v betterleaks >/dev/null 2>&1; then
-    scan_bin="betterleaks"
-elif command -v gitleaks >/dev/null 2>&1; then
-    scan_bin="gitleaks"
-fi
-
-if [ -z "$scan_bin" ]; then
+if ! command -v betterleaks >/dev/null 2>&1; then
     {
         echo ""
-        echo "Note: neither betterleaks nor gitleaks is installed. Pre-commit isn't"
-        echo "scanning staged changes for secrets at all this commit."
-        echo "Install: https://betterleaks.com/ (or https://github.com/gitleaks/gitleaks#installing)"
+        echo "Note: betterleaks isn't installed. Pre-commit isn't scanning staged"
+        echo "changes for secrets at all this commit."
+        echo "Install: https://betterleaks.com/"
         echo ""
     } >&2
     exit 0
 fi
 
-findings=$("$scan_bin" protect --staged --redact -v 2>&1)
+findings=$(betterleaks protect --staged --redact -v 2>&1)
 scan_status=$?
 
 [ "$scan_status" -eq 0 ] && exit 0
@@ -94,7 +77,7 @@ scan_status=$?
     echo "redact the value, then re-stage and commit again."
     echo "False positive: commit again with --no-verify, or add an allowlist"
     echo "rule, a .gitleaksignore entry or repo .gitleaks.toml (betterleaks"
-    echo "reads the same config format)."
+    echo "reads gitleaks' own config format)."
     echo "=========================================================="
     echo ""
 } >&2

@@ -3,12 +3,12 @@
 # Run: bash tools/hook-templates/test-pre-commit.sh
 #
 # Modelled on this directory's own test-post-merge.sh: pre-commit has real
-# branching logic (strict vs warn, betterleaks-vs-gitleaks precedence,
-# no-scanner-found handling) rather than pre-push's near-zero-logic warning,
-# so comments and manual testing alone aren't enough here either.
+# branching logic (strict vs warn, no-scanner-found handling) rather than
+# pre-push's near-zero-logic warning, so comments and manual testing alone
+# aren't enough here either.
 #
-# Every fixture is a throwaway git repo under mktemp. No real betterleaks or
-# gitleaks needs to be installed to run this suite, since both are stubbed.
+# Every fixture is a throwaway git repo under mktemp. No real betterleaks
+# needs to be installed to run this suite, since it's stubbed.
 
 set -u
 HOOK_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pre-commit"
@@ -28,27 +28,25 @@ make_test_repo() {
   echo "$dir"
 }
 
-# Stub a scanner binary on PATH. $1 = bindir, $2 = binary name
-# ("betterleaks" or "gitleaks"), $3 = "clean" (exit 0, no output) or "dirty"
-# (exit 1, prints a fixed, name-tagged finding line so a test can tell which
-# stub actually ran). Stands in for the real `<bin> protect --staged
-# --redact -v`.
-make_stub_scanner() {
-  local bindir="$1" binname="$2" mode="$3"
+# Stub `betterleaks` on PATH. $1 = bindir, $2 = "clean" (exit 0, no output)
+# or "dirty" (exit 1, prints a fixed finding line). Stands in for the real
+# `betterleaks protect --staged --redact -v`.
+make_stub_betterleaks() {
+  local bindir="$1" mode="$2"
   mkdir -p "$bindir"
   if [ "$mode" = "dirty" ]; then
-    cat > "$bindir/$binname" <<EOF
+    cat > "$bindir/betterleaks" <<'EOF'
 #!/bin/bash
-echo "stub finding from $binname: fake-secret-detected"
+echo "stub finding: fake-secret-detected"
 exit 1
 EOF
   else
-    cat > "$bindir/$binname" <<'EOF'
+    cat > "$bindir/betterleaks" <<'EOF'
 #!/bin/bash
 exit 0
 EOF
   fi
-  chmod +x "$bindir/$binname"
+  chmod +x "$bindir/betterleaks"
 }
 
 assert_eq() {
@@ -63,9 +61,9 @@ assert_eq() {
 }
 
 # Runs the hook inside $1 (repo dir), with $2 (if given) a stub bindir
-# prepended to PATH, e.g. for a fake betterleaks/gitleaks. Doesn't otherwise
-# sanitize PATH: the "no scanner" tests rely on the dev/CI machine not
-# having a real betterleaks or gitleaks installed, not on hiding one.
+# prepended to PATH for a fake betterleaks. Doesn't otherwise sanitize PATH:
+# the "no scanner" tests rely on the dev/CI machine not having a real
+# betterleaks installed, not on hiding one.
 run_hook() {
   local repo="$1" bindir="${2:-}"
   ( cd "$repo" && PATH="${bindir:+$bindir:}$PATH" "$HOOK_SCRIPT" )
@@ -93,79 +91,60 @@ test_no_scanner_installed_warns_every_time_but_never_blocks() {
   output2=$(run_hook "$repo" 2>&1)
   status2=$?
   assert_eq "no scanner, run 1: exit 0" "0" "$status1"
-  assert_eq "no scanner, run 1: notice shown" "1" "$(printf '%s' "$output1" | grep -c "neither betterleaks nor gitleaks is installed")"
+  assert_eq "no scanner, run 1: notice shown" "1" "$(printf '%s' "$output1" | grep -c "betterleaks isn't installed")"
   assert_eq "no scanner, run 2: exit 0" "0" "$status2"
-  assert_eq "no scanner, run 2: notice shown again (not throttled)" "1" "$(printf '%s' "$output2" | grep -c "neither betterleaks nor gitleaks is installed")"
+  assert_eq "no scanner, run 2: notice shown again (not throttled)" "1" "$(printf '%s' "$output2" | grep -c "betterleaks isn't installed")"
   rm -rf "$repo"
 }
 
-test_gitleaks_clean_exits_zero_no_banner() {
+test_betterleaks_clean_exits_zero_no_banner() {
   local repo bindir output status
   repo=$(make_test_repo)
   bindir=$(mktemp -d)
-  make_stub_scanner "$bindir" "gitleaks" "clean"
+  make_stub_betterleaks "$bindir" "clean"
   printf 'anything\n' > "$repo/a.md"
   git -C "$repo" add a.md
   output=$(run_hook "$repo" "$bindir" 2>&1)
   status=$?
-  assert_eq "gitleaks present, clean: exit 0" "0" "$status"
-  assert_eq "gitleaks present, clean: no finding banner" "0" "$(printf '%s' "$output" | grep -c 'possible secret')"
-  assert_eq "gitleaks present, clean: no 'no scanner' notice" "0" "$(printf '%s' "$output" | grep -c 'is installed')"
+  assert_eq "betterleaks present, clean: exit 0" "0" "$status"
+  assert_eq "betterleaks present, clean: no finding banner" "0" "$(printf '%s' "$output" | grep -c 'possible secret')"
+  assert_eq "betterleaks present, clean: no 'not installed' notice" "0" "$(printf '%s' "$output" | grep -c "isn't installed")"
   rm -rf "$repo" "$bindir"
 }
 
-test_gitleaks_dirty_warns_but_does_not_block_by_default() {
+test_betterleaks_dirty_warns_but_does_not_block_by_default() {
   local repo bindir output status
   repo=$(make_test_repo)
   bindir=$(mktemp -d)
-  make_stub_scanner "$bindir" "gitleaks" "dirty"
+  make_stub_betterleaks "$bindir" "dirty"
   printf 'anything\n' > "$repo/a.md"
   git -C "$repo" add a.md
   output=$(run_hook "$repo" "$bindir" 2>&1)
   status=$?
-  assert_eq "gitleaks present, dirty, non-strict: exit 0" "0" "$status"
-  assert_eq "gitleaks present, dirty: finding banner shown" "1" "$(printf '%s' "$output" | grep -c 'possible secret')"
-  assert_eq "gitleaks present, dirty: stub's own finding text passed through" "1" "$(printf '%s' "$output" | grep -c 'fake-secret-detected')"
+  assert_eq "betterleaks present, dirty, non-strict: exit 0" "0" "$status"
+  assert_eq "betterleaks present, dirty: finding banner shown" "1" "$(printf '%s' "$output" | grep -c 'possible secret')"
+  assert_eq "betterleaks present, dirty: stub's own finding text passed through" "1" "$(printf '%s' "$output" | grep -c 'fake-secret-detected')"
   rm -rf "$repo" "$bindir"
 }
 
-test_gitleaks_dirty_strict_mode_blocks() {
+test_betterleaks_dirty_strict_mode_blocks() {
   local repo bindir output status
   repo=$(make_test_repo)
   bindir=$(mktemp -d)
-  make_stub_scanner "$bindir" "gitleaks" "dirty"
+  make_stub_betterleaks "$bindir" "dirty"
   printf 'anything\n' > "$repo/a.md"
   git -C "$repo" add a.md
   output=$(cd "$repo" && PATH="$bindir:$PATH" PRECOMMIT_SECRET_SCAN_STRICT=1 "$HOOK_SCRIPT" 2>&1)
   status=$?
-  assert_eq "gitleaks present, dirty, strict: exit 1" "1" "$status"
-  rm -rf "$repo" "$bindir"
-}
-
-test_betterleaks_preferred_over_gitleaks_when_both_present() {
-  # Both stubs exist and disagree (betterleaks clean, gitleaks dirty) so a
-  # pass here can only mean betterleaks actually won the precedence check,
-  # not that the hook happened to be looking at gitleaks' output.
-  local repo bindir output status
-  repo=$(make_test_repo)
-  bindir=$(mktemp -d)
-  make_stub_scanner "$bindir" "betterleaks" "clean"
-  make_stub_scanner "$bindir" "gitleaks" "dirty"
-  printf 'anything\n' > "$repo/a.md"
-  git -C "$repo" add a.md
-  output=$(run_hook "$repo" "$bindir" 2>&1)
-  status=$?
-  assert_eq "both present: betterleaks (clean) wins, exit 0" "0" "$status"
-  assert_eq "both present: no finding banner (gitleaks' dirty stub never ran)" "0" "$(printf '%s' "$output" | grep -c 'possible secret')"
+  assert_eq "betterleaks present, dirty, strict: exit 1" "1" "$status"
   rm -rf "$repo" "$bindir"
 }
 
 test_no_staged_changes_exits_zero_silently
 test_no_scanner_installed_warns_every_time_but_never_blocks
-test_gitleaks_clean_exits_zero_no_banner
-test_gitleaks_dirty_warns_but_does_not_block_by_default
-test_gitleaks_dirty_strict_mode_blocks
-test_betterleaks_preferred_over_gitleaks_when_both_present
+test_betterleaks_clean_exits_zero_no_banner
+test_betterleaks_dirty_warns_but_does_not_block_by_default
+test_betterleaks_dirty_strict_mode_blocks
 
 echo "--- $PASS passed, $FAIL failed ---"
 [ "$FAIL" -eq 0 ]
