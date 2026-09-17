@@ -30,7 +30,26 @@ These are deliberately condensed pointers back to the runbooks, not a second cop
 
 ## Git hooks
 
-Three optional hooks, each independently installable, tracked (as source) under `tools/hook-templates/`. Git never tracks the installed copies themselves (`.git/hooks/` isn't part of a repo's history), so each clone that wants a hook needs this one-time copy step.
+Four optional hooks, each independently installable, tracked (as source) under `tools/hook-templates/`. Git never tracks the installed copies themselves (`.git/hooks/` isn't part of a repo's history), so each clone that wants a hook needs this one-time copy step.
+
+### `pre-commit`: secret scan before it enters history
+
+Scans staged changes for likely secrets (API keys, tokens, private key blocks, connection strings with embedded passwords) before a commit lands, even locally. This is the cheapest point to catch one, since an uncommitted change costs nothing to fix and a pushed one is genuinely harder to walk back (see the "Redact real credentials, tenant IDs, and personal data" line in [`runbooks/using-the-vault.md`](../runbooks/using-the-vault.md)).
+
+```bash
+cp tools/hook-templates/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+Prefers [`betterleaks`](https://betterleaks.com/) if it's on `PATH`, falling back to [`gitleaks`](https://github.com/gitleaks/gitleaks) if only that's installed. Betterleaks is gitleaks' own successor from the same team, CLI- and config-compatible, with substantially better recall on real secrets (its token-efficiency detection scored around 98.6% versus gitleaks' entropy-based 70.4% on the CredData benchmark).
+
+**No hand-rolled regex fallback if neither is installed, deliberately.** A home-grown pattern set would be weaker than either real tool (the whole reason betterleaks is preferred over gitleaks here is that regex/entropy detection alone has poor recall), while adding real code and test surface of its own, for a false sense of coverage arguably worse than knowing plainly there's none. Instead, no scanner found means no scan at all, just a loud, *unthrottled* reminder every commit to go install one. That's a small enough per-commit cost, and honest about the actual gap, unlike a throttled nag that could let "we're not really checking anything" go unnoticed for a while.
+
+**Deliberately scoped to secrets, not general PII.** Names, emails, and phone numbers don't have a regex-tractable shape in prose the way a key or token does, and a general PII scanner here would false-positive on ordinary sentences constantly and still miss creative phrasing, which teaches people to reach for `--no-verify` on every commit. PII redaction stays the documented human-review discipline it already is; this hook only adds a machine-checkable backstop for the narrower, more mechanically-detectable case.
+
+**Non-blocking by default**, same philosophy as `pre-push` below. A real finding prints a loud warning but still lets the commit through, because a hard block on a false positive in a personal-notes vault trains people to bypass the hook entirely. Set `PRECOMMIT_SECRET_SCAN_STRICT=1` (shell profile, or a repo-local `.envrc`) to make a real finding block the commit instead, which is worth it for a team vault where "warn and trust everyone to act on it" isn't a strong enough guarantee. A confirmed false positive can still go through with `git commit --no-verify`, or by adding an allowlist rule, a `.gitleaksignore` entry or a repo `.gitleaks.toml` (betterleaks reads the same config format), if it's a recurring one.
+
+**Testing this hook:** `tools/hook-templates/test-pre-commit.sh` (run with `bash tools/hook-templates/test-pre-commit.sh`). 15 assertions cover the no-staged-changes no-op, the no-scanner-installed warning (and that it's unthrottled, unlike the old design), betterleaks-over-gitleaks precedence when both are present, and the warn-versus-strict exit code branching. Unlike `post-merge`'s suite it needs no throwaway vault fixture, since this hook only reads staged content and never writes anything, just a throwaway repo and stub `betterleaks`/`gitleaks` binaries on `PATH`.
 
 ### `post-merge` — self-documenting repo
 

@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: scans staged changes for likely secrets and credentials
+# before they enter local git history at all. This is the earliest, cheapest
+# point to catch one, since a commit that never happened costs nothing to
+# walk back, unlike a pushed one. See the "Redact real credentials, tenant
+# IDs, and personal data" line in the Growing this as a team vault section of
+# runbooks/using-the-vault.md: "anything sensitive committed here is
+# genuinely harder to walk back than in a system with access controls".
+#
+# Deliberately scoped to *secrets* (API keys, tokens, private key blocks,
+# connection strings with an embedded password) rather than general PII
+# (names, emails, phone numbers). Secret shapes are regex/entropy-tractable
+# with a low false-positive rate, but PII in a prose-heavy vault is not: a
+# general PII scanner here would flag ordinary sentences constantly and still
+# miss creative phrasing, training people to reach for --no-verify on every
+# commit. PII redaction stays the documented human-review discipline it
+# already is (same runbook section). This hook only adds a machine-checkable
+# backstop for the narrower, higher-stakes, more mechanically-detectable
+# case.
+#
+# Non-blocking by default, same philosophy as tools/hook-templates/pre-push.
+# A hard block on a false positive in a personal-notes vault teaches people
+# to bypass the hook entirely, which is worse than an occasional missed real
+# secret going out with a loud warning instead. Set
+# PRECOMMIT_SECRET_SCAN_STRICT=1 (repo- or machine-wide, e.g. in your shell
+# profile or a repo-local .envrc) to make a real finding block the commit
+# instead of just warning, which is reasonable for a team vault where "warn
+# and trust everyone to act on it" isn't a strong enough guarantee.
+#
+# Installed copy lives at .git/hooks/pre-commit, not tracked by git (hooks
+# never are). This file is the tracked source of truth; re-copy after edits:
+#   cp tools/hook-templates/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Detection engine: prefers `betterleaks` (https://betterleaks.com/) if it's
+# on PATH, falling back to `gitleaks` (https://github.com/gitleaks/gitleaks)
+# if only that's installed. Betterleaks is gitleaks' own successor from the
+# same team: CLI- and config-compatible (same `protect --staged` flags, same
+# .gitleaksignore/.gitleaks.toml format), but with substantially better
+# recall on real secrets (its token-efficiency detection scored around 98.6%
+# versus gitleaks' entropy-based 70.4% on the CredData benchmark), so it's
+# preferred when both are present.
+#
+# No hand-rolled regex fallback if neither is installed, deliberately. A
+# home-grown pattern set would be weaker than either real tool (the whole
+# reason betterleaks is preferred over gitleaks here is that regex/entropy
+# detection alone has poor recall), while adding real code and test surface
+# of its own, for a false sense of coverage that's arguably worse than
+# knowing plainly there's none. Instead, no scanner found means no scan at
+# all, just a loud, unthrottled reminder every commit to go install one.
+# That's a small enough cost per commit, and honest about the actual gap,
+# unlike a once-a-day nag that could let "we're not really checking
+# anything" go unnoticed for a while.
+
+set -u
+
+STRICT="${PRECOMMIT_SECRET_SCAN_STRICT:-0}"
+
+# Nothing staged, e.g. an empty or amend-only commit: nothing to scan.
+staged_files=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+[ -z "$staged_files" ] && exit 0
+
+scan_bin=""
+if command -v betterleaks >/dev/null 2>&1; then
+    scan_bin="betterleaks"
+elif command -v gitleaks >/dev/null 2>&1; then
+    scan_bin="gitleaks"
+fi
+
+if [ -z "$scan_bin" ]; then
+    {
+        echo ""
+        echo "Note: neither betterleaks nor gitleaks is installed. Pre-commit isn't"
+        echo "scanning staged changes for secrets at all this commit."
+        echo "Install: https://betterleaks.com/ (or https://github.com/gitleaks/gitleaks#installing)"
+        echo ""
+    } >&2
+    exit 0
+fi
+
+findings=$("$scan_bin" protect --staged --redact -v 2>&1)
+scan_status=$?
+
+[ "$scan_status" -eq 0 ] && exit 0
+
+{
+    echo ""
+    echo "=========================================================="
+    echo " pre-commit secret scan: possible secret(s) in staged changes"
+    echo "=========================================================="
+    echo "$findings"
+    echo ""
+    echo "Real secret: unstage it (git restore --staged <file>), remove or"
+    echo "redact the value, then re-stage and commit again."
+    echo "False positive: commit again with --no-verify, or add an allowlist"
+    echo "rule, a .gitleaksignore entry or repo .gitleaks.toml (betterleaks"
+    echo "reads the same config format)."
+    echo "=========================================================="
+    echo ""
+} >&2
+
+if [ "$STRICT" = "1" ] || [ "$STRICT" = "true" ]; then
+    exit 1
+fi
+
+exit 0
