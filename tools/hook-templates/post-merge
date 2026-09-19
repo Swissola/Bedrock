@@ -24,6 +24,14 @@
 # repo - never pushed. Push stays a manual, human-reviewed step at end of
 # session; this only protects the update from being silently lost or
 # overwritten before someone gets to that push.
+#
+# That auto-commit only gets secret-scanned if tools/hook-templates/pre-commit
+# is ALSO installed in this vault repo's .git/hooks/pre-commit - a plain
+# `git commit` (which this hook uses, deliberately never --no-verify) fires
+# whatever pre-commit hook exists, but installing post-merge on its own,
+# without pre-commit, means this auto-commit path has zero secret-scanning.
+# The output-validation check above verifies WHICH file changed, never
+# WHAT'S in it. Install both together (see docs/automation.md).
 
 set -u
 
