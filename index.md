@@ -18,6 +18,7 @@ Add a row (and a `[[repos/<name>/index]]` doc) here for each system or codebase 
 - [[docs/mcp-tools-reference]] — full reference of what the vault connection can do
 - [[runbooks/using-the-vault]] — session-start catch-up, writing daily notes, and bootstrapping `repos/` docs
 - [[runbooks/daily-workflow]] — a return-to checklist for day-to-day vault use
+- [[runbooks/git-recovery]] — undoing mistakes: bad commits, committed secrets, deleted notes, lost work
 - [[runbooks/adopting-for-a-new-team]] — checklist for turning this template into your own team's vault
 
 ## Daily Notes
@@ -34,4 +35,5 @@ Keep this section current as you add docs — it's the one place a new team memb
 - `docs/mcp-tools-reference.md`
 - `runbooks/using-the-vault.md`
 - `runbooks/daily-workflow.md`
+- `runbooks/git-recovery.md`
 - `runbooks/adopting-for-a-new-team.md`

@@ -130,6 +130,7 @@ Since this vault is meant for your whole team rather than one person, a couple o
 - **One `repos/<name>/` per system you all touch regularly** — split into multiple files (an index, then topic-specific docs) once a system's documentation outgrows a single page.
 - **Don't duplicate — cross-link.** If two people are documenting the same system from different angles, that's two docs cross-linked, not one person's version winning.
 - **Redact real credentials, tenant IDs, and personal data.** No real secrets or personal data in vault docs, even though it's an internal knowledge base — describe config *shape*, not real values. This matters even more here than in most internal wikis, since the entire point of this pattern is git history and easy forking/sharing — anything sensitive committed here is genuinely harder to walk back than in a system with access controls.
+  If something does slip through, [`git-recovery.md`](git-recovery.md#1-a-secret-or-personal-data-got-committed) says what to do.
 
 ## Push policy: direct to `main`, no required PR
 
@@ -157,4 +158,5 @@ Deliberately looser than a code repo, for two reasons: this vault is context, no
 - [`../docs/mcp-setup.md`](../docs/mcp-setup.md) — MCP setup
 - [`../docs/automation.md`](../docs/automation.md) — optional commands, skills, and hooks that build on top of these manual workflows
 - [`daily-workflow.md`](daily-workflow.md) — where these actions fit into an actual session (start/during/end), plus worked examples
+- [`git-recovery.md`](git-recovery.md) — undoing mistakes in the vault repo
 - [`../index.md`](../index.md)

@@ -46,6 +46,8 @@ Skip this if you're already comfortable with git. If not, every example below us
 - **Unpushed commit**: a commit that exists on your machine but hasn't been uploaded yet. Safer than an uncommitted change (it's a real, named snapshot), but still invisible to everyone else until pushed.
 - **Merge conflict**: git's way of saying "two people changed the same lines of the same file, and I can't guess which version you want" — it stops and asks you to decide by hand. Covered in Example 4 below.
 
+When something goes wrong beyond a merge conflict (a bad commit, a secret committed, a deleted note, a pull that refuses to run), see [`git-recovery.md`](git-recovery.md).
+
 ## Worked examples
 
 Two things need to be true before any of these: **Obsidian must be open** (the vault connection runs inside the app — closed Obsidian means your assistant can't reach the vault at all), and **the `obsidian` MCP server must already be registered on your machine** (a one-time setup step, see [`docs/mcp-setup.md`](../docs/mcp-setup.md) — do that first if you haven't).
@@ -91,6 +93,7 @@ This is the case the optional reminder hooks exist for — there are two of them
    - `git log origin/main..main` — commits that already exist on your machine but haven't been uploaded yet (this is exactly what the reminder hooks are checking).
 4. **If `git status` shows uncommitted changes**: `git add` and `git commit` them with a message describing what they are.
 5. **Look at what's about to be pushed before you push it** — `git log origin/main..main` (or `--stat` for more detail). This might be a mix of your own commits and several small automated commits a hook made on its own. That's normal and expected if you've installed the `post-merge` hook. But a quick look here *is* the actual safety check this whole design depends on — a hook's output-validation only verifies it wrote to the right file, not that what it wrote is actually correct, so a glance before pushing is the last line of defence, not a formality.
+   If something there shouldn't go out, [`git-recovery.md`](git-recovery.md) covers undoing it, including unwanted hook commits.
 6. `git push`. Everything above is now visible to the rest of the team.
 
 ### Example 4: Two people changed the same doc — a merge conflict
@@ -115,4 +118,5 @@ This repo pushes straight to `main`, no PR required — see [`using-the-vault.md
 
 - [`../docs/mcp-setup.md`](../docs/mcp-setup.md) — MCP setup
 - [`using-the-vault.md`](using-the-vault.md) — folder conventions, daily-note template, cross-linking
+- [`git-recovery.md`](git-recovery.md) — undoing mistakes: bad commits, committed secrets, deleted notes, lost work
 - [`../index.md`](../index.md)
