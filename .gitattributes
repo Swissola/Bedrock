@@ -4,3 +4,4 @@
 # templates are meant to be cloned and run cross-platform.
 tools/hook-templates/* text eol=lf
 tools/*.sh text eol=lf
+tools/command-templates/test/*.mjs text eol=lf
