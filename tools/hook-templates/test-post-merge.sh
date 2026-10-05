@@ -473,5 +473,237 @@ EOF
 
 test_hostile_filename_is_fenced_not_executed
 
+# ---------------------------------------------------------------------------
+# Vaults that are not git repos, a configurable doc path, and a second MCP
+# backend (see docs/vault-config.md). Everything above this line is the
+# original suite and must keep passing unchanged.
+
+# Number of lines containing a fixed string in a file; 0 if there are none or
+# the file is missing. (`grep -c ... || echo 0` prints a second 0 when the count
+# is 0, which breaks equality checks expecting 0.)
+gcount() {
+  local n
+  n=$(grep -c -F -- "$1" "$2" 2>/dev/null) || true
+  echo "${n:-0}"
+}
+
+make_plain_vault() {
+  # $1 = repo name, $2 = vault-relative doc path (default repos/<name>/index.md).
+  # A plain folder, deliberately NOT a git repo (e.g. a Syncthing-synced vault).
+  local name="$1" doc="${2:-repos/$1/index.md}" dir
+  dir=$(mktemp -d)
+  mkdir -p "$dir/$(dirname "$doc")"
+  echo "original index" > "$dir/$doc"
+  echo "$dir"
+}
+
+# Runs the hook against a repo with one relevant change and waits for the
+# run log to appear. Sets LOG_FILE. Extra env assignments can be passed as args.
+run_hook_and_wait() {
+  local repo="$1" vault="$2" logdir="$3" bindir="$4"; shift 4
+  echo "real change" >> "$repo/README.md"
+  git -C "$repo" commit -aq -m "real change"
+  ( cd "$repo" && env PATH="$bindir:$PATH" VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" "$@" bash "$HOOK_SCRIPT" )
+  LOG_FILE="$logdir/widget-service-post-merge.log"
+  local waited=0
+  while [ ! -s "$LOG_FILE" ] && [ "$waited" -lt 80 ]; do sleep 0.1; waited=$((waited + 1)); done
+}
+
+test_non_git_vault_update_succeeds_without_committing() {
+  local repo vault logdir bindir
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  logdir=$(mktemp -d); bindir=$(mktemp -d)
+  make_stub_claude_writing_index "$bindir" "$vault" "widget-service" "updated index"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir"
+  assert_eq "non-git vault: run logged as success (exit=0)" "1" "$(gcount "exit=0" "$LOG_FILE")"
+  assert_eq "non-git vault: nothing auto-committed" "0" "$(gcount "auto-committed" "$LOG_FILE")"
+  assert_eq "non-git vault: no .git created in the vault" "1" "$([ -e "$vault/.git" ] && echo 0 || echo 1)"
+  assert_eq "non-git vault: the doc really was updated" "updated index" "$(cat "$vault/repos/widget-service/index.md")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_non_git_vault_unexpected_new_file_is_flagged_not_removed() {
+  # Without git there is no provably-safe revert, so this only flags.
+  local repo vault logdir bindir
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  logdir=$(mktemp -d); bindir=$(mktemp -d)
+  cat > "$bindir/claude" <<EOF
+#!/bin/bash
+echo "updated index" > "$vault/repos/widget-service/index.md"
+mkdir -p "$vault/repos/other-thing"
+echo "hallucinated content" > "$vault/repos/other-thing/index.md"
+exit 0
+EOF
+  chmod +x "$bindir/claude"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir"
+  assert_eq "non-git vault: unexpected new file downgrades exit to 3" "1" "$(gcount "exit=3" "$LOG_FILE")"
+  assert_eq "non-git vault: unexpected file is listed in the log" "1" "$(gcount "repos/other-thing/index.md" "$LOG_FILE")"
+  assert_eq "non-git vault: unexpected file is NOT deleted (flag only)" "0" "$([ -f "$vault/repos/other-thing/index.md" ] && echo 0 || echo 1)"
+  assert_eq "non-git vault: log says it was not reverted" "1" "$(gcount "not reverted" "$LOG_FILE")"
+  assert_eq "non-git vault: failure recorded in FAILURES.log" "1" "$(gcount "widget-service" "$logdir/FAILURES.log")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_non_git_vault_unexpected_modification_is_flagged_not_reverted() {
+  local repo vault logdir bindir
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  mkdir -p "$vault/repos/keep-me"; echo "precious" > "$vault/repos/keep-me/index.md"
+  logdir=$(mktemp -d); bindir=$(mktemp -d)
+  cat > "$bindir/claude" <<EOF
+#!/bin/bash
+echo "updated index" > "$vault/repos/widget-service/index.md"
+echo "vandalised" > "$vault/repos/keep-me/index.md"
+exit 0
+EOF
+  chmod +x "$bindir/claude"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir"
+  assert_eq "non-git vault: modification of another existing note flagged (exit=3)" "1" "$(gcount "exit=3" "$LOG_FILE")"
+  assert_eq "non-git vault: that note is left as the run wrote it (no revert possible)" "vandalised" "$(cat "$vault/repos/keep-me/index.md")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_non_git_vault_dot_folder_churn_is_not_flagged() {
+  # Obsidian and Syncthing keep rewriting files under dot-folders while a run
+  # is going. Those are not the run's writes and must not read as failures.
+  local repo vault logdir bindir
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  logdir=$(mktemp -d); bindir=$(mktemp -d)
+  cat > "$bindir/claude" <<EOF
+#!/bin/bash
+echo "updated index" > "$vault/repos/widget-service/index.md"
+mkdir -p "$vault/.obsidian" "$vault/.stversions"
+echo "{}" > "$vault/.obsidian/workspace.json"
+echo "v" > "$vault/.stversions/old.md"
+exit 0
+EOF
+  chmod +x "$bindir/claude"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir"
+  assert_eq "non-git vault: dot-folder writes are ignored (stays exit=0)" "1" "$(gcount "exit=0" "$LOG_FILE")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_reposPath_from_vault_config() {
+  local repo vault logdir bindir capture
+  repo=$(make_other_repo "widget-service")
+  vault=$(make_plain_vault "widget-service" "Projects/widget-service/index.md")
+  printf -- '---\nreposPath: "Projects/{repo}/index.md"\n---\n' > "$vault/vault-config.md"
+  logdir=$(mktemp -d); bindir=$(mktemp -d); capture="$bindir/args.txt"
+  cat > "$bindir/claude" <<EOF
+#!/bin/bash
+echo "\$@" > "$capture"
+echo "updated index" > "$vault/Projects/widget-service/index.md"
+exit 0
+EOF
+  chmod +x "$bindir/claude"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir"
+  assert_eq "reposPath: hook runs against the configured doc (exit=0)" "1" "$(gcount "exit=0" "$LOG_FILE")"
+  assert_eq "reposPath: prompt names the configured doc path" "1" "$([ "$(gcount "Projects/widget-service/index.md" "$capture")" -ge 1 ] && echo 1 || echo 0)"
+  assert_eq "reposPath: prompt does not name the default path" "0" "$(gcount "repos/widget-service/index.md" "$capture")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_reposPath_missing_doc_aborts_naming_configured_path() {
+  local repo vault logdir bindir marker
+  repo=$(make_other_repo "widget-service"); vault=$(mktemp -d)
+  printf -- '---\nreposPath: "Projects/{repo}/index.md"\n---\n' > "$vault/vault-config.md"
+  mkdir -p "$vault/repos/widget-service"; echo "decoy" > "$vault/repos/widget-service/index.md"
+  logdir=$(mktemp -d); bindir=$(mktemp -d); marker="$bindir/invoked"
+  printf '#!/bin/bash\ntouch "%s"\nexit 0\n' "$marker" > "$bindir/claude"; chmod +x "$bindir/claude"
+  echo "real change" >> "$repo/README.md"; git -C "$repo" commit -aq -m "real change"
+  ( cd "$repo" && PATH="$bindir:$PATH" VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
+  sleep 0.5
+  assert_eq "reposPath: a decoy at the default path does not satisfy the guard" "1" "$([ -f "$marker" ] && echo 0 || echo 1)"
+  assert_eq "reposPath: abort message names the configured path" "1" "$(gcount "Projects/widget-service/index.md not found" "$logdir/widget-service-post-merge.log")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_unsafe_reposPath_falls_back_to_default() {
+  local repo vault logdir bindir
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  printf -- '---\nreposPath: ../escape/{repo}.md\n---\n' > "$vault/vault-config.md"
+  logdir=$(mktemp -d); bindir=$(mktemp -d)
+  make_stub_claude_writing_index "$bindir" "$vault" "widget-service" "updated index"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir"
+  assert_eq "unsafe reposPath ('..') ignored: default doc used (exit=0)" "1" "$(gcount "exit=0" "$LOG_FILE")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_vault_root_read_from_file_when_env_unset() {
+  local repo vault logdir bindir rootfile
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  logdir=$(mktemp -d); bindir=$(mktemp -d); rootfile="$bindir/vault-root"
+  printf '%s\n' "$vault" > "$rootfile"
+  make_stub_claude_writing_index "$bindir" "$vault" "widget-service" "updated index"
+  echo "real change" >> "$repo/README.md"; git -C "$repo" commit -aq -m "real change"
+  ( cd "$repo" && env -u VAULT_ROOT PATH="$bindir:$PATH" HOOK_LOG_DIR="$logdir" VAULT_ROOT_FILE="$rootfile" bash "$HOOK_SCRIPT" )
+  LOG_FILE="$logdir/widget-service-post-merge.log"
+  local waited=0; while [ ! -s "$LOG_FILE" ] && [ "$waited" -lt 80 ]; do sleep 0.1; waited=$((waited + 1)); done
+  assert_eq "VAULT_ROOT_FILE used when VAULT_ROOT is unset (exit=0)" "1" "$(gcount "exit=0" "$LOG_FILE")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_env_vault_root_beats_file() {
+  local repo vault logdir bindir rootfile
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  logdir=$(mktemp -d); bindir=$(mktemp -d); rootfile="$bindir/vault-root"
+  printf '%s\n' "/nonexistent/wrong/vault" > "$rootfile"
+  make_stub_claude_writing_index "$bindir" "$vault" "widget-service" "updated index"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" VAULT_ROOT_FILE="$rootfile"
+  assert_eq "explicit VAULT_ROOT env wins over VAULT_ROOT_FILE" "1" "$(gcount "exit=0" "$LOG_FILE")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_default_backend_allows_rest_api_tools_only() {
+  local repo vault logdir bindir capture
+  repo=$(make_other_repo "widget-service"); vault=$(make_test_vault "widget-service")
+  logdir=$(mktemp -d); bindir=$(mktemp -d); capture="$bindir/args.txt"
+  printf '#!/bin/bash\necho "$@" > "%s"\nexit 0\n' "$capture" > "$bindir/claude"; chmod +x "$bindir/claude"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" MCP_CONFIG="$bindir/none.json"
+  local waited=0; while [ ! -s "$capture" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done
+  assert_eq "default backend: allows mcp__obsidian__vault_write" "1" "$([ "$(gcount "mcp__obsidian__vault_write" "$capture")" -ge 1 ] && echo 1 || echo 0)"
+  assert_eq "default backend: does not allow mcpvault tool names" "0" "$(gcount "mcp__obsidian__write_note" "$capture")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_mcpvault_backend_detected_from_mcp_config() {
+  local repo vault logdir bindir capture mcp
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  logdir=$(mktemp -d); bindir=$(mktemp -d); capture="$bindir/args.txt"; mcp="$bindir/mcp.json"
+  echo '{"mcpServers":{"obsidian":{"command":"npx","args":["-y","@bitbonsai/mcpvault@latest","/some/vault"]}}}' > "$mcp"
+  printf '#!/bin/bash\necho "$@" > "%s"\nexit 0\n' "$capture" > "$bindir/claude"; chmod +x "$bindir/claude"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" MCP_CONFIG="$mcp"
+  local waited=0; while [ ! -s "$capture" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done
+  assert_eq "mcpvault config: allows read_note, write_note, list_directory" "3" "$(grep -o -E "mcp__obsidian__(read_note|write_note|list_directory)" "$capture" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+  assert_eq "mcpvault config: does not allow vault_write" "0" "$(gcount "mcp__obsidian__vault_write" "$capture")"
+  assert_eq "mcpvault config: prompt tells the run to use write_note" "1" "$([ "$(gcount "mcp__obsidian__write_note of the complete updated document" "$capture")" -ge 1 ] && echo 1 || echo 0)"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_backend_key_in_vault_config_overrides_detection() {
+  local repo vault logdir bindir capture mcp
+  repo=$(make_other_repo "widget-service"); vault=$(make_plain_vault "widget-service")
+  printf -- '---\nbackend: rest-api\n---\n' > "$vault/vault-config.md"
+  logdir=$(mktemp -d); bindir=$(mktemp -d); capture="$bindir/args.txt"; mcp="$bindir/mcp.json"
+  echo '{"mcpServers":{"obsidian":{"command":"npx","args":["@bitbonsai/mcpvault@latest","/v"]}}}' > "$mcp"
+  printf '#!/bin/bash\necho "$@" > "%s"\nexit 0\n' "$capture" > "$bindir/claude"; chmod +x "$bindir/claude"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" MCP_CONFIG="$mcp"
+  local waited=0; while [ ! -s "$capture" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done
+  assert_eq "backend: rest-api in vault-config overrides an mcpvault-looking MCP config" "1" "$([ "$(gcount "mcp__obsidian__vault_write" "$capture")" -ge 1 ] && echo 1 || echo 0)"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+}
+
+test_non_git_vault_update_succeeds_without_committing
+test_non_git_vault_unexpected_new_file_is_flagged_not_removed
+test_non_git_vault_unexpected_modification_is_flagged_not_reverted
+test_non_git_vault_dot_folder_churn_is_not_flagged
+test_reposPath_from_vault_config
+test_reposPath_missing_doc_aborts_naming_configured_path
+test_unsafe_reposPath_falls_back_to_default
+test_vault_root_read_from_file_when_env_unset
+test_env_vault_root_beats_file
+test_default_backend_allows_rest_api_tools_only
+test_mcpvault_backend_detected_from_mcp_config
+test_backend_key_in_vault_config_overrides_detection
+
 echo "--- $PASS passed, $FAIL failed ---"
 [ "$FAIL" -eq 0 ]

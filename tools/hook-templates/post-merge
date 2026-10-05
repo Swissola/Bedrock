@@ -25,6 +25,11 @@
 # session; this only protects the update from being silently lost or
 # overwritten before someone gets to that push.
 #
+# If the vault is NOT a git repo of its own (no .git at its root, e.g. a
+# Syncthing-synced folder) none of the git-based protection above is possible:
+# unexpected writes are flagged in the log (exit 3) but never reverted or
+# removed, and nothing is committed. See docs/vault-config.md, Hooks.
+#
 # That auto-commit only gets secret-scanned if tools/hook-templates/pre-commit
 # is ALSO installed in this vault repo's .git/hooks/pre-commit - a plain
 # `git commit` (which this hook uses, deliberately never --no-verify) fires
@@ -37,8 +42,7 @@ set -u
 
 REPO_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"
 [ -z "$REPO_NAME" ] && REPO_NAME="unknown-repo"
-DOC_TARGET="repos/${REPO_NAME}/index.md"
-# Both derived from THIS repo's own git remote/root, so a plain fork+rename
+# REPO_NAME is derived from THIS repo's own git remote/root, so a plain fork+rename
 # of the vault needs zero edits here - it's correct as long as this hook is
 # documenting the repo it's actually installed in (the common case, and the
 # only one that's fully automatic). Installing this exact template into a
@@ -52,6 +56,17 @@ DOC_TARGET="repos/${REPO_NAME}/index.md"
 # harness can point this at an isolated temp directory and a short timeout
 # instead of touching this machine's real ~/.claude/hook-logs or waiting
 # out a real 15s retry delay.
+#
+# VAULT_ROOT is resolved in this order: the VAULT_ROOT environment variable;
+# else the single line in the file named by VAULT_ROOT_FILE (default
+# ~/.claude/hook-configs/vault-root), which is how a per-machine installer can
+# point every repo's hook at a vault that isn't the repo itself, without editing
+# each .git/hooks/post-merge; else this repo's own git root (the original
+# behaviour, unchanged for anyone with neither set).
+VAULT_ROOT_FILE="${VAULT_ROOT_FILE:-$HOME/.claude/hook-configs/vault-root}"
+if [ -z "${VAULT_ROOT:-}" ] && [ -f "$VAULT_ROOT_FILE" ]; then
+    VAULT_ROOT="$(head -n1 "$VAULT_ROOT_FILE" | tr -d '\r')"
+fi
 VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 HOOK_LOG_DIR="${HOOK_LOG_DIR:-$HOME/.claude/hook-logs}"
 MCP_CONFIG="${MCP_CONFIG:-$HOME/.claude/hook-configs/obsidian-mcp-config.json}"
@@ -59,8 +74,66 @@ KILL_SWITCH="${KILL_SWITCH:-$HOOK_LOG_DIR/.${REPO_NAME}.disabled}"
 FAILURES_LOG="$HOOK_LOG_DIR/FAILURES.log"
 SEEN_MARKER="$HOOK_LOG_DIR/.failures-seen"
 REPO_LOG="$HOOK_LOG_DIR/${REPO_NAME}-post-merge.log"
-ALLOWED_TOOLS="Read Grep Glob mcp__obsidian__vault_read mcp__obsidian__vault_list mcp__obsidian__vault_write mcp__obsidian__vault_append"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
+
+# Optional per-vault settings (docs/vault-config.md): `reposPath` and
+# `backend`, read from the frontmatter of vault-config.md at the vault root.
+# With no such file, or no such key, the defaults below apply and this behaves
+# exactly as it did before the file existed. A config whose frontmatter has no
+# closing `---` is ignored entirely rather than guessing where it ends.
+config_value() {
+    [ -n "$VAULT_ROOT" ] && [ -f "$VAULT_ROOT/vault-config.md" ] || return 0
+    tr -d '\r' < "$VAULT_ROOT/vault-config.md" | awk -v k="$1" '
+        NR == 1 { if ($0 != "---") exit; next }
+        $0 == "---" { closed = 1; exit }
+        { lines[++n] = $0 }
+        END {
+            if (!closed) exit
+            for (i = 1; i <= n; i++) if (index(lines[i], k ":") == 1) {
+                v = substr(lines[i], length(k) + 2)
+                sub(/^[ \t]+/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+                if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+                print v; exit
+            }
+        }'
+}
+
+# A configured path must stay inside the vault: relative, no `..`, no drive.
+safe_rel() {
+    case "$1" in ""|/*|[A-Za-z]:*|*..*) return 1 ;; esac
+    return 0
+}
+
+REPOS_PATH="$(config_value reposPath)"
+safe_rel "$REPOS_PATH" || REPOS_PATH="repos/{repo}/index.md"
+DOC_TARGET="${REPOS_PATH//\{repo\}/$REPO_NAME}"
+
+# Which `obsidian` MCP server the run talks to decides the tool names it is
+# allowed (see docs/vault-config.md). `backend` in vault-config.md wins;
+# otherwise an MCP config that mentions mcpvault means mcpvault; otherwise the
+# Local REST API plugin's tools, which is what this hook always assumed.
+BACKEND="$(config_value backend)"
+if [ "$BACKEND" != "rest-api" ] && [ "$BACKEND" != "mcpvault" ]; then
+    BACKEND="rest-api"
+    grep -qs 'mcpvault' "$MCP_CONFIG" && BACKEND="mcpvault"
+fi
+if [ "$BACKEND" = "mcpvault" ]; then
+    READ_TOOL="mcp__obsidian__read_note"; WRITE_TOOL="mcp__obsidian__write_note"
+    LIST_TOOL="mcp__obsidian__list_directory"; PATCH_TOOL="patch_note"
+    ALLOWED_TOOLS="Read Grep Glob $READ_TOOL $LIST_TOOL $WRITE_TOOL"
+else
+    READ_TOOL="mcp__obsidian__vault_read"; WRITE_TOOL="mcp__obsidian__vault_write"
+    LIST_TOOL="mcp__obsidian__vault_list"; PATCH_TOOL="vault_patch"
+    ALLOWED_TOOLS="Read Grep Glob mcp__obsidian__vault_read mcp__obsidian__vault_list mcp__obsidian__vault_write mcp__obsidian__vault_append"
+fi
+
+# Is the vault a git repo of its own (a .git entry at its root)? If so the
+# output validation below can revert unexpected writes and the update is
+# auto-committed. If not (e.g. a Syncthing-synced folder) there is no safe way
+# to undo a write, so unexpected writes are only flagged, never reverted or
+# deleted, and nothing is committed.
+VAULT_IS_GIT=0
+[ -n "$VAULT_ROOT" ] && [ -e "$VAULT_ROOT/.git" ] && VAULT_IS_GIT=1
 RETRY_DELAY="${RETRY_DELAY:-15}"
 # Pinned, not inherited: without an explicit --model flag this run silently
 # takes whatever model the pulling developer's own machine defaults to,
@@ -183,12 +256,12 @@ $changed_data
 Instructions:
 1. Read only the changed files listed above to understand what changed.
 2. Access the vault only via mcp__obsidian__* tools, never direct filesystem paths.
-3. Read the existing doc at $DOC_TARGET first (mcp__obsidian__vault_read), then update
+3. Read the existing doc at $DOC_TARGET first ($READ_TOOL), then update
    only what's actually relevant to the changed files - never blanket re-document the
    whole repo, and never touch any other vault note.
-4. Never use vault_patch (heading-targeting can be unreliable and can wipe a doc down
-   to just its title) - always full vault_read, edit the content yourself, then full
-   mcp__obsidian__vault_write of the complete updated document.
+4. Never use $PATCH_TOOL (heading-targeting can be unreliable and can wipe a doc down
+   to just its title) - always full ${READ_TOOL#mcp__obsidian__}, edit the content yourself, then full
+   $WRITE_TOOL of the complete updated document.
 5. Stamp the doc with: *Last updated: $(date +%Y-%m-%d) (${new_sha})*
 6. If any mcp__obsidian__* call fails or is unavailable, print the literal string
    MCP_OBSIDIAN_UNAVAILABLE and stop - never silently fall back to filesystem access.
@@ -205,7 +278,16 @@ EOF
     # touched - it diffs the vault's actual working tree before and after,
     # independent of whatever the run's text output claims.
     pre_state=""
-    [ -n "$VAULT_ROOT" ] && pre_state=$(git -C "$VAULT_ROOT" status --porcelain 2>/dev/null)
+    [ "$VAULT_IS_GIT" = "1" ] && pre_state=$(git -C "$VAULT_ROOT" status --porcelain 2>/dev/null)
+    # Non-git vault: a marker file created now; anything newer than it after
+    # the run was written during the run. (On a filesystem with one-second
+    # timestamps a write in the very same second as this line could be missed,
+    # which is not a practical risk: the run takes far longer than a second
+    # before it writes anything.)
+    run_marker=""
+    if [ "$VAULT_IS_GIT" != "1" ] && [ -n "$VAULT_ROOT" ]; then
+        run_marker=$(mktemp)
+    fi
 
     timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
         --mcp-config "$MCP_CONFIG" --strict-mcp-config \
@@ -226,7 +308,7 @@ EOF
     end_ts=$(date -Iseconds)
 
     unexpected_paths=""
-    if [ -n "$VAULT_ROOT" ]; then
+    if [ "$VAULT_IS_GIT" = "1" ]; then
         post_state=$(git -C "$VAULT_ROOT" status --porcelain 2>/dev/null)
         # Keep the porcelain status code (XY) attached to each path this
         # time, rather than stripping it - `git checkout -- <path>` only
@@ -260,6 +342,25 @@ EOF
             unexpected_paths=$(printf '%s\n' "$unexpected_lines" | sed -E 's/^.. //')
             exit_code=3
         fi
+    elif [ -n "$run_marker" ]; then
+        # Non-git vault: anything written since the run started, other than
+        # DOC_TARGET. Flag only, nothing is reverted or removed, since without
+        # git there is no way to prove a deletion or restore is safe. Dot
+        # folders and files (.obsidian, .stversions, ...) are skipped: Obsidian
+        # and sync tools rewrite those all the time and they are not the run's
+        # writes. A sync tool bringing in another device's notes mid-run can
+        # still show up here as a false alarm; the log lists exactly which
+        # files, so it is quick to check.
+        unexpected_paths=""
+        while IFS= read -r changed_file; do
+            [ -z "$changed_file" ] && continue
+            rel="${changed_file#"$VAULT_ROOT"/}"
+            [ "$rel" = "$DOC_TARGET" ] && continue
+            unexpected_paths="${unexpected_paths}${rel}"$'\n'
+        done < <(find "$VAULT_ROOT" -mindepth 1 \( -name '.*' -prune \) -o -type f -newer "$run_marker" -print 2>/dev/null)
+        unexpected_paths="${unexpected_paths%$'\n'}"
+        [ -n "$unexpected_paths" ] && exit_code=3
+        rm -f "$run_marker"
     fi
 
     # Downgrade a reported success to a real failure if the run's own output
@@ -272,7 +373,7 @@ EOF
     fi
 
     committed=""
-    if [ "$exit_code" -eq 0 ] && [ -n "$VAULT_ROOT" ] && ! git -C "$VAULT_ROOT" diff --quiet -- "$DOC_TARGET" 2>/dev/null; then
+    if [ "$exit_code" -eq 0 ] && [ "$VAULT_IS_GIT" = "1" ] && ! git -C "$VAULT_ROOT" diff --quiet -- "$DOC_TARGET" 2>/dev/null; then
         # Local commit only - never pushed by the hook. Captures the update
         # durably so it can't be silently lost or overwritten before a human
         # gets to review and push it; a human still decides when it goes to
@@ -288,7 +389,11 @@ EOF
         echo "Changed files:"
         echo "$changed"
         if [ -n "$unexpected_paths" ]; then
-            echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; new files removed, modified tracked files reverted) ---"
+            if [ "$VAULT_IS_GIT" = "1" ]; then
+                echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; new files removed, modified tracked files reverted) ---"
+            else
+                echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; vault is not a git repo, flagged only, not reverted or removed) ---"
+            fi
             echo "$unexpected_paths"
         fi
         if [ "$committed" = "yes" ]; then
