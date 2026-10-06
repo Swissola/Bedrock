@@ -10,24 +10,49 @@ permissions:
 
 jobs:
   shell-tests:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - name: ubuntu
+            os: ubuntu-latest
+            bash: bash
+            path_prefix: ""
+          # macOS's own /bin/bash is 3.2, what a user's Terminal runs. Putting /bin first
+          # makes the `bash` the hooks and tests launch resolve to it too.
+          - name: macos (system bash 3.2)
+            os: macos-latest
+            bash: /bin/bash
+            path_prefix: "/bin:"
+          # GNU timeout from coreutils is installed as `gtimeout`.
+          - name: macos (gtimeout)
+            os: macos-latest
+            bash: bash
+            path_prefix: ""
+            brew: coreutils
     steps:
       - uses: actions/checkout@v4
+      - name: Install extra tools
+        if: matrix.brew != ''
+        run: brew install ${{ matrix.brew }}
       - name: Tool versions
         run: |
+          export PATH="${{ matrix.path_prefix }}$PATH"
+          ${{ matrix.bash }} --version | head -n1
           bash --version | head -n1
           git --version
           jq --version
+          node --version
+          for t in timeout gtimeout perl; do printf '%s: ' "$t"; command -v "$t" || echo "not installed"; done
       - name: pre-commit hook
-        run: bash tools/hook-templates/test-pre-commit.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-pre-commit.sh
       - name: session-start-vault-context hook
-        run: bash tools/hook-templates/test-session-start-vault-context.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-session-start-vault-context.sh
       - name: post-merge hook
-        run: bash tools/hook-templates/test-post-merge.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-post-merge.sh
       - name: installer
-        run: bash tools/test-install-claude-config.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/test-install-claude-config.sh
+      - name: stub REST API MCP server (path guard)
+        run: node tools/command-templates/test/test-stub-rest-api-mcp.mjs
