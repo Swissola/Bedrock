@@ -106,6 +106,12 @@ function runCommand({ vault, repo, template, args = '', system = '' }) {
   const r = sh('claude', a, repo);
   const { calls, final } = parseEvents(r.stdout || '');
   if (r.error) console.log(`  (could not run claude: ${r.error.message})`);
+  // A run that made no vault call at all usually died early (not logged in, bad token,
+  // a refused option): say what claude reported instead of leaving only failed assertions.
+  if (!calls.length) {
+    const brief = (s) => (s || '').trim().replace(/\s+/g, ' ').slice(0, 300) || '(nothing)';
+    console.log(`  (claude made no vault calls: exit ${r.status}; result: ${brief(final)}; stderr: ${brief(r.stderr)})`);
+  }
   return { calls, files: walk(vault), final };
 }
 
