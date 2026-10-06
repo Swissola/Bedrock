@@ -42,13 +42,21 @@ set -u
 
 # GNU `timeout` is not on macOS by default (coreutils provides `gtimeout`). Use whichever
 # exists, then perl's alarm, and only then run with no time limit rather than not at all.
+# HOOK_TIMEOUT_IMPL (timeout | gtimeout | perl | none) forces one branch; the tests use it.
 with_timeout() {
-    local secs="$1"; shift
-    if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"
-    elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$secs" "$@"
-    elif command -v perl >/dev/null 2>&1; then perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
-    else "$@"
+    local secs="$1" impl="${HOOK_TIMEOUT_IMPL:-auto}"; shift
+    if [ "$impl" = "auto" ]; then
+        if command -v timeout >/dev/null 2>&1; then impl=timeout
+        elif command -v gtimeout >/dev/null 2>&1; then impl=gtimeout
+        elif command -v perl >/dev/null 2>&1; then impl=perl
+        else impl=none
+        fi
     fi
+    case "$impl" in
+        timeout|gtimeout) "$impl" "$secs" "$@" ;;
+        perl) perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@" ;;
+        *) "$@" ;;
+    esac
 }
 
 REPO_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"

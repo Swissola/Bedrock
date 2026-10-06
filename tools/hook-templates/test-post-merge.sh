@@ -738,5 +738,44 @@ test_default_backend_allows_rest_api_tools_only
 test_mcpvault_backend_detected_from_mcp_config
 test_backend_key_in_vault_config_overrides_detection
 
+# with_timeout() has four branches and any one machine takes only one of them, so
+# HOOK_TIMEOUT_IMPL forces each. Skipped where the tool isn't installed.
+check_timeout_impl() {
+  local impl="$1" tool="$1"
+  [[ "$impl" = "none" ]] && tool=""
+  if [[ -n "$tool" ]] && ! command -v "$tool" >/dev/null 2>&1; then
+    echo "SKIP: timeout impl $impl (not installed here)"; return 0
+  fi
+  local repo vault logdir bindir
+  repo=$(make_other_repo "$REPO_NAME"); vault=$(make_test_vault "$REPO_NAME")
+  logdir=$(mktemp -d); bindir=$(mktemp -d)
+  make_stub_claude_writing_index "$bindir" "$vault" "$REPO_NAME" "$INDEX_CONTENT"
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" HOOK_TIMEOUT_IMPL="$impl" TIMEOUT_SECS=20
+  assert_eq "timeout impl $impl: a normal run succeeds" "1" "$(gcount "$LOG_EXIT_0" "$LOG_FILE")"
+  assert_eq "timeout impl $impl: the stub really ran" "$INDEX_CONTENT" "$(cat "$vault/repos/$REPO_NAME/index.md")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+  [[ "$impl" = "none" ]] && return 0   # no limit to enforce
+  if [[ "$impl" = "perl" ]] && [[ "$(uname -s)" =~ MINGW|MSYS|CYGWIN ]]; then
+    echo "SKIP: timeout impl perl, hung-run check (msys perl loses the alarm across exec; Windows always has a real timeout)"; return 0
+  fi
+  repo=$(make_other_repo "$REPO_NAME"); vault=$(make_test_vault "$REPO_NAME")
+  logdir=$(mktemp -d); bindir=$(mktemp -d)
+  printf '#!/bin/bash\nexec sleep 30\n' > "$bindir/claude"; chmod +x "$bindir/claude"
+  local began=$SECONDS
+  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" HOOK_TIMEOUT_IMPL="$impl" TIMEOUT_SECS=1 RETRY_DELAY=0
+  assert_eq "timeout impl $impl: a hung run is cut off quickly" "1" "$([[ -s "$LOG_FILE" && $((SECONDS - began)) -lt 20 ]] && echo 1 || echo 0)"
+  assert_eq "timeout impl $impl: the cut-off is logged as a failure" "1" "$(grep -cE 'exit=[1-9]' "$LOG_FILE" 2>/dev/null || echo 0)"
+  assert_eq "timeout impl $impl: a timeout is not mistaken for 'not found' and retried" "0" "$(gcount "exit=127" "$LOG_FILE")"
+  rm -rf "$repo" "$vault" "$logdir" "$bindir"
+  return 0
+}
+test_with_timeout_every_branch() {
+  local impl
+  for impl in timeout gtimeout perl none; do check_timeout_impl "$impl"; done
+  return 0
+}
+test_with_timeout_every_branch
+
+
 echo "--- $PASS passed, $FAIL failed ---"
 [ "$FAIL" -eq 0 ]
