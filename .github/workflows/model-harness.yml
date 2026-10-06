@@ -1,0 +1,84 @@
+name: model harness (manual)
+
+# Runs tools/command-templates/test/run-command-tests.mjs: every scenario is a real
+# `claude -p` call, so it spends the subscription behind CLAUDE_CODE_OAUTH_TOKEN.
+#
+# This repository is public, so the token is protected in layers:
+#   - workflow_dispatch only: no pull_request, push or schedule trigger can start it;
+#   - the token lives in the `model-harness` Environment, not as a repo secret. That
+#     environment only deploys from `main` and needs the owner's approval for each run,
+#     so a branch carrying a modified copy of this file cannot read it;
+#   - the job refuses to run off `main` or for anyone but the owner;
+#   - inputs are fixed choices, never free text, and reach the shell as env variables;
+#   - read-only permissions, pinned actions, a pinned CLI version, no network packages
+#     at run time (stub backend only), a time limit, one run at a time.
+# Setup steps for the environment and the secret: docs/automation.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Which scenario to run (the harness matches by substring)
+        type: choice
+        default: "log: default config, new note"
+        options:
+          - "log: default config, new note"
+          - "log: default config, same-day"
+          - "log: personal config"
+          - "context: personal config"
+          - "context: default config"
+          - "populate: default config"
+          - "populate: personal config"
+          - "log: secrets"
+          - "log: malformed"
+          - all
+      model:
+        description: Model for the runs
+        type: choice
+        default: sonnet
+        options:
+          - sonnet
+          - haiku
+
+permissions: {}
+
+concurrency:
+  group: model-harness
+  cancel-in-progress: false
+
+jobs:
+  harness:
+    if: github.repository == 'Swissola/Bedrock' && github.ref == 'refs/heads/main' && github.actor == 'Swissola'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: model-harness
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install the claude CLI (pinned version)
+        run: |
+          npm install --global @anthropic-ai/claude-code@2.1.291
+          claude --version
+      - name: Run the harness (stub backend)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          SCENARIO: ${{ inputs.scenario }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          set -eu
+          case "$MODEL" in sonnet|haiku) ;; *) echo "unknown model"; exit 2 ;; esac
+          args=(--backend rest-api --model "$MODEL")
+          case "$SCENARIO" in
+            all) ;;
+            "log: default config, new note"|"log: default config, same-day"|"log: personal config"|"context: personal config"|"context: default config"|"populate: default config"|"populate: personal config"|"log: secrets"|"log: malformed")
+              args+=(--only "$SCENARIO") ;;
+            *) echo "unknown scenario"; exit 2 ;;
+          esac
+          node tools/command-templates/test/run-command-tests.mjs "${args[@]}"

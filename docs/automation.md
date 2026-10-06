@@ -175,3 +175,21 @@ Deliberately rejected. Having a hook push its own commit immediately would remov
 
 - [`../runbooks/using-the-vault.md`](../runbooks/using-the-vault.md) — the manual workflows this automates
 - [`../runbooks/daily-workflow.md`](../runbooks/daily-workflow.md) — where hooks fit into an actual session, and the worked example of catching up on unpushed commits
+
+## Running the model-driven harness from GitHub Actions (optional)
+
+`tools/command-templates/test/run-command-tests.mjs` makes real `claude -p` calls, so it is not part of the automatic CI checks. `.github/workflows/model-harness.yml` runs it on demand, using a Claude subscription token. This repository is public, so the setup keeps that token away from anything but a deliberate, approved run on `main`.
+
+One-time setup (repository admin):
+
+1. In **Settings → Environments**, create `model-harness`. Add yourself as a **required reviewer**, and under **Deployment branches and tags** choose *Selected branches and tags* and allow only `main`.
+2. Generate a token with `claude setup-token` and store it as an **environment** secret, not a repository secret:
+
+   ```bash
+   gh secret set CLAUDE_CODE_OAUTH_TOKEN --env model-harness --repo <owner>/<repo>
+   ```
+
+   A repository-level secret with the same name would also be readable from any branch, which defeats the environment, so delete it if one exists (`gh secret delete CLAUDE_CODE_OAUTH_TOKEN --repo <owner>/<repo>`).
+3. Run it from **Actions → model harness (manual) → Run workflow** on `main`, pick a scenario (start with one), and approve the pending deployment.
+
+What the workflow does and does not allow: it only starts from `workflow_dispatch`; it refuses to run off `main` or for another actor; inputs are fixed choices; permissions are read-only; actions and the `claude` CLI version are pinned; it uses the stub REST API backend only, so nothing is fetched from a package registry at run time; and it has a 30-minute limit and one run at a time. The token is visible to the `claude` process during a run, so only run scenarios you have read. Revoke the token and delete the environment secret if you stop using this.

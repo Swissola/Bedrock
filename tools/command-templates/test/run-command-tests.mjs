@@ -12,7 +12,8 @@
 //                                   are sensitive to wording
 //     --model <name>                default sonnet
 //
-// MANUAL: every scenario is a real `claude -p` run, so it costs model calls and
+// MANUAL (or the "model harness (manual)" workflow, see docs/automation.md): every
+// scenario is a real `claude -p` run, so it costs model calls and
 // is not part of any automatic check. Requires the `claude` CLI on PATH.
 //
 // Judging: never by the model's own summary of what it did (it can be wrong, or
