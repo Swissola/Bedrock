@@ -111,8 +111,8 @@ test_most_recent_note_by_mtime_across_contributors() {
   mkdir -p "$vault/repos/widget"; echo "doc" > "$vault/repos/widget/index.md"
   write_note "$vault/daily-notes/alice/2026-10-05-zzz.md" OLD
   write_note "$vault/daily-notes/bob/2026-10-05-aaa.md" NEW
-  touch -d "2026-10-05 08:00" "$vault/daily-notes/alice/2026-10-05-zzz.md"
-  touch -d "2026-10-05 12:00" "$vault/daily-notes/bob/2026-10-05-aaa.md"
+  touch -t 202610050800 "$vault/daily-notes/alice/2026-10-05-zzz.md"
+  touch -t 202610051200 "$vault/daily-notes/bob/2026-10-05-aaa.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "newest by mtime wins across contributors" "CONTEXT-NEW" "$out"
   assert_not_contains "older note (alphabetically later) not loaded" "CONTEXT-OLD" "$out"
@@ -165,8 +165,8 @@ personal_vault() {  # builds a vault using the personal layout plus decoys in th
   # decoys in the DEFAULT locations, newer, which a config-ignoring hook would pick
   mkdir -p "$vault/repos/widget"; echo "DECOY-REPODOC" > "$vault/repos/widget/index.md"
   write_note "$vault/daily-notes/alice/2026-10-05-decoy.md" DECOY
-  touch -d "2026-10-05 08:00" "$vault/Inbox/daily-notes/2026-10-05-widget-x.md"
-  touch -d "2026-10-05 12:00" "$vault/daily-notes/alice/2026-10-05-decoy.md"
+  touch -t 202610050800 "$vault/Inbox/daily-notes/2026-10-05-widget-x.md"
+  touch -t 202610051200 "$vault/daily-notes/alice/2026-10-05-decoy.md"
   echo "$vault"
   return $?
 }

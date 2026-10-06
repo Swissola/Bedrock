@@ -40,6 +40,17 @@
 
 set -u
 
+# GNU `timeout` is not on macOS by default (coreutils provides `gtimeout`). Use whichever
+# exists, then perl's alarm, and only then run with no time limit rather than not at all.
+with_timeout() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$secs" "$@"
+    elif command -v perl >/dev/null 2>&1; then perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
+    else "$@"
+    fi
+}
+
 REPO_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"
 [ -z "$REPO_NAME" ] && REPO_NAME="unknown-repo"
 # REPO_NAME is derived from THIS repo's own git remote/root, so a plain fork+rename
@@ -292,7 +303,7 @@ EOF
         run_marker=$(mktemp)
     fi
 
-    timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
+    with_timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
         --mcp-config "$MCP_CONFIG" --strict-mcp-config \
         --allowedTools "$ALLOWED_TOOLS" --model "$MODEL" \
         --print "$prompt" > "$run_output" 2>&1
@@ -301,7 +312,7 @@ EOF
     if [ "$exit_code" -eq 127 ]; then
         sleep "$RETRY_DELAY"
         claude_bin=$(resolve_claude)
-        timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
+        with_timeout "$TIMEOUT_SECS" "$claude_bin" --restricted \
             --mcp-config "$MCP_CONFIG" --strict-mcp-config \
             --allowedTools "$ALLOWED_TOOLS" --model "$MODEL" \
             --print "$prompt" > "$run_output" 2>&1
