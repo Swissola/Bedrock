@@ -69,7 +69,7 @@ test_check_mode() {
   assert_eq "check on a fresh install: exit 0" "0" "$st"
   assert_contains "check on a fresh install: says current" "current" "$out"
   # an older installed copy: same file with a lower version stamp
-  sed -i 's/version [0-9][0-9]*/version 1/' "$p/claude/commands/vault-log.md"
+  sed 's/version [0-9][0-9]*/version 1/' "$p/claude/commands/vault-log.md" > "$p/vl.tmp" && mv "$p/vl.tmp" "$p/claude/commands/vault-log.md"  # no sed -i: BSD and GNU differ
   out=$(bash "$INSTALLER" --prefix "$p/claude" --check 2>&1); st=$?
   assert_eq "check with an outdated command: exit 1" "1" "$st"
   assert_contains "check names the outdated command" "vault-log.md" "$out"
