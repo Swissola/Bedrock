@@ -43,9 +43,18 @@ const tools = [
     inputSchema: { type: 'object', properties: { path: pathProp, targetType: { type: 'string' }, target: { type: 'string' }, operation: { type: 'string' }, content: { type: 'string' } }, required: ['path'] } },
 ];
 
+// Resolve a vault-relative path, refusing anything that lands outside the vault:
+// `..` segments, absolute paths, or a symlink inside the vault that points out.
+const isInside = (base, target) => {
+  const r = path.relative(base, target);
+  return r === '' || (!r.startsWith('..') && !path.isAbsolute(r));
+};
 function resolveInside(rel) {
-  const p = path.resolve(root, rel || '');
-  if (p !== root && !p.startsWith(root + path.sep)) throw new Error('path escapes the vault');
+  const p = path.resolve(root, String(rel || ''));
+  if (!isInside(root, p)) throw new Error('path escapes the vault');
+  let probe = p; // nearest existing ancestor, so a new file's parent is checked too
+  while (!fs.existsSync(probe) && probe !== root) probe = path.dirname(probe);
+  if (!isInside(fs.realpathSync(root), fs.realpathSync(probe))) throw new Error('path escapes the vault');
   return p;
 }
 const text = (s, isError = false) => ({ content: [{ type: 'text', text: s }], isError });

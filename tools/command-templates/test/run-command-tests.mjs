@@ -103,19 +103,28 @@ function runCommand({ vault, repo, template, args = '', system = '' }) {
     '--allowedTools', 'mcp__obsidian__*', 'Edit', 'Read', 'Bash(git config:*)', 'Bash(git rev-parse:*)', 'Bash(git remote:*)', 'Bash(hostname)', 'PowerShell(*)'];
   if (system) a.push('--append-system-prompt', system);
   const r = sh('claude', a, repo);
-  const calls = []; let final = '';
-  for (const line of (r.stdout || '').split('\n')) {
-    let j; try { j = JSON.parse(line); } catch { continue; }
-    if (j.type === 'assistant') for (const c of j.message?.content || []) if (c.type === 'tool_use' && c.name.startsWith('mcp__obsidian__')) {
-      const name = c.name.replace('mcp__obsidian__', ''); calls.push({ name, op: OPS[name] || name, path: c.input?.path ?? '' });
-    }
-    if (j.type === 'result') final = j.result || '';
-  }
+  const { calls, final } = parseEvents(r.stdout || '');
   if (r.error) console.log(`  (could not run claude: ${r.error.message})`);
   return { calls, files: walk(vault), final };
 }
 
-const sections = (t) => [...t.matchAll(/^## (.+?)\s*$/gm)].map((m) => m[1]).filter((s) => !s.startsWith('Update'));
+// Reads the stream-json event log: the obsidian MCP tool calls made, and the final result text.
+function parseEvents(stdout) {
+  const calls = []; let final = '';
+  for (const line of stdout.split('\n')) {
+    let j; try { j = JSON.parse(line); } catch { continue; }
+    if (j.type === 'result') final = j.result || '';
+    if (j.type !== 'assistant') continue;
+    for (const c of j.message?.content || []) {
+      if (c.type !== 'tool_use' || !c.name.startsWith('mcp__obsidian__')) continue;
+      const name = c.name.replace('mcp__obsidian__', '');
+      calls.push({ name, op: OPS[name] || name, path: c.input?.path ?? '' });
+    }
+  }
+  return { calls, final };
+}
+
+const sections = (t) => t.split('\n').filter((l) => l.startsWith('## ')).map((l) => l.slice(3).trim()).filter((s) => !s.startsWith('Update'));
 const SIX = ['What Was Done', 'Decisions Made', 'Problems Solved', 'Commands Used', 'Context for Future Sessions', 'Open Questions / Next Steps'];
 const FIVE = ['What Was Done', 'Decisions Made & Why', 'Problems Solved', 'Context for Future Sessions', 'Open Questions / Next Steps'];
 const firstRead = (c) => c.find((x) => x.op === 'read')?.path;
@@ -160,7 +169,7 @@ const scenarios = [
     check('tags include the repo name', /widget/.test(t.split('---')[1] || ''));
     check('machine field present', /^machine: \S+/m.test(t));
     const cl = fs.readFileSync(path.join(repo, 'change-log.md'), 'utf8');
-    check('change-log.md has a new entry above the old one', cl.indexOf('**What changed:**') !== -1 && cl.indexOf('## 2026-01-01 - Old entry') > cl.indexOf('**Notes:**'));
+    check('change-log.md has a new entry above the old one', cl.includes('**What changed:**') && cl.indexOf('## 2026-01-01 - Old entry') > cl.indexOf('**Notes:**'));
     check('change-log.md left uncommitted', sh('git', ['status', '--short'], repo).stdout.includes('change-log.md'));
   } },
   { name: 'context: personal config reads the config first and honours hubNote/dailyNotesPath', run() {
@@ -217,7 +226,8 @@ const scenarios = [
 console.log(`Backend: ${backend}  model: ${model}  repeat: ${repeat}\n`);
 for (const s of scenarios.filter((x) => !only || x.name.includes(only))) {
   for (let i = 1; i <= repeat; i++) {
-    console.log(`${s.name}${repeat > 1 ? `  [run ${i}/${repeat}]` : ''}`);
+    const runLabel = repeat > 1 ? `  [run ${i}/${repeat}]` : '';
+    console.log(`${s.name}${runLabel}`);
     try { s.run(); } catch (e) { fail++; console.log(`  FAIL: scenario threw (${e.message})`); }
   }
 }
