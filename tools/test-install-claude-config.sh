@@ -13,15 +13,17 @@ FAIL=0
 
 assert_eq() {
   local desc="$1" expected="$2" actual="$3"
-  if [ "$expected" = "$actual" ]; then echo "PASS: $desc"; PASS=$((PASS + 1))
+  if [[ "$expected" = "$actual" ]]; then echo "PASS: $desc"; PASS=$((PASS + 1))
   else echo "FAIL: $desc (expected [$expected], got [$actual])"; FAIL=$((FAIL + 1)); fi
+  return $?
 }
 assert_contains() {
   local desc="$1" needle="$2" haystack="$3"
   if printf '%s' "$haystack" | grep -qF -- "$needle"; then echo "PASS: $desc"; PASS=$((PASS + 1))
   else echo "FAIL: $desc (output does not contain [$needle])"; FAIL=$((FAIL + 1)); fi
+  return $?
 }
-exists() { [ -e "$1" ] && echo yes || echo no; }
+exists() { local p="$1"; [[ -e "$p" ]] && echo yes || echo no; return $?; }
 
 test_dry_run_changes_nothing() {
   local p out; p=$(mktemp -d)
@@ -30,6 +32,7 @@ test_dry_run_changes_nothing() {
   assert_eq "dry run: nothing created" "no" "$(exists "$p/claude")"
   assert_contains "dry run: says what it would do" "would install" "$out"
   rm -rf "$p"
+  return $?
 }
 
 test_fresh_install_copies_commands_skills_hooks() {
@@ -43,9 +46,10 @@ test_fresh_install_copies_commands_skills_hooks() {
   assert_eq "installs the post-merge hook template" "yes" "$(exists "$p/claude/hook-templates/post-merge")"
   assert_eq "installs the session-start hook template" "yes" "$(exists "$p/claude/hook-templates/session-start-vault-context")"
   assert_eq "installs the session-start .sh wrapper" "yes" "$(exists "$p/claude/hook-templates/session-start-vault-context.sh")"
-  assert_eq "hook templates are executable" "yes" "$([ -x "$p/claude/hook-templates/post-merge" ] && echo yes || echo no)"
+  assert_eq "hook templates are executable" "yes" "$([[ -x "$p/claude/hook-templates/post-merge" ]] && echo yes || echo no)"
   assert_eq "test scripts are NOT installed" "no" "$(exists "$p/claude/hook-templates/test-post-merge.sh")"
   rm -rf "$p"
+  return $?
 }
 
 test_second_run_is_idempotent() {
@@ -55,6 +59,7 @@ test_second_run_is_idempotent() {
   assert_contains "second run: reports unchanged" "unchanged" "$out"
   assert_eq "second run: nothing re-installed" "0" "$(printf '%s' "$out" | grep -c -E '^(installed|updated)')"
   rm -rf "$p"
+  return $?
 }
 
 test_check_mode() {
@@ -77,6 +82,7 @@ test_check_mode() {
   out=$(bash "$INSTALLER" --prefix "$p/claude" --check 2>&1)
   assert_contains "check reports a modified hook template" "differs" "$out"
   rm -rf "$p"
+  return $?
 }
 
 test_update_replaces_outdated_copy() {
@@ -87,6 +93,7 @@ test_update_replaces_outdated_copy() {
   assert_contains "re-run reports the update" "updated" "$out"
   assert_eq "re-run restores the real content" "0" "$(grep -c '^stale$' "$p/claude/commands/vault-log.md")"
   rm -rf "$p"
+  return $?
 }
 
 test_vault_root_file() {
@@ -95,12 +102,13 @@ test_vault_root_file() {
   assert_eq "--vault writes the vault-root file" "$v" "$(head -n1 "$p/claude/hook-configs/vault-root" 2>/dev/null | tr -d '\r')"
   # a different vault must not be silently overwritten
   local v2; v2=$(mktemp -d)
-  out=$(bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" 2>&1); local st=$?
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" 2>&1)
   assert_eq "a different existing vault-root is not overwritten without --force" "$v" "$(head -n1 "$p/claude/hook-configs/vault-root" | tr -d '\r')"
   assert_contains "…and the installer says why" "--force" "$out"
   bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" --force >/dev/null 2>&1
   assert_eq "--force replaces it" "$v2" "$(head -n1 "$p/claude/hook-configs/vault-root" | tr -d '\r')"
   rm -rf "$p" "$v" "$v2"
+  return $?
 }
 
 test_nonexistent_vault_is_an_error() {
@@ -109,6 +117,7 @@ test_nonexistent_vault_is_an_error() {
   assert_eq "nonexistent --vault: exit 2" "2" "$st"
   assert_contains "…with a clear message" "not a directory" "$out"
   rm -rf "$p"
+  return $?
 }
 
 test_mcpvault_config_generated_once() {
@@ -122,6 +131,7 @@ test_mcpvault_config_generated_once() {
   bash "$INSTALLER" --prefix "$p/claude" --vault "$v" --backend mcpvault >/dev/null 2>&1
   assert_eq "mcpvault: an existing MCP config is never overwritten" "1" "$(grep -c '"mine"' "$cfg")"
   rm -rf "$p" "$v"
+  return $?
 }
 
 test_rest_api_backend_writes_no_config_and_explains() {
@@ -130,12 +140,14 @@ test_rest_api_backend_writes_no_config_and_explains() {
   assert_eq "rest-api: no MCP config generated (needs an API key)" "no" "$(exists "$p/claude/hook-configs/obsidian-mcp-config.json")"
   assert_contains "rest-api: points at the setup guide" "mcp-setup" "$out"
   rm -rf "$p" "$v"
+  return $?
 }
 
 test_unknown_option_is_a_usage_error() {
   local out st; out=$(bash "$INSTALLER" --bogus 2>&1); st=$?
   assert_eq "unknown option: exit 2" "2" "$st"
   assert_contains "…prints usage" "Usage" "$out"
+  return $?
 }
 
 test_never_touches_real_home_without_prefix_in_tests() {
@@ -145,6 +157,7 @@ test_never_touches_real_home_without_prefix_in_tests() {
   out=$(HOME="$fakehome" bash "$INSTALLER" --dry-run 2>&1)
   assert_eq "dry run without --prefix writes nothing under HOME" "no" "$(exists "$fakehome/.claude")"
   rm -rf "$fakehome"
+  return $?
 }
 
 test_session_start_wrapper_uses_vault_root_file() {
@@ -162,6 +175,7 @@ test_session_start_wrapper_uses_vault_root_file() {
   out=$( cd "$repo" && printf '{"source":"compact"}' | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
   assert_eq "wrapper: passes stdin through (compact still skipped)" "" "$out"
   rm -rf "$p" "$v" "$repo"
+  return $?
 }
 
 test_no_skills_flag() {
@@ -180,6 +194,7 @@ test_no_skills_flag() {
   out=$(bash "$INSTALLER" --prefix "$p/claude" --check 2>&1); st=$?
   assert_eq "--check without --no-skills: missing skills are reported (exit 1)" "1" "$st"
   rm -rf "$p"
+  return $?
 }
 
 test_dry_run_changes_nothing
@@ -197,4 +212,4 @@ test_never_touches_real_home_without_prefix_in_tests
 test_session_start_wrapper_uses_vault_root_file
 
 echo "--- $PASS passed, $FAIL failed ---"
-[ "$FAIL" -eq 0 ]
+[[ "$FAIL" -eq 0 ]]

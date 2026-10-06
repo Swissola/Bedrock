@@ -44,9 +44,10 @@ Usage: install-claude-config.sh [options]
   --prefix <dir>       install into <dir> instead of ~/.claude (used by tests).
   -h, --help           this text.
 EOF
+  return $?
 }
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --vault) VAULT="${2:-}"; shift 2 ;;
     --backend) BACKEND="${2:-}"; shift 2 ;;
@@ -60,39 +61,39 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -n "$BACKEND" ] && [ "$BACKEND" != "rest-api" ] && [ "$BACKEND" != "mcpvault" ]; then
+if [[ -n "$BACKEND" ]] && [[ "$BACKEND" != "rest-api" ]] && [[ "$BACKEND" != "mcpvault" ]]; then
   echo "--backend must be rest-api or mcpvault" >&2; exit 2
 fi
-if [ -n "$VAULT" ] && [ ! -d "$VAULT" ]; then
+if [[ -n "$VAULT" ]] && [[ ! -d "$VAULT" ]]; then
   echo "--vault '$VAULT' is not a directory" >&2; exit 2
 fi
-[ -n "$PREFIX" ] || { echo "empty --prefix" >&2; exit 2; }
+[[ -n "$PREFIX" ]] || { echo "empty --prefix" >&2; exit 2; }
 
 NEED_ATTENTION=0
 
 # bedrock-template stamp, e.g. "<!-- bedrock-template: vault-log, version 2 -->"
-stamp_version() { grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$1" 2>/dev/null | head -n1 | sed -E 's/.*version //'; }
+stamp_version() { local f="$1"; grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$f" 2>/dev/null | head -n1 | sed -E 's/.*version //'; return $?; }
 
 # install_file <source> <destination> [exec]
 install_file() {
   local src="$1" dst="$2" mode="${3:-}" verb
-  if [ -e "$dst" ] && cmp -s "$src" "$dst"; then
+  if [[ -e "$dst" ]] && cmp -s "$src" "$dst"; then
     echo "unchanged $dst"; return 0
   fi
-  [ -e "$dst" ] && verb="update" || verb="install"
-  if [ "$DRY" = "1" ]; then echo "would $verb $dst"; return 0; fi
+  [[ -e "$dst" ]] && verb="update" || verb="install"
+  if [[ "$DRY" = "1" ]]; then echo "would $verb $dst"; return 0; fi
   mkdir -p "$(dirname "$dst")" && cp "$src" "$dst" || { echo "FAILED to write $dst" >&2; NEED_ATTENTION=1; return 1; }
-  [ "$mode" = "exec" ] && chmod +x "$dst"
-  [ "$verb" = "update" ] && echo "updated $dst" || echo "installed $dst"
+  [[ "$mode" = "exec" ]] && chmod +x "$dst"
+  [[ "$verb" = "update" ]] && echo "updated $dst" || echo "installed $dst"
 }
 
 # check_file <source> <destination> <label>
 check_file() {
   local src="$1" dst="$2" label="$3" sv iv
-  if [ ! -e "$dst" ]; then echo "missing  $label"; NEED_ATTENTION=1; return; fi
+  if [[ ! -e "$dst" ]]; then echo "missing  $label"; NEED_ATTENTION=1; return; fi
   if cmp -s "$src" "$dst"; then echo "current  $label"; return; fi
   sv="$(stamp_version "$src")"; iv="$(stamp_version "$dst")"
-  if [ -n "$sv" ] && [ -n "$iv" ] && [ "$iv" -lt "$sv" ] 2>/dev/null; then
+  if [[ -n "$sv" ]] && [[ -n "$iv" ]] && [[ "$iv" -lt "$sv" ]] 2>/dev/null; then
     echo "outdated $label (installed version $iv, repo has $sv)"
   else
     echo "differs  $label (installed copy is not byte-identical to this repo's)"
@@ -116,6 +117,7 @@ if [ -z "${VAULT_ROOT:-}" ] && [ -f "$d/../hook-configs/vault-root" ]; then
 fi
 exec bash "$d/session-start-vault-context"
 EOF
+  return $?
 }
 
 # --- the file lists --------------------------------------------------------
@@ -125,59 +127,59 @@ SKILL_DIRS=("$SRC_ROOT"/tools/skill-templates/*/)
 
 echo "Source:  $SRC_ROOT"
 echo "Install: $PREFIX"
-[ "$CHECK" = "1" ] && echo "(check only, nothing will be changed)"
-[ "$DRY" = "1" ] && echo "(dry run, nothing will be changed)"
+[[ "$CHECK" = "1" ]] && echo "(check only, nothing will be changed)"
+[[ "$DRY" = "1" ]] && echo "(dry run, nothing will be changed)"
 echo
 
 # --- prerequisites (warnings only) -----------------------------------------
-if [ "$CHECK" != "1" ]; then
+if [[ "$CHECK" != "1" ]]; then
   command -v claude >/dev/null 2>&1 || echo "warning: 'claude' is not on PATH here (a terminal opened before installing it won't see it)."
   command -v jq >/dev/null 2>&1 || echo "warning: jq is not installed; the post-merge hook refuses to run without it."
   command -v timeout >/dev/null 2>&1 || echo "warning: 'timeout' is not installed; the post-merge hook needs it."
-  if [ "$BACKEND" = "mcpvault" ]; then
+  if [[ "$BACKEND" = "mcpvault" ]]; then
     command -v npx >/dev/null 2>&1 || echo "warning: npx is not on PATH; the mcpvault MCP server runs through it. After installing Node, fully close and reopen the terminal."
   fi
 fi
 
 # --- commands, skills, hooks -----------------------------------------------
-if [ "$CHECK" = "1" ]; then
-  for f in "${COMMAND_SRCS[@]}"; do [ -f "$f" ] && check_file "$f" "$PREFIX/commands/$(basename "$f")" "commands/$(basename "$f")"; done
-  [ "$SKIP_SKILLS" = "1" ] || for d in "${SKILL_DIRS[@]}"; do [ -f "${d}SKILL.md" ] && check_file "${d}SKILL.md" "$PREFIX/skills/$(basename "$d")/SKILL.md" "skills/$(basename "$d")/SKILL.md"; done
+if [[ "$CHECK" = "1" ]]; then
+  for f in "${COMMAND_SRCS[@]}"; do [[ -f "$f" ]] && check_file "$f" "$PREFIX/commands/$(basename "$f")" "commands/$(basename "$f")"; done
+  [[ "$SKIP_SKILLS" = "1" ]] || for d in "${SKILL_DIRS[@]}"; do [[ -f "${d}SKILL.md" ]] && check_file "${d}SKILL.md" "$PREFIX/skills/$(basename "$d")/SKILL.md" "skills/$(basename "$d")/SKILL.md"; done
   for h in "${HOOKS[@]}"; do check_file "$SRC_ROOT/tools/hook-templates/$h" "$PREFIX/hook-templates/$h" "hook-templates/$h"; done
   tmpw="$(mktemp)"; wrapper_content > "$tmpw"
   check_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" "hook-templates/session-start-vault-context.sh"
   rm -f "$tmpw"
   echo
-  [ "$NEED_ATTENTION" = "0" ] && echo "Everything is current." || echo "Re-run without --check to bring these up to date."
+  [[ "$NEED_ATTENTION" = "0" ]] && echo "Everything is current." || echo "Re-run without --check to bring these up to date."
   exit "$NEED_ATTENTION"
 fi
 
-for f in "${COMMAND_SRCS[@]}"; do [ -f "$f" ] && install_file "$f" "$PREFIX/commands/$(basename "$f")"; done
-[ "$SKIP_SKILLS" = "1" ] || for d in "${SKILL_DIRS[@]}"; do [ -f "${d}SKILL.md" ] && install_file "${d}SKILL.md" "$PREFIX/skills/$(basename "$d")/SKILL.md"; done
+for f in "${COMMAND_SRCS[@]}"; do [[ -f "$f" ]] && install_file "$f" "$PREFIX/commands/$(basename "$f")"; done
+[[ "$SKIP_SKILLS" = "1" ]] || for d in "${SKILL_DIRS[@]}"; do [[ -f "${d}SKILL.md" ]] && install_file "${d}SKILL.md" "$PREFIX/skills/$(basename "$d")/SKILL.md"; done
 for h in "${HOOKS[@]}"; do install_file "$SRC_ROOT/tools/hook-templates/$h" "$PREFIX/hook-templates/$h" exec; done
 tmpw="$(mktemp)"; wrapper_content > "$tmpw"
 install_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" exec
 rm -f "$tmpw"
 
 # --- vault-root file and hook MCP config -----------------------------------
-if [ -n "$VAULT" ]; then
+if [[ -n "$VAULT" ]]; then
   vault_norm="$(printf '%s' "$VAULT" | tr '\\' '/')"
   root_file="$PREFIX/hook-configs/vault-root"
-  if [ -f "$root_file" ] && [ "$(head -n1 "$root_file" | tr -d '\r')" != "$vault_norm" ] && [ "$FORCE" != "1" ]; then
+  if [[ -f "$root_file" ]] && [[ "$(head -n1 "$root_file" | tr -d '\r')" != "$vault_norm" ]] && [[ "$FORCE" != "1" ]]; then
     echo "kept      $root_file (already points at '$(head -n1 "$root_file" | tr -d '\r')'; pass --force to change it to '$vault_norm')"
-  elif [ -f "$root_file" ] && [ "$(head -n1 "$root_file" | tr -d '\r')" = "$vault_norm" ]; then
+  elif [[ -f "$root_file" ]] && [[ "$(head -n1 "$root_file" | tr -d '\r')" = "$vault_norm" ]]; then
     echo "unchanged $root_file"
-  elif [ "$DRY" = "1" ]; then
+  elif [[ "$DRY" = "1" ]]; then
     echo "would write $root_file"
   else
     mkdir -p "$PREFIX/hook-configs" && printf '%s\n' "$vault_norm" > "$root_file" && echo "wrote     $root_file"
   fi
 
-  if [ "$BACKEND" = "mcpvault" ]; then
+  if [[ "$BACKEND" = "mcpvault" ]]; then
     cfg="$PREFIX/hook-configs/obsidian-mcp-config.json"
-    if [ -e "$cfg" ]; then
+    if [[ -e "$cfg" ]]; then
       echo "kept      $cfg (never overwritten)"
-    elif [ "$DRY" = "1" ]; then
+    elif [[ "$DRY" = "1" ]]; then
       echo "would write $cfg"
     elif printf '%s' "$vault_norm" | grep -q '"'; then
       echo "not writing $cfg: the vault path contains a double quote" >&2
@@ -187,7 +189,7 @@ if [ -n "$VAULT" ]; then
     fi
   fi
 fi
-if [ "$BACKEND" = "rest-api" ]; then
+if [[ "$BACKEND" = "rest-api" ]]; then
   echo "note: the REST API backend needs the plugin's API key, so its MCP config can't be generated here; run tools/setup-mcp.sh (see docs/mcp-setup.md)."
 fi
 
