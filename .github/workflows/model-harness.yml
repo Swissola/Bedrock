@@ -69,6 +69,16 @@ jobs:
           npm install --global --ignore-scripts @anthropic-ai/claude-code@2.1.291
           node "$(npm root --global)/@anthropic-ai/claude-code/install.cjs"
           claude --version
+      - name: Check that the token authenticates (one tiny call)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          set -u
+          case "$MODEL" in sonnet|haiku) ;; *) echo "unknown model"; exit 2 ;; esac
+          out=$(claude -p "Reply with the single word OK." --model "$MODEL" --max-turns 1 --output-format json 2>&1) || true
+          printf '%s' "$out" | jq -r '"is_error=\(.is_error) result=\(.result)"' 2>/dev/null || printf '%s\n' "${out:0:300}"
+          printf '%s' "$out" | jq -e '.is_error == false' >/dev/null
       - name: Run the harness (stub backend)
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
