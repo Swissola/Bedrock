@@ -1,0 +1,33 @@
+name: shell tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell-tests:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tool versions
+        run: |
+          bash --version | head -n1
+          git --version
+          jq --version
+      - name: pre-commit hook
+        run: bash tools/hook-templates/test-pre-commit.sh
+      - name: session-start-vault-context hook
+        run: bash tools/hook-templates/test-session-start-vault-context.sh
+      - name: post-merge hook
+        run: bash tools/hook-templates/test-post-merge.sh
+      - name: installer
+        run: bash tools/test-install-claude-config.sh
