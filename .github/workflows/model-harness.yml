@@ -64,7 +64,10 @@ jobs:
           node-version: "22"
       - name: Install the claude CLI (pinned version)
         run: |
-          npm install --global @anthropic-ai/claude-code@2.1.291
+          # --ignore-scripts so no package's lifecycle script runs on its own; the CLI
+          # needs its own install script (it links the native binary), run explicitly.
+          npm install --global --ignore-scripts @anthropic-ai/claude-code@2.1.291
+          node "$(npm root --global)/@anthropic-ai/claude-code/install.cjs"
           claude --version
       - name: Run the harness (stub backend)
         env:
