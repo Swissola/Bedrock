@@ -30,7 +30,10 @@
 #
 # Silent no-op if this repo has no repos/<name>/index.md yet (not opted in,
 # or not bootstrapped) - same precondition as post-merge: run /vault-populate
-# (or ask your assistant directly) first.
+# (or ask your assistant directly) first. Where that doc and the daily notes
+# live can be changed per vault with `reposPath` / `dailyNotesPath` in an
+# optional vault-config.md, see docs/vault-config.md; the paths above are the
+# defaults.
 #
 # Skips entirely on a mid-session /compact. Claude Code passes
 # {"source": "startup"|"resume"|"clear"|"compact"|"fork", ...} on stdin; a
@@ -48,6 +51,12 @@
 # session. Falls back to loading the full note if neither forward-looking
 # section is present (an older note, or one that's pure history), rather
 # than silently showing nothing.
+#
+# If the note also has appended "## Update ..." sections (what /vault-log adds
+# when a note for the same session already exists), the MOST RECENT one is
+# loaded too, capped at UPDATE_MAX_LINES (default 40) lines, with a count of any
+# earlier updates left out. An append can't rewrite the forward-looking
+# sections, so without this the latest state never reached the next session.
 #
 # "Most recent daily note" is found by actual file modification time across
 # EVERY daily-notes/<person>/ subfolder, not by a filename or directory
@@ -70,11 +79,53 @@ VAULT_ROOT="${VAULT_ROOT:-}"
 
 REPO_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"
 [ -z "$REPO_NAME" ] && REPO_NAME="$(basename "$(pwd)")"
-INDEX_FILE="$VAULT_ROOT/repos/$REPO_NAME/index.md"
+
+# Optional per-vault settings (docs/vault-config.md): `reposPath` and
+# `dailyNotesPath`, read from the frontmatter of vault-config.md at the vault
+# root. With no such file, or no such key, the defaults below apply and this
+# behaves exactly as it did before the file existed. Parsed in plain bash
+# because this hook runs before any MCP tool is available. A config whose
+# frontmatter has no closing `---` is ignored entirely, rather than guessing
+# where it ends.
+config_value() {
+  [ -f "$VAULT_ROOT/vault-config.md" ] || return 0
+  tr -d '\r' < "$VAULT_ROOT/vault-config.md" | awk -v k="$1" '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { closed = 1; exit }
+    { lines[++n] = $0 }
+    END {
+      if (!closed) exit
+      for (i = 1; i <= n; i++) if (index(lines[i], k ":") == 1) {
+        v = substr(lines[i], length(k) + 2)
+        sub(/^[ \t]+/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+        if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+        print v; exit
+      }
+    }'
+}
+
+# A configured path must stay inside the vault: relative, no `..`, no drive.
+safe_rel() {
+  case "$1" in ""|/*|[A-Za-z]:*|*..*) return 1 ;; esac
+  return 0
+}
+
+REPOS_PATH="$(config_value reposPath)"
+safe_rel "$REPOS_PATH" || REPOS_PATH="repos/{repo}/index.md"
+INDEX_REL="${REPOS_PATH//\{repo\}/$REPO_NAME}"
+INDEX_FILE="$VAULT_ROOT/$INDEX_REL"
 
 [ -f "$INDEX_FILE" ] || exit 0
 
-DAILY_DIR="$VAULT_ROOT/daily-notes"
+# Daily notes are scanned from the part of dailyNotesPath before its first
+# placeholder, so `daily-notes/{author}` scans every contributor's subfolder
+# and a flat `Inbox/daily-notes` scans just that folder.
+DAILY_PATH="$(config_value dailyNotesPath)"
+safe_rel "$DAILY_PATH" || DAILY_PATH="daily-notes/{author}"
+DAILY_BASE="${DAILY_PATH%%\{*}"
+DAILY_BASE="${DAILY_BASE%/}"
+[ -n "$DAILY_BASE" ] || DAILY_BASE="daily-notes"
+DAILY_DIR="$VAULT_ROOT/$DAILY_BASE"
 LATEST_NOTE=""
 if [ -d "$DAILY_DIR" ]; then
   LATEST_NOTE=$(find "$DAILY_DIR" -name '*.md' -type f -exec ls -t {} + 2>/dev/null | head -n1)
@@ -82,7 +133,7 @@ fi
 
 echo "--- Vault context for $REPO_NAME (auto-loaded, see runbooks/using-the-vault.md in the vault) ---"
 echo
-echo "## repos/$REPO_NAME/index.md"
+echo "## $INDEX_REL"
 cat "$INDEX_FILE"
 
 extract_section() {
@@ -92,6 +143,21 @@ extract_section() {
     grabbing { print }
   ' "$1"
 }
+
+# The last "## Update ..." section of a note, up to the next "## " heading. Each
+# new Update heading restarts the buffer, so what is left at the end is the
+# most recent one wherever it sits in the note.
+extract_last_update() {
+  awk '
+    /^## Update/ { buf = $0 "\n"; grabbing = 1; next }
+    grabbing && /^## / { grabbing = 0 }
+    grabbing { buf = buf $0 "\n" }
+    END { printf "%s", buf }
+  ' "$1"
+}
+
+# Cap on how much of that update is loaded (UPDATE_MAX_LINES to override).
+UPDATE_MAX_LINES="${UPDATE_MAX_LINES:-40}"
 
 if [ -n "$LATEST_NOTE" ]; then
   REL_NOTE="${LATEST_NOTE#"$VAULT_ROOT/"}"
@@ -103,6 +169,27 @@ if [ -n "$LATEST_NOTE" ]; then
     echo "## Most recent daily note, any contributor: $REL_NOTE (forward-looking sections only; read the note itself, or ask, for full history)"
     [ -n "$CONTEXT_SECTION" ] && { echo; echo "$CONTEXT_SECTION"; }
     [ -n "$NEXT_STEPS_SECTION" ] && { echo; echo "$NEXT_STEPS_SECTION"; }
+
+    # An appended "## Update ..." section (what /vault-log adds when a note for
+    # the same session already exists) can't rewrite the two sections above, so
+    # without this the latest state never reached the next session and the
+    # forward-looking sections could be out of date. Load the MOST RECENT update
+    # only, capped, and say how many earlier ones were left out: the older ones
+    # are history, which this hook deliberately doesn't load.
+    UPDATE_SECTION=$(extract_last_update "$LATEST_NOTE")
+    if [ -n "$UPDATE_SECTION" ]; then
+      UPDATE_TOTAL=$(grep -c '^## Update' "$LATEST_NOTE" 2>/dev/null || true)
+      UPDATE_EARLIER=$(( ${UPDATE_TOTAL:-1} - 1 ))
+      UPDATE_NOTE=""
+      [ "$UPDATE_EARLIER" -gt 0 ] && UPDATE_NOTE=" - $UPDATE_EARLIER earlier update(s) in the note not loaded"
+      echo
+      echo "## Appended to that note, most recent update (a later same-session addition; it supersedes the sections above where they differ)$UPDATE_NOTE"
+      UPDATE_LINES=$(printf '%s\n' "$UPDATE_SECTION" | wc -l | tr -d ' ')
+      printf '%s\n' "$UPDATE_SECTION" | head -n "$UPDATE_MAX_LINES"
+      if [ "$UPDATE_LINES" -gt "$UPDATE_MAX_LINES" ]; then
+        echo "(update truncated: $((UPDATE_LINES - UPDATE_MAX_LINES)) more lines in the note)"
+      fi
+    fi
   else
     echo
     echo "## Most recent daily note, any contributor: $REL_NOTE (no forward-looking sections, loading in full)"

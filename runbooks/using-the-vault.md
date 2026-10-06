@@ -100,6 +100,8 @@ date: YYYY-MM-DD
 
 If you pick a session back up later the same day, **append an `## Update (later same session) — ...` section to the existing file** rather than starting a new one — keeps the full story in one place.
 
+> **Different conventions in your own vault?** The folder, filename, template and same-day rule above are the defaults. A vault that wants something else (a different folder layout, extra frontmatter, several notes per day) can say so in an optional `vault-config.md`; see [`docs/vault-config.md`](../docs/vault-config.md). With no such file, everything on this page applies as written.
+
 If anything durable came out of the session (a system now understood, a procedure worth repeating), ask for it to be pulled into `repos/` or `runbooks/` and cross-linked — don't leave it stranded in the daily note where the next person won't think to look.
 
 ## 3. Bootstrapping a `repos/<name>/` doc

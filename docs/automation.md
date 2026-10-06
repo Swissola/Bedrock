@@ -9,7 +9,16 @@ There are two independent layers here. Install either, both, or neither:
 
 ## Slash commands and skills
 
-Install once, per machine:
+**Easiest: the installer.** From a clone of this repo, on each machine:
+
+```bash
+bash tools/install-claude-config.sh --vault <absolute path to your vault>
+```
+
+It copies the three commands, the two skills and the hook templates into `~/.claude/`, writes `~/.claude/hook-configs/vault-root` so hooks installed in other repos can find the vault, and warns about anything missing (`claude`, `jq`, `timeout`). It is idempotent, so re-run it after pulling this repo; `--check` reports what is current, outdated or missing without changing anything, and `--dry-run` shows what it would do. Pass `--no-skills` for a vault whose layout differs from the team default: the two skills describe the team layout (`daily-notes/<author>/`, `repos/<name>/`) and trigger on any `obsidian` MCP call, so they would contradict a different layout. With `--backend mcpvault` it also writes the hook MCP config. On Windows, `tools\install-claude-config.ps1` takes the same arguments and runs it under Git for Windows' bash (you may need `powershell -ExecutionPolicy Bypass -File ...` on a machine where script execution is restricted). Commands and skills load in a **new** Claude Code session, and per-repo hooks (`post-merge`, `pre-commit`) still need copying into that repo's `.git/hooks` as described below. `bash tools/test-install-claude-config.sh` tests the installer against a throwaway directory.
+
+Or by hand, once per machine:
+
 
 ```bash
 cp tools/command-templates/vault-context.md ~/.claude/commands/vault-context.md
@@ -27,6 +36,8 @@ This gives you three commands — `/vault-context` (read the hub note + recent d
 Installed at **user scope** (`~/.claude/commands/`, `~/.claude/skills/`), not this repo's own project-level `.claude/`, since `/vault-populate` in particular needs to work from inside whichever *other* repo you're documenting, not just from within the vault itself. Claude Code doesn't track either folder in git (they live in your home directory, outside any repo), so each clone needs this one-time copy step, and a restart to pick up new commands/skills.
 
 These are deliberately condensed pointers back to the runbooks, not a second copy of the full content to keep in sync — if the two ever disagree, the runbooks win.
+
+`/vault-log` also reads an optional `vault-config.md` at the vault root, for vaults that lay their notes out differently from the defaults in the runbook; see [`vault-config.md`](vault-config.md). With no such file it behaves exactly as described above, and it works with either `obsidian` MCP backend (the Local REST API plugin, or MCPVault). Each template carries a `bedrock-template: <name>, version N` comment so a machine's installed copy can be compared against the one in this repo.
 
 ## Git hooks
 
@@ -76,7 +87,9 @@ chmod +x .git/hooks/post-merge .git/hooks/pre-commit
 
 **Installing this into a repo other than the vault itself, deliberately:** the repo name and doc target auto-derive from wherever the hook is actually installed (its own git remote), so copying it unmodified into another repo's `.git/hooks/post-merge` already names and targets that repo correctly. The one thing that never auto-derives is `VAULT_ROOT` at the top of the script — set it as an environment variable (or edit the script's own default) to an explicit absolute path to your vault's own checkout, since the default (deriving from the current repo) would otherwise resolve to that *other* repo, not the vault. `HOOK_LOG_DIR`, `MCP_CONFIG`, `TIMEOUT_SECS`, `RETRY_DELAY`, and `KILL_SWITCH` are all environment-overridable the same way, mainly useful for the test suite below rather than day-to-day use. The hook also refuses to run at all until `repos/<that-repo>/index.md` already exists in the vault — bootstrap it once via `/vault-populate` (or ask your assistant directly) before installing this hook; it refines an existing doc rather than creating one from nothing. That same check is also what catches a forgotten `VAULT_ROOT` edit: it fails safe (logs and exits) rather than silently running against the wrong repo.
 
-**Testing this hook:** `tools/hook-templates/test-post-merge.sh` (run with `bash tools/hook-templates/test-post-merge.sh`) is a real, isolated test suite, 30 assertions covering the branch guard, the diff filter, the kill switch, the `jq`-fencing requirement, the retry-on-127 behaviour, and the output-validation logic in detail, including the new-file-vs-modified-file distinction above. It builds its own temp git fixtures and a stub `claude` binary, nothing it does touches this machine's real vault or logs. Worth running after any edit to `post-merge` itself, it caught two real bugs during development (see the `post-merge` script's own comments on the output-validation section for the details) that comments and manual testing alone had missed.
+**Per-vault settings:** `post-merge` also reads the optional [`vault-config.md`](vault-config.md) (`reposPath` for where the doc lives, `backend` for which MCP tool names the run may use), and can find the vault from a one-line `~/.claude/hook-configs/vault-root` file when `VAULT_ROOT` isn't set. If the vault is **not a git repo** it only flags unexpected writes (never reverts, removes or commits), see [Hooks in `vault-config.md`](vault-config.md#hooks).
+
+**Testing this hook:** `tools/hook-templates/test-post-merge.sh` (run with `bash tools/hook-templates/test-post-merge.sh`) is a real, isolated test suite, 56 assertions covering the branch guard, the diff filter, the kill switch, the `jq`-fencing requirement, the retry-on-127 behaviour, and the output-validation logic in detail, including the new-file-vs-modified-file distinction above, plus a vault that is not a git repo, a configurable doc path, `VAULT_ROOT_FILE`, and both MCP backends. It builds its own temp git fixtures and a stub `claude` binary, nothing it does touches this machine's real vault or logs. Worth running after any edit to `post-merge` itself, it caught two real bugs during development (see the `post-merge` script's own comments on the output-validation section for the details) that comments and manual testing alone had missed.
 
 ### `session-start-vault-check` — unpushed-commit reminder
 
@@ -139,7 +152,7 @@ Opt-in **per repo**, the same model as `post-merge` — a repo asks for this del
 
 Because Claude Code project settings **are** version-controlled (unlike `.git/hooks/`, which never are), this can genuinely be committed into that other repo's own tracked `.claude/settings.json` and shared with the whole team in one commit — but only if `VAULT_ROOT` resolves the same way on every contributor's machine (e.g. everyone clones the vault to the same path by convention). If your team's vault path isn't consistent across machines, keep this a manual per-machine step instead, the same as `session-start-vault-check`.
 
-Silent no-op until that repo already has a `repos/<name>/index.md` in the vault — bootstrap it first via `/vault-populate`, same precondition as `post-merge`. Also silently skips on a mid-session `/compact` (its own summary already carries whatever this injected earlier), and fails open — still injects — on malformed or missing stdin, rather than risk silently going dark on a genuine session start.
+Silent no-op until that repo already has a `repos/<name>/index.md` in the vault (or the doc at the vault's configured `reposPath`) — bootstrap it first via `/vault-populate`, same precondition as `post-merge`. Where that doc and the daily notes live can be set per vault in the optional [`vault-config.md`](vault-config.md); If the note also has appended `## Update ...` sections (what `/vault-log` adds when a note for the same session already exists), the most recent one is loaded too (capped at 40 lines, override with `UPDATE_MAX_LINES`) with a count of earlier ones left out, since an append can't rewrite the two forward-looking sections. `bash tools/hook-templates/test-session-start-vault-context.sh` (44 assertions) tests the defaults, the config keys and the update handling. Also silently skips on a mid-session `/compact` (its own summary already carries whatever this injected earlier), and fails open — still injects — on malformed or missing stdin, rather than risk silently going dark on a genuine session start.
 
 Reads the vault directly off disk, same deliberate MCP-only exception as `session-start-vault-check`: this runs before the model's own tool-calling loop begins.
 
