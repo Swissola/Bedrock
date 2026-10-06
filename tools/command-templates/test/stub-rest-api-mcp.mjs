@@ -22,19 +22,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
-// The vault folder is chosen by whoever launches the stub (the test harness); it is
-// the one path the stub trusts. Everything a tool call asks for is checked against it.
-function openVaultRoot(arg) {
-  if (!arg) return null; // realpathSync('') would resolve to the working directory
-  try {
-    const real = fs.realpathSync(String(arg));
-    return fs.statSync(real).isDirectory() ? real : null;
-  } catch {
-    return null;
-  }
-}
-const root = openVaultRoot(process.argv[2]);
-if (!root) {
+const root = path.resolve(process.argv[2] || '');
+if (!process.argv[2] || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
   console.error('usage: stub-rest-api-mcp.mjs <existing vault folder>');
   process.exit(2);
 }
