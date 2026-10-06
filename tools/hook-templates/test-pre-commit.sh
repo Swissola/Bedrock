@@ -60,13 +60,25 @@ assert_eq() {
   fi
 }
 
-# Runs the hook inside $1 (repo dir), with $2 (if given) a stub bindir
-# prepended to PATH for a fake betterleaks. Doesn't otherwise sanitize PATH:
-# the "no scanner" tests rely on the dev/CI machine not having a real
-# betterleaks installed, not on hiding one.
+# PATH with every directory that holds a real betterleaks removed, so the "no scanner"
+# tests behave the same on a machine that has it installed.
+path_without_betterleaks() {
+  local out="" dir
+  local IFS=:
+  for dir in $PATH; do
+    [[ -x "$dir/betterleaks" || -x "$dir/betterleaks.exe" ]] && continue
+    out="${out:+$out:}$dir"
+  done
+  printf '%s' "$out"
+  return 0
+}
+
+# Runs the hook inside $1 (repo dir). With $2 a stub bindir is prepended to PATH
+# for a fake betterleaks; without it, any real betterleaks is hidden from PATH.
 run_hook() {
-  local repo="$1" bindir="${2:-}"
-  ( cd "$repo" && PATH="${bindir:+$bindir:}$PATH" "$HOOK_SCRIPT" )
+  local repo="$1" bindir="${2:-}" path
+  if [[ -n "$bindir" ]]; then path="$bindir:$PATH"; else path=$(path_without_betterleaks); fi
+  ( cd "$repo" && PATH="$path" "$HOOK_SCRIPT" )
 }
 
 test_no_staged_changes_exits_zero_silently() {
