@@ -226,9 +226,20 @@ EOF
   fakepath="$bindir"
   jq_dir=$(dirname "$(command -v jq 2>/dev/null)" 2>/dev/null)
   for d in $(echo "$PATH" | tr ':' '\n'); do
-    [ "$d" = "$jq_dir" ] && continue
+    [[ "$d" = "$jq_dir" ]] && continue
     fakepath="$fakepath:$d"
   done
+  # On merged-/usr systems /bin is a symlink to /usr/bin, so jq is still found through
+  # it. Then build a private PATH holding every tool except jq.
+  if PATH="$fakepath" command -v jq >/dev/null 2>&1; then
+    local farm f; farm=$(mktemp -d)
+    for d in $(echo "$PATH" | tr ':' '\n'); do
+      for f in "$d"/*; do
+        [[ -x "$f" && ! -d "$f" && "${f##*/}" != "jq" ]] && ln -sf "$f" "$farm/${f##*/}" 2>/dev/null
+      done
+    done
+    fakepath="$bindir:$farm"
+  fi
   echo "$CHANGE_MSG" >> "$repo/README.md"
   git -C "$repo" commit -aq -m "$CHANGE_MSG"
   ( cd "$repo" && PATH="$fakepath" VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )

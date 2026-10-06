@@ -240,6 +240,7 @@ new_sha=$(git rev-parse --short HEAD 2>/dev/null)
     fi
     changed_data=$(printf '%s\n' "$changed" | jq -Rsc '[splits("\n") | select(length > 0)]')
 
+    READ_NAME="${READ_TOOL#mcp__obsidian__}"  # kept out of the heredoc: macOS bash 3.2 mis-parses it there
     prompt=$(cat <<EOF
 You are a git post-merge documentation hook for the repo "$REPO_NAME".
 Commit range: ${old_sha}..${new_sha}
@@ -260,7 +261,7 @@ Instructions:
    only what's actually relevant to the changed files - never blanket re-document the
    whole repo, and never touch any other vault note.
 4. Never use $PATCH_TOOL (heading-targeting can be unreliable and can wipe a doc down
-   to just its title) - always full ${READ_TOOL#mcp__obsidian__}, edit the content yourself, then full
+   to just its title) - always full $READ_NAME, edit the content yourself, then full
    $WRITE_TOOL of the complete updated document.
 5. Stamp the doc with: *Last updated: $(date +%Y-%m-%d) (${new_sha})*
 6. If any mcp__obsidian__* call fails or is unavailable, print the literal string
