@@ -333,6 +333,8 @@ When this was set up, every mutant was confirmed to apply cleanly (`--check-appl
 
 The manual workflow has since been run for all groups on GitHub (Ubuntu, run 37660645269 on commit `3abb325`): **all 32 mutants were killed, none survived, none were broken and no baseline failed**. That includes `in2`, so the Windows-only skip is confirmed to be caught where file modes are real. The planning job, the group dropdown and the per-group parallel jobs all behaved as designed, and the whole run took three minutes.
 
+Two mutants were added afterwards (`pc5` reworked and `pc7` new, for the `git --staged --redact` invocation and the 1.x-only `-v`), making 33. The `pre-commit` group was re-run on GitHub (Ubuntu, run 37666004118 on commit `c35126f`): all 7 killed, none survived, none broken, no baseline failed, in nine seconds.
+
 Running the `post-merge` group also exposed two timing-based checks in its suite (one pre-existing, one of mine) that failed whenever the machine was busy, which stopped the group at its baseline. Both now use no clock: the hung-run check uses a stub that would hang for two minutes and prints a marker if it ever finishes, and the slow-`claude` check uses a stub that waits for a release file.
 
 Which mutants are killed changes whenever a suite does, so treat the result of a run, not this paragraph, as the current answer.
