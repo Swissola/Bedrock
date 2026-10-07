@@ -28,7 +28,7 @@ The trade-off is honesty about what this *isn't*: it's not real-time multi-user 
 | `docs/` | Setup and reference material — how to connect the assistant to the vault, and what it can do once connected | You |
 | `tools/` | Copy-paste setup scripts, optional git hooks, and optional Claude Code commands/skills that make the workflow below effortless | You, once, per machine |
 
-The git hooks with real branching logic touch security-relevant ground: `post-merge` runs an AI assistant unattended against your vault, and `pre-commit` decides whether a secret gets warned about or blocked. Both come with their own isolated test suites (`tools/hook-templates/test-post-merge.sh`, `tools/hook-templates/test-pre-commit.sh`) rather than just comments and manual testing; see [`docs/automation.md`](docs/automation.md).
+The git hooks with real branching logic touch security-relevant ground: `post-merge` runs an AI assistant unattended against your vault, and `pre-commit` decides whether a secret gets warned about or blocked. Every hook, the installer and the setup scripts come with their own isolated test suite rather than just comments and manual testing, and `bash tools/run-all-tests.sh` runs the lot; see [`docs/testing.md`](docs/testing.md) for what each one checks and [`docs/automation.md`](docs/automation.md) for the hooks themselves.
 
 The distinction that matters throughout: **`daily-notes/` is a session log; `repos/` and `runbooks/` are the current-state reference.** Anything worth knowing next time without reading through old sessions belongs in the latter, cross-linked from the daily note that produced it.
 
