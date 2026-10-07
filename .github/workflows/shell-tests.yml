@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           url="https://github.com/betterleaks/betterleaks/releases/download/v${BETTERLEAKS_VERSION}/betterleaks_${BETTERLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/betterleaks.tar.gz" "$url"
+          curl --proto "=https" --tlsv1.2 -fsSL --retry 3 -o "$RUNNER_TEMP/betterleaks.tar.gz" "$url"
           echo "${BETTERLEAKS_SHA256}  $RUNNER_TEMP/betterleaks.tar.gz" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           tar -xzf "$RUNNER_TEMP/betterleaks.tar.gz" -C "$HOME/.local/bin" betterleaks
