@@ -47,7 +47,7 @@ set -u
 STRICT="${PRECOMMIT_SECRET_SCAN_STRICT:-0}"
 
 # Nothing staged, e.g. an empty or amend-only commit: nothing to scan.
-staged_files=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+staged_files=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null)
 [ -z "$staged_files" ] && exit 0
 
 if ! command -v betterleaks >/dev/null 2>&1; then

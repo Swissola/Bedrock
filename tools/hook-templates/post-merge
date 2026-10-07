@@ -356,7 +356,7 @@ EOF
                     # "/", e.g. "?? repos/other-thing/", `rm -f` on a
                     # directory path silently no-ops without -r, found by
                     # this suite's own test against exactly that case.
-                    rm -rf "$VAULT_ROOT/$p" 2>/dev/null
+                    rm -rf "${VAULT_ROOT:?}/$p" 2>/dev/null
                 else
                     git -C "$VAULT_ROOT" checkout -- "$p" 2>/dev/null
                 fi

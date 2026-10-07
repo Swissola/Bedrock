@@ -53,7 +53,9 @@ foreach ($doc in $config.documents) {
 
     # Remove the h1 heading and any immediately following blank line —
     # the wiki page title already carries this.
-    $content = $content -replace '(?m)^# .+\r?\n(\r?\n)?', ''
+    # First match only: the same heading the title came from. Later "# " lines (shell
+    # comments in a code block, say) are body text and stay.
+    $content = [regex]::new('(?m)^# .+\r?\n(\r?\n)?').Replace($content, '', 1)
 
     # Record space/title/parent as simple frontmatter-style metadata for
     # whatever platform-specific publish step runs next to read. Adapt

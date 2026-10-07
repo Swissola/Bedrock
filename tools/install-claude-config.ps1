@@ -18,7 +18,7 @@ $candidates = @(@(
 ) | Where-Object { $_ -and (Test-Path $_) })
 
 if (-not $candidates) {
-    Write-Error "Git for Windows' bash.exe was not found. Install Git for Windows (https://git-scm.com/download/win), or run tools/install-claude-config.sh from another bash."
+    Write-Error "Git for Windows' bash.exe was not found. Install Git for Windows (https://git-scm.com/download/win), or run tools/install-claude-config.sh from another bash." -ErrorAction Continue
     exit 2
 }
 

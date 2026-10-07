@@ -45,11 +45,13 @@ if (-not (Test-Path $dataFile)) {
 Write-Host "[Step 2] OK - plugin installed"
 
 # --- Step 3: enable the plain-HTTP server ---
-$dataRaw = Get-Content $dataFile -Raw
+# Read and written as UTF-8 with .NET directly: in Windows PowerShell 5.1, Get-Content reads
+# BOM-less UTF-8 as ANSI and Set-Content -Encoding utf8 writes a byte order mark.
+$dataRaw = [System.IO.File]::ReadAllText($dataFile)
 
 if ($dataRaw -match '"enableInsecureServer":\s*false') {
     $dataRaw = $dataRaw -replace '"enableInsecureServer":\s*false', '"enableInsecureServer": true'
-    Set-Content -Path $dataFile -Value $dataRaw -Encoding utf8 -NoNewline
+    [System.IO.File]::WriteAllText($dataFile, $dataRaw, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "[Step 3] Enabled HTTP server. Restart Obsidian now, then re-run this script to continue."
     exit 0
 } elseif ($dataRaw -match '"enableInsecureServer":\s*true') {
