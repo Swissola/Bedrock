@@ -171,7 +171,7 @@ Added:
 | `auto_commit_touches_only_the_doc_and_is_never_pushed` | The commit contains exactly the doc, its message names the doc and sha, and a bare origin does not move. |
 | `a_failed_run_is_logged_and_never_committed_and_never_blocks_the_pull` | `claude` exiting 1: the hook still exits 0, the log shows `exit=1`, nothing is committed, the failure is recorded for the next session. |
 | `each_vault_unreachable_message_downgrades_to_exit_2_and_skips_the_commit` | The other three "unreachable" messages each give exit 2 and no commit. |
-| `the_hook_returns_before_a_slow_claude_finishes` | With a twelve second `claude`, the hook itself returns in under ten and exits 0. |
+| `the_hook_returns_before_a_slow_claude_finishes` | With a `claude` that waits until the test releases it, the hook itself returns (exit 0) while the run is still going, so no run log exists yet; once released, the background run completes and is logged. It uses no clock, so a busy machine cannot make it flake. |
 | `unacknowledged_failures_are_surfaced_once_then_only_new_ones` | Earlier failures are printed once, not repeated, and only new ones appear afterwards. |
 | `no_default_branch_or_a_detached_head_does_nothing` | No `origin/HEAD`, or a detached `HEAD`: `claude` is never called. |
 | `repo_name_comes_from_the_origin_url_in_every_common_form` | SSH, HTTPS with and without `.git`, and a trailing slash all give the right repo name. |
@@ -326,7 +326,9 @@ bash tools/run-mutation-tests.sh --check-applies        # fast: does every mutan
 
 ### What has been checked
 
-When this was set up, every mutant was confirmed to apply cleanly (`--check-applies`), and the runner itself was tested end to end (it reports a harmless change as a survivor, a real break as killed, and exits 1 if anything survived). Locally, 21 of the 32 mutants have been run against their suites, and all 21 were killed with none surviving: the six `pre-commit` ones, the six `pre-push` ones (five by hand earlier, the sixth in the runner test), the four `setup-mcp` ones (by hand earlier) and the five `session-start-vault-check` ones. The rest (`post-merge`, `session-start-vault-context` and the installer, 11 mutants) are slow and have **not been run yet**: the first manual run of the workflow for those groups is their first real test, and a survivor there would mean a gap in the suite, or a mutant that needs adjusting.
+When this was set up, every mutant was confirmed to apply cleanly (`--check-applies`), and the runner itself was tested end to end: it reports a harmless change as a survivor, a real break as killed, a mutant tagged `not-observable-on-windows` as skipped on Windows, and exits 1 if anything survived. All 32 mutants were then run against their suites on a Windows machine. **31 were killed and none survived.** The 32nd (`in2`, installed hooks losing their executable bit) is tagged `not-observable-on-windows` and was skipped: Windows Git Bash reports any file starting with `#!` as executable, so the suite cannot see the difference there. It runs on Linux and macOS, which is where the first manual run of the workflow will confirm it is killed; that has not been checked yet.
+
+Running the `post-merge` group also exposed two timing-based checks in its suite (one pre-existing, one of mine) that failed whenever the machine was busy, which stopped the group at its baseline. Both now use no clock: the hung-run check uses a stub that would hang for two minutes and prints a marker if it ever finishes, and the slow-`claude` check uses a stub that waits for a release file.
 
 Which mutants are killed changes whenever a suite does, so treat the result of a run, not this paragraph, as the current answer.
 
