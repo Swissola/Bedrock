@@ -28,7 +28,7 @@ The trade-off is honesty about what this *isn't*: it's not real-time multi-user 
 | `docs/` | Setup and reference material — how to connect the assistant to the vault, and what it can do once connected | You |
 | `tools/` | Copy-paste setup scripts, optional git hooks, and optional Claude Code commands/skills that make the workflow below effortless | You, once, per machine |
 
-The git hooks with real branching logic touch security-relevant ground: `post-merge` runs an AI assistant unattended against your vault, and `pre-commit` decides whether a secret gets warned about or blocked. Every hook, the installer and the setup scripts come with their own isolated test suite rather than just comments and manual testing, and `bash tools/run-all-tests.sh` runs the lot; see [`docs/testing.md`](docs/testing.md) for what each one checks and [`docs/automation.md`](docs/automation.md) for the hooks themselves.
+The git hooks with real branching logic touch security-relevant ground: `post-merge` runs an AI assistant unattended against your vault, and `pre-commit` decides whether a secret gets warned about or blocked. Every hook, the installer and the setup scripts come with their own isolated test suite rather than just comments and manual testing, and `bash tools/run-all-tests.sh` runs the lot. The same suites run in GitHub Actions on every pull request (Linux, macOS and Windows), and a separate, manual-only workflow runs mutation checks that prove the suites can actually fail. See [`docs/testing.md`](docs/testing.md) for what each one checks and [`docs/automation.md`](docs/automation.md) for the hooks themselves.
 
 The distinction that matters throughout: **`daily-notes/` is a session log; `repos/` and `runbooks/` are the current-state reference.** Anything worth knowing next time without reading through old sessions belongs in the latter, cross-linked from the daily note that produced it.
 
@@ -46,6 +46,7 @@ The distinction that matters throughout: **`daily-notes/` is a session log; `rep
 - [`docs/mcp-setup.md`](docs/mcp-setup.md) — connect Claude Code to the vault (one-time, per machine)
 - [`docs/mcp-tools-reference.md`](docs/mcp-tools-reference.md) — everything the vault connection can actually do
 - [`docs/automation.md`](docs/automation.md) — optional slash commands, skills, and git hooks that remove most of the remembering
+- [`docs/testing.md`](docs/testing.md) — how to run the test suites, what each one checks in plain English, the manual mutation checks, and what is deliberately not covered
 - [`runbooks/using-the-vault.md`](runbooks/using-the-vault.md) — the three recurring workflows, as plain-English prompts
 - [`runbooks/daily-workflow.md`](runbooks/daily-workflow.md) — a return-to checklist, plus worked examples including how merge conflicts happen and get resolved
 - [`runbooks/adopting-for-a-new-team.md`](runbooks/adopting-for-a-new-team.md) — the checklist for turning this template into *your* team's vault
