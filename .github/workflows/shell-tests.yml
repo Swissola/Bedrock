@@ -33,10 +33,29 @@ jobs:
             path_prefix: ""
             brew: coreutils
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install extra tools
         if: matrix.brew != ''
         run: brew install ${{ matrix.brew }}
+      # The pre-commit suite has two checks that run the REAL betterleaks, to catch the scanner
+      # changing the arguments the hook passes. Everywhere else they skip with a visible message.
+      # Pinned to the version they were developed against and verified against the checksum
+      # published in that release (checksums.txt); bump both together, deliberately.
+      - name: Install betterleaks (ubuntu only)
+        if: matrix.name == 'ubuntu'
+        env:
+          BETTERLEAKS_VERSION: "1.8.1"
+          BETTERLEAKS_SHA256: efa407244e1ea8e35f582b8a42becdeac08bdead04f68eb752adda722d583c2a
+        run: |
+          set -euo pipefail
+          url="https://github.com/betterleaks/betterleaks/releases/download/v${BETTERLEAKS_VERSION}/betterleaks_${BETTERLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/betterleaks.tar.gz" "$url"
+          echo "${BETTERLEAKS_SHA256}  $RUNNER_TEMP/betterleaks.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$RUNNER_TEMP/betterleaks.tar.gz" -C "$HOME/.local/bin" betterleaks
+          chmod +x "$HOME/.local/bin/betterleaks"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/betterleaks" version
       - name: Tool versions
         run: |
           export PATH="${{ matrix.path_prefix }}$PATH"
@@ -45,7 +64,7 @@ jobs:
           git --version
           jq --version
           node --version
-          for t in timeout gtimeout perl shellcheck; do printf '%s: ' "$t"; command -v "$t" || echo "not installed"; done
+          for t in timeout gtimeout perl shellcheck betterleaks; do printf '%s: ' "$t"; command -v "$t" || echo "not installed"; done
       - name: pre-commit hook
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-pre-commit.sh
       - name: pre-push hook
@@ -78,7 +97,7 @@ jobs:
     name: windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: PowerShell scripts, PowerShell 7
         shell: pwsh
         run: ./tools/test-powershell-scripts.ps1

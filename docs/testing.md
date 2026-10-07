@@ -47,7 +47,7 @@ A skip is printed as `SKIP:` and is never counted as a pass.
 |---|---|---|
 | `post-merge`, perl timeout, hung-run | Running under Git Bash on Windows | MSYS perl loses the alarm across `exec`; Windows always has a real `timeout` so the branch is not used there. No ticket: it cannot be tested on that platform. |
 | `post-merge`, `gtimeout` | `gtimeout` not installed | The macOS CI job installs it. |
-| `pre-commit`, real `betterleaks` | `betterleaks` not installed | Needs the real binary. |
+| `pre-commit`, real `betterleaks` | `betterleaks` not installed | Needs the real binary. CI installs a pinned, checksum-verified copy (v1.8.1) on the Ubuntu job only, so they run there and skip on macOS and Windows. |
 | Installer, backslash vault path | No `cygpath` (not Windows) | Only meaningful with a Windows path. |
 | Installer, double quote in vault path | The filesystem cannot create such a folder | Windows. |
 | Structure, `shellcheck` | Not installed | Advisory locally. CI turns it into a gate on the Ubuntu job (see below). |

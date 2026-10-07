@@ -45,7 +45,7 @@ jobs:
     outputs:
       groups: ${{ steps.pick.outputs.groups }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: pick
         env:
           HOOK: ${{ inputs.hook }}
@@ -71,7 +71,7 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.plan.outputs.groups) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tool versions
         run: |
           bash --version | head -n1
