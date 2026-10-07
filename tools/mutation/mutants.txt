@@ -1,0 +1,62 @@
+# Mutants for tools/run-mutation-tests.sh.
+#
+# A mutant is one small, deliberate break in a script (flip a condition, drop a line, change a
+# number). The suite for that script is then run against the broken copy, and it must FAIL:
+# if it still passes, the suite is not really checking that behaviour (a "survivor").
+#
+# One mutant per line, five fields separated by @@ (not | or tab, which the expressions use):
+#
+#   hook @@ name @@ target file (relative to the repo root) @@ sed expression @@ what it breaks
+#
+# `hook` is the group name used by --hook, and picks the suite: tools/hook-templates/test-<hook>.sh
+# or, failing that, tools/test-<hook>.sh. The sed expression is applied (default sed, so basic
+# regular expressions) to a COPY of the target; the repo itself is never modified. A line whose
+# expression changes nothing is reported as a broken mutant, so a refactor that moves the
+# target text cannot silently turn a mutant into a no-op. Blank lines and # lines are ignored.
+# Check them without running any suite: bash tools/run-mutation-tests.sh --check-applies
+
+# ---- pre-commit ---------------------------------------------------------------------------
+pre-commit@@pc1@@tools/hook-templates/pre-commit@@s/ || \[ "\$STRICT" = "true" \]//@@strict mode no longer accepts "true"
+pre-commit@@pc2@@tools/hook-templates/pre-commit@@s/--diff-filter=ACMR/--diff-filter=A/@@only newly added files are scanned (modified and renamed are skipped)
+pre-commit@@pc3@@tools/hook-templates/pre-commit@@s/^    echo "\$findings"$/    :/@@the scanner's findings are no longer shown in the banner
+pre-commit@@pc4@@tools/hook-templates/pre-commit@@s/\[ "\$scan_status" -eq 0 \] \&\& exit 0/[ "$scan_status" -ne 1 ] \&\& exit 0/@@a scanner crash (exit other than 1) is treated as a clean scan
+pre-commit@@pc5@@tools/hook-templates/pre-commit@@s/protect --staged --redact -v/protect --staged/@@the scanner is no longer asked to redact secrets in its output
+pre-commit@@pc6@@tools/hook-templates/pre-commit@@s/^    exit 0$/    exit 1/@@with no scanner installed the hook blocks every commit
+
+# ---- pre-push -----------------------------------------------------------------------------
+pre-push@@pp1@@tools/hook-templates/pre-push@@s/WARN_COOLDOWN_SECONDS=600/WARN_COOLDOWN_SECONDS=6000/@@the warning cooldown is ten times too long
+pre-push@@pp2@@tools/hook-templates/pre-push@@s/\[ "\$this_repo_root" = "\$VAULT_ROOT" \]/false/@@pushing the vault itself still warns about its own commits
+pre-push@@pp3@@tools/hook-templates/pre-push@@$s/exit 0/exit 1/@@the hook blocks the push after warning
+pre-push@@pp4@@tools/hook-templates/pre-push@@s/--format='%h'/--format='%h %s'/;s/worth bundling that too:"/worth bundling that too: $pending_hashes"/@@commit subjects leak into the warning
+pre-push@@pp5@@tools/hook-templates/pre-push@@s/^touch "\$LAST_WARN_FILE".*$/:/@@the throttle marker is never written, so every push warns
+pre-push@@pp6@@tools/hook-templates/pre-push@@s/^} >&2$/}/@@the warning goes to stdout instead of stderr
+
+# ---- session-start-vault-check ---------------------------------------------------------------
+session-start-vault-check@@ss1@@tools/hook-templates/session-start-vault-check@@s/if \[ "\$source_field" = "compact" \]; then/if false; then/@@a /compact is no longer skipped
+session-start-vault-check@@ss2@@tools/hook-templates/session-start-vault-check@@s/if \[ "\$event" = "PostToolUse" \]; then/if true; then/@@session starts are throttled as well as tool calls
+session-start-vault-check@@ss3@@tools/hook-templates/session-start-vault-check@@s/^touch "\$LAST_CHECK_FILE".*$/:/@@the check marker is never written, so tool calls are never throttled
+session-start-vault-check@@ss4@@tools/hook-templates/session-start-vault-check@@s/--format='%h'/--format='%h %s'/@@commit subjects leak into the reminder
+session-start-vault-check@@ss5@@tools/hook-templates/session-start-vault-check@@s/NUDGE_COOLDOWN_SECONDS=3600/NUDGE_COOLDOWN_SECONDS=36000/@@the reminder cooldown is ten times too long
+
+# ---- post-merge ---------------------------------------------------------------------------
+post-merge@@pm1@@tools/hook-templates/post-merge@@s/(lock|log|tmp)/(log|tmp)/@@lock files are no longer filtered out of the changed-file list
+post-merge@@pm2@@tools/hook-templates/post-merge@@s/^) >\/dev\/null 2>&1 &$/) >\/dev\/null 2>\&1/@@the work runs in the foreground, so a pull waits for the whole run
+post-merge@@pm3@@tools/hook-templates/post-merge@@s/ALLOWED_TOOLS="Read Grep Glob mcp__obsidian__vault_read/ALLOWED_TOOLS="Bash Read Grep Glob mcp__obsidian__vault_read/@@the model is allowed to run shell commands
+post-merge@@pm4@@tools/hook-templates/post-merge@@s/echo "\$total_lines" > "\$SEEN_MARKER"/:/@@old failures are shown again on every pull
+post-merge@@pm5@@tools/hook-templates/post-merge@@s/committed="yes"/committed="yes"; git -C "$VAULT_ROOT" push -q origin HEAD 2>\/dev\/null/@@the hook pushes the vault commit
+
+# ---- session-start-vault-context ----------------------------------------------------------------
+session-start-vault-context@@cx1@@tools/hook-templates/session-start-vault-context@@s/\[ "\$SOURCE" = "compact" \] && exit 0/:/@@a /compact reloads the context
+session-start-vault-context@@cx2@@tools/hook-templates/session-start-vault-context@@s/UPDATE_MAX_LINES="\${UPDATE_MAX_LINES:-40}"/UPDATE_MAX_LINES=40/@@UPDATE_MAX_LINES is ignored
+session-start-vault-context@@cx3@@tools/hook-templates/session-start-vault-context@@s/-name '\*\.md' //@@non-markdown files can be picked as the latest note
+
+# ---- install-claude-config ---------------------------------------------------------------------
+install-claude-config@@in1@@tools/install-claude-config.sh@@s/\[\[ "\$iv" -lt "\$sv" \]\]/[[ "$iv" -gt "$sv" ]]/@@--check calls an older install newer and a newer one outdated
+install-claude-config@@in2@@tools/install-claude-config.sh@@s/\[\[ "\$mode" = "exec" \]\] \&\& chmod +x "\$dst"/:/@@installed hooks lose their executable bit
+install-claude-config@@in3@@tools/install-claude-config.sh@@s/^if \[\[ -n "\$BACKEND" \]\] \&\& \[\[ "\$BACKEND" != "rest-api" \]\] \&\& \[\[ "\$BACKEND" != "mcpvault" \]\]; then$/if false; then/@@an invalid --backend value is accepted
+
+# ---- setup-mcp ----------------------------------------------------------------------------
+setup-mcp@@sm1@@tools/setup-mcp.sh@@s/port:-27123/port:-27124/@@the default port is wrong
+setup-mcp@@sm2@@tools/setup-mcp.sh@@s/!= "200"/!= "000"/@@a failing endpoint is reported as success
+setup-mcp@@sm3@@tools/setup-mcp.sh@@s/^    exit 0$/    :/@@after enabling the HTTP server it carries on instead of stopping for a restart
+setup-mcp@@sm4@@tools/setup-mcp.sh@@s/echo "\[Step 4\] OK - registered\./echo "[Step 4] key ${api_key}"; echo "[Step 4] OK - registered./@@the API key is printed
