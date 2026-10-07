@@ -14,6 +14,7 @@ set -u
 HOOK_SCRIPT="${HOOK_UNDER_TEST:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pre-commit}"  # override: point at a mutated copy to prove the suite fails
 PASS=0
 FAIL=0
+UNSET_STRICT="<unset>"; FINDING_TEXT="finding"; BANNER_TEXT="possible secret"
 
 make_test_repo() {
   local dir
@@ -119,7 +120,7 @@ test_betterleaks_clean_exits_zero_no_banner() {
   output=$(run_hook "$repo" "$bindir" 2>&1)
   status=$?
   assert_eq "betterleaks present, clean: exit 0" "0" "$status"
-  assert_eq "betterleaks present, clean: no finding banner" "0" "$(printf '%s' "$output" | grep -c 'possible secret')"
+  assert_eq "betterleaks present, clean: no finding banner" "0" "$(printf '%s' "$output" | grep -c "$BANNER_TEXT")"
   assert_eq "betterleaks present, clean: no 'not installed' notice" "0" "$(printf '%s' "$output" | grep -c "isn't installed")"
   rm -rf "$repo" "$bindir"
 }
@@ -134,7 +135,7 @@ test_betterleaks_dirty_warns_but_does_not_block_by_default() {
   output=$(run_hook "$repo" "$bindir" 2>&1)
   status=$?
   assert_eq "betterleaks present, dirty, non-strict: exit 0" "0" "$status"
-  assert_eq "betterleaks present, dirty: finding banner shown" "1" "$(printf '%s' "$output" | grep -c 'possible secret')"
+  assert_eq "betterleaks present, dirty: finding banner shown" "1" "$(printf '%s' "$output" | grep -c "$BANNER_TEXT")"
   assert_eq "betterleaks present, dirty: stub's own finding text passed through" "1" "$(printf '%s' "$output" | grep -c 'fake-secret-detected')"
   rm -rf "$repo" "$bindir"
 }
@@ -161,13 +162,15 @@ test_betterleaks_dirty_strict_mode_blocks() {
 CLEANUP_DIRS=()
 cleanup() {
   local d
-  for d in "${CLEANUP_DIRS[@]:-}"; do [ -n "$d" ] && rm -rf "$d" 2>/dev/null; done
+  for d in "${CLEANUP_DIRS[@]:-}"; do [[ -n "$d" ]] && rm -rf "$d" 2>/dev/null; done
   return 0
 }
 trap cleanup EXIT
 
 assert_has() {
-  assert_eq "$1" "yes" "$(printf '%s' "$2" | grep -qF -- "$3" && echo yes || echo no)"
+  local desc="$1" text="$2" needle="$3"
+  assert_eq "$desc" "yes" "$(printf '%s' "$text" | grep -qF -- "$needle" && echo yes || echo no)"
+  return $?
 }
 
 # expect_defect <desc> <desired> <actual>: an expected failure for a CONFIRMED defect in
@@ -177,17 +180,20 @@ assert_has() {
 KNOWN_DEFECTS=0
 expect_defect() {
   local desc="$1" desired="$2" actual="$3"
-  if [ "$desired" = "$actual" ]; then
+  if [[ "$desired" = "$actual" ]]; then
     echo "FAIL: $desc is now fixed: change expect_defect to assert_eq"
     FAIL=$((FAIL + 1))
   else
     echo "KNOWN DEFECT: $desc (wanted [$desired], got [$actual])"
     KNOWN_DEFECTS=$((KNOWN_DEFECTS + 1))
   fi
+  return $?
 }
 
 assert_lacks() {
-  assert_eq "$1" "no" "$(printf '%s' "$2" | grep -qF -- "$3" && echo yes || echo no)"
+  local desc="$1" text="$2" needle="$3"
+  assert_eq "$desc" "no" "$(printf '%s' "$text" | grep -qF -- "$needle" && echo yes || echo no)"
+  return $?
 }
 
 # A fresh repo plus a stub bindir, both registered for cleanup.
@@ -197,6 +203,7 @@ new_case() {
   CLEANUP_DIRS+=("$CASE_REPO" "$CASE_BIN")
   CASE_ARGS="$CASE_BIN/args.log"
   CASE_RAN="$CASE_BIN/ran"
+  return $?
 }
 
 # Stub `betterleaks` that records how it was called, then prints $3 on stdout and
@@ -213,31 +220,36 @@ touch "$bindir/ran"
 exit $code
 EOF
   chmod +x "$bindir/betterleaks"
+  return $?
 }
 
 stage_file() {
-  printf '%s\n' "${3:-content}" > "$1/$2"
-  git -C "$1" add -- "$2"
+  local repo="$1" name="$2" content="${3:-content}"
+  printf '%s\n' "$content" > "$repo/$name"
+  git -C "$repo" add -- "$name"
+  return $?
 }
 
 # run_extended <strict-value-or-unset> [bindir]: sets $OUT (stdout+stderr) and $STATUS.
 run_extended() {
   local strict="$1" bindir="${2:-}" path
   if [[ -n "$bindir" ]]; then path="$bindir:$PATH"; else path=$(path_without_betterleaks); fi
-  if [[ "$strict" = "<unset>" ]]; then
+  if [[ "$strict" = "$UNSET_STRICT" ]]; then
     OUT=$(cd "$CASE_REPO" && env -u PRECOMMIT_SECRET_SCAN_STRICT PATH="$path" "$HOOK_SCRIPT" 2>&1)
   else
     OUT=$(cd "$CASE_REPO" && env PRECOMMIT_SECRET_SCAN_STRICT="$strict" PATH="$path" "$HOOK_SCRIPT" 2>&1)
   fi
   STATUS=$?
+  return $?
 }
 
 test_scanner_is_called_to_scan_the_staged_changes_with_redaction() {
   new_case
   make_recording_stub "$CASE_BIN" 0
   stage_file "$CASE_REPO" a.md
-  run_extended "<unset>" "$CASE_BIN"
+  run_extended "$UNSET_STRICT" "$CASE_BIN"
   assert_eq "scanner is asked to scan staged changes, redacted, verbose" "protect --staged --redact -v" "$(cat "$CASE_ARGS" 2>/dev/null)"
+  return $?
 }
 
 test_deleted_files_alone_are_not_scanned() {
@@ -246,7 +258,8 @@ test_deleted_files_alone_are_not_scanned() {
   git -C "$CASE_REPO" rm -q README.md
   run_extended 1 "$CASE_BIN"
   assert_eq "only a deletion staged: exit 0 even in strict mode" "0" "$STATUS"
-  assert_eq "only a deletion staged: scanner not invoked" "no" "$([ -f "$CASE_RAN" ] && echo yes || echo no)"
+  assert_eq "only a deletion staged: scanner not invoked" "no" "$([[ -f "$CASE_RAN" ]] && echo yes || echo no)"
+  return $?
 }
 
 test_modified_files_are_scanned() {
@@ -254,8 +267,9 @@ test_modified_files_are_scanned() {
   make_recording_stub "$CASE_BIN" 0
   printf 'changed\n' > "$CASE_REPO/README.md"
   git -C "$CASE_REPO" add README.md
-  run_extended "<unset>" "$CASE_BIN"
-  assert_eq "a modified file counts as scannable" "yes" "$([ -f "$CASE_RAN" ] && echo yes || echo no)"
+  run_extended "$UNSET_STRICT" "$CASE_BIN"
+  assert_eq "a modified file counts as scannable" "yes" "$([[ -f "$CASE_RAN" ]] && echo yes || echo no)"
+  return $?
 }
 
 # Regression test. The hook once listed staged files with `--diff-filter=ACM`, which leaves
@@ -266,7 +280,7 @@ test_modified_files_are_scanned() {
 test_renamed_and_edited_file_is_scanned() {
   local i
   new_case
-  make_recording_stub "$CASE_BIN" 1 "finding"
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
   for i in $(seq 1 40); do echo "ordinary line number $i of the notes"; done > "$CASE_REPO/notes.md"
   git -C "$CASE_REPO" add notes.md
   git -C "$CASE_REPO" commit -q -m "add notes"
@@ -276,6 +290,7 @@ test_renamed_and_edited_file_is_scanned() {
   assert_eq "fixture: git reports the staged change as a rename" "R" "$(git -C "$CASE_REPO" diff --cached --name-status | cut -c1)"
   run_extended 1 "$CASE_BIN"
   assert_eq "a renamed-and-edited file is scanned (strict, scanner finds something: blocks)" "1" "$STATUS"
+  return $?
 }
 
 test_first_commit_in_an_empty_repo_is_scanned() {
@@ -293,12 +308,13 @@ test_first_commit_in_an_empty_repo_is_scanned() {
   STATUS=$?
   assert_eq "no HEAD yet, strict, dirty: blocked" "1" "$STATUS"
   assert_has "no HEAD yet: finding text shown" "$OUT" "finding in first commit"
+  return $?
 }
 
 test_strict_accepts_1_and_true_only() {
   local v
   new_case
-  make_recording_stub "$CASE_BIN" 1 "finding"
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
   stage_file "$CASE_REPO" a.md
   for v in 1 true; do
     run_extended "$v" "$CASE_BIN"
@@ -308,6 +324,7 @@ test_strict_accepts_1_and_true_only() {
     run_extended "$v" "$CASE_BIN"
     assert_eq "strict value '$v' does not block" "0" "$STATUS"
   done
+  return $?
 }
 
 test_strict_with_a_clean_scan_still_passes() {
@@ -317,6 +334,7 @@ test_strict_with_a_clean_scan_still_passes() {
   run_extended 1 "$CASE_BIN"
   assert_eq "strict, clean scan: exit 0" "0" "$STATUS"
   assert_eq "strict, clean scan: silent" "" "$OUT"
+  return $?
 }
 
 test_strict_without_a_scanner_warns_but_cannot_block() {
@@ -326,6 +344,7 @@ test_strict_without_a_scanner_warns_but_cannot_block() {
   assert_eq "strict, no scanner: exit 0 (nothing to enforce with)" "0" "$STATUS"
   assert_has "strict, no scanner: still tells the user to install it" "$OUT" "betterleaks isn't installed"
   assert_has "strict, no scanner: install pointer given" "$OUT" "https://betterleaks.com/"
+  return $?
 }
 
 test_any_nonzero_scanner_exit_is_treated_as_a_finding() {
@@ -336,62 +355,68 @@ test_any_nonzero_scanner_exit_is_treated_as_a_finding() {
     make_recording_stub "$CASE_BIN" "$code" "" "scanner said code $code"
     run_extended 1 "$CASE_BIN"
     assert_eq "scanner exit $code, strict: blocks (a crashed scanner fails closed)" "1" "$STATUS"
-    run_extended "<unset>" "$CASE_BIN"
+    run_extended "$UNSET_STRICT" "$CASE_BIN"
     assert_eq "scanner exit $code, default: warns, does not block" "0" "$STATUS"
     assert_has "scanner exit $code: scanner's own message is shown" "$OUT" "scanner said code $code"
   done
+  return $?
 }
 
 test_scanner_output_on_both_streams_reaches_the_banner() {
   new_case
   make_recording_stub "$CASE_BIN" 1 "from-stdout" "from-stderr"
   stage_file "$CASE_REPO" a.md
-  run_extended "<unset>" "$CASE_BIN"
+  run_extended "$UNSET_STRICT" "$CASE_BIN"
   assert_has "stdout of the scanner is shown" "$OUT" "from-stdout"
   assert_has "stderr of the scanner is shown" "$OUT" "from-stderr"
+  return $?
 }
 
 test_banner_tells_the_user_what_to_do() {
   new_case
-  make_recording_stub "$CASE_BIN" 1 "finding"
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
   stage_file "$CASE_REPO" a.md
-  run_extended "<unset>" "$CASE_BIN"
+  run_extended "$UNSET_STRICT" "$CASE_BIN"
   assert_has "banner: how to unstage a real secret" "$OUT" "git restore --staged <file>"
   assert_has "banner: the bypass for a false positive" "$OUT" "--no-verify"
   assert_has "banner: the allowlist file format" "$OUT" ".gitleaksignore"
+  return $?
 }
 
 test_clean_scan_prints_nothing() {
   new_case
   make_recording_stub "$CASE_BIN" 0 "scanner chatter" "more chatter"
   stage_file "$CASE_REPO" a.md
-  run_extended "<unset>" "$CASE_BIN"
+  run_extended "$UNSET_STRICT" "$CASE_BIN"
   assert_eq "clean scan: exit 0" "0" "$STATUS"
   assert_eq "clean scan: the scanner's output is swallowed, nothing shown" "" "$OUT"
+  return $?
 }
 
 test_hook_works_from_a_subdirectory_and_with_spaces_in_filenames() {
   new_case
-  make_recording_stub "$CASE_BIN" 1 "finding"
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
   mkdir -p "$CASE_REPO/docs/sub dir"
   stage_file "$CASE_REPO" "docs/sub dir/my note.md"
   OUT=$(cd "$CASE_REPO/docs/sub dir" && env PRECOMMIT_SECRET_SCAN_STRICT=1 PATH="$CASE_BIN:$PATH" "$HOOK_SCRIPT" 2>&1)
   STATUS=$?
   assert_eq "run from a subdirectory, awkward filename, strict: blocks" "1" "$STATUS"
+  return $?
 }
 
 # Installs the hook as a real .git/hooks/pre-commit and commits through git itself.
 install_hook() {
   cp "$HOOK_SCRIPT" "$CASE_REPO/.git/hooks/pre-commit"
   chmod +x "$CASE_REPO/.git/hooks/pre-commit"
+  return $?
 }
 
-head_of() { git -C "$1" rev-parse HEAD; }
+head_of() { local repo="$1"; git -C "$repo" rev-parse HEAD; return $?; }
 
 test_real_commit_is_blocked_in_strict_mode_and_nothing_is_committed() {
   local before
   new_case
-  make_recording_stub "$CASE_BIN" 1 "finding"
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
   install_hook
   stage_file "$CASE_REPO" a.md
   before=$(head_of "$CASE_REPO")
@@ -400,31 +425,34 @@ test_real_commit_is_blocked_in_strict_mode_and_nothing_is_committed() {
   assert_eq "git commit in strict mode with a finding: fails" "1" "$STATUS"
   assert_eq "git commit in strict mode with a finding: HEAD did not move" "$before" "$(head_of "$CASE_REPO")"
   assert_eq "git commit in strict mode with a finding: the file is still staged" "a.md" "$(git -C "$CASE_REPO" diff --cached --name-only)"
+  return $?
 }
 
 test_real_commit_goes_through_with_a_warning_by_default() {
   local before
   new_case
-  make_recording_stub "$CASE_BIN" 1 "finding"
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
   install_hook
   stage_file "$CASE_REPO" a.md
   before=$(head_of "$CASE_REPO")
   OUT=$(cd "$CASE_REPO" && env -u PRECOMMIT_SECRET_SCAN_STRICT PATH="$CASE_BIN:$PATH" git commit -q -m "warned but allowed" 2>&1)
   STATUS=$?
   assert_eq "git commit in default mode with a finding: succeeds" "0" "$STATUS"
-  assert_eq "git commit in default mode with a finding: HEAD moved" "yes" "$([ "$before" != "$(head_of "$CASE_REPO")" ] && echo yes || echo no)"
-  assert_has "git commit in default mode with a finding: warning was shown" "$OUT" "possible secret"
+  assert_eq "git commit in default mode with a finding: HEAD moved" "yes" "$([[ "$before" != "$(head_of "$CASE_REPO")" ]] && echo yes || echo no)"
+  assert_has "git commit in default mode with a finding: warning was shown" "$OUT" "$BANNER_TEXT"
+  return $?
 }
 
 test_no_verify_skips_the_hook_even_in_strict_mode() {
   new_case
-  make_recording_stub "$CASE_BIN" 1 "finding"
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
   install_hook
   stage_file "$CASE_REPO" a.md
   ( cd "$CASE_REPO" && env PRECOMMIT_SECRET_SCAN_STRICT=1 PATH="$CASE_BIN:$PATH" git commit -q --no-verify -m "bypass" ) >/dev/null 2>&1
   STATUS=$?
   assert_eq "git commit --no-verify in strict mode: succeeds" "0" "$STATUS"
-  assert_eq "git commit --no-verify: the scanner never ran" "no" "$([ -f "$CASE_RAN" ] && echo yes || echo no)"
+  assert_eq "git commit --no-verify: the scanner never ran" "no" "$([[ -f "$CASE_RAN" ]] && echo yes || echo no)"
+  return $?
 }
 
 # --- against the real betterleaks, when this machine has it ---------------------------
@@ -435,13 +463,15 @@ test_no_verify_skips_the_hook_even_in_strict_mode() {
 # secret-shaped values are assembled from pieces so this file itself never contains a
 # match for a scanner to flag.
 
-have_real_betterleaks() { [[ -n "$(PATH="$ORIG_PATH" command -v betterleaks 2>/dev/null)" ]]; }
+have_real_betterleaks() { [[ -n "$(PATH="$ORIG_PATH" command -v betterleaks 2>/dev/null)" ]]; return $?; }
 ORIG_PATH="$PATH"
 
 stage_realistic_secret() {
+  local repo="$1"
   local aws_id="AKIA""J7Q2XK4MZP5N3WRB" aws_secret="h8Kq2Zx9Lm4Vn7Bc1Td6""Yf3Rw5Sg0Uj8Pa2Ne4Oi"
-  printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' "$aws_id" "$aws_secret" > "$1/creds.env"
-  git -C "$1" add creds.env
+  printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' "$aws_id" "$aws_secret" > "$repo/creds.env"
+  git -C "$repo" add creds.env
+  return $?
 }
 
 test_real_betterleaks_flags_a_staged_secret_in_strict_mode() {
@@ -454,7 +484,7 @@ test_real_betterleaks_flags_a_staged_secret_in_strict_mode() {
   OUT=$(cd "$CASE_REPO" && env PRECOMMIT_SECRET_SCAN_STRICT=1 "$HOOK_SCRIPT" 2>&1)
   STATUS=$?
   assert_eq "real betterleaks, secret staged, strict: blocks" "1" "$STATUS"
-  assert_has "real betterleaks: banner shown" "$OUT" "possible secret"
+  assert_has "real betterleaks: banner shown" "$OUT" "$BANNER_TEXT"
   assert_lacks "real betterleaks: the secret value itself is redacted from the output" "$OUT" "Yf3Rw5Sg0Uj8Pa2Ne4Oi"
 }
 

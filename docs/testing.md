@@ -202,7 +202,7 @@ Added:
 | `the_hook_never_writes_to_the_vault` | Every vault file keeps its content, none added or removed. |
 | `update_cap_can_be_changed_with_update_max_lines` | The cap can be lowered and raised. |
 | `update_stops_at_the_next_heading_and_counts_earlier_updates` | Only the last update, nothing after it, and "2 earlier update(s)". |
-| `a_reposPath_without_a_placeholder_names_one_fixed_doc` | A fixed doc path. |
+| `a_repos_path_without_a_placeholder_names_one_fixed_doc` | A fixed doc path. |
 | `config_values_with_trailing_comments_and_empty_values` | Trailing `# comment` stripped; empty values use defaults. |
 | `a_longer_config_key_is_not_mistaken_for_a_shorter_one` | `reposPathExtra` is not read as `reposPath`. |
 

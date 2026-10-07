@@ -10,6 +10,7 @@ TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALLER="$TOOLS_DIR/install-claude-config.sh"
 PASS=0
 FAIL=0
+STARTUP_JSON='{"source":"startup"}'
 
 assert_eq() {
   local desc="$1" expected="$2" actual="$3"
@@ -169,7 +170,7 @@ test_session_start_wrapper_uses_vault_root_file() {
   echo "REPODOC-MARKER" > "$v/repos/widget/index.md"
   printf '## Context for Future Sessions\nCTX-MARKER\n' > "$v/daily-notes/alice/2026-10-05-a.md"
   bash "$INSTALLER" --prefix "$p/claude" --vault "$v" >/dev/null 2>&1
-  out=$( cd "$repo" && printf '{"source":"startup"}' | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
+  out=$( cd "$repo" && printf '%s' "$STARTUP_JSON" | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
   assert_contains "wrapper: finds the vault via the vault-root file" "REPODOC-MARKER" "$out"
   assert_contains "wrapper: loads the latest note's context" "CTX-MARKER" "$out"
   out=$( cd "$repo" && printf '{"source":"compact"}' | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
@@ -425,7 +426,7 @@ test_wrapper_prefers_vault_root_from_the_environment_over_the_file() {
   echo "FROM-FILE-VAULT" > "$v_file/repos/widget/index.md"
   echo "FROM-ENV-VAULT" > "$v_env/repos/widget/index.md"
   bash "$INSTALLER" --prefix "$p/claude" --vault "$v_file" >/dev/null 2>&1
-  out=$( cd "$repo" && printf '{"source":"startup"}' | env VAULT_ROOT="$v_env" bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
+  out=$( cd "$repo" && printf '%s' "$STARTUP_JSON" | env VAULT_ROOT="$v_env" bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
   assert_contains "wrapper: VAULT_ROOT from the environment wins" "FROM-ENV-VAULT" "$out"
   assert_eq "wrapper: the vault-root file's vault is not used" "0" "$(printf '%s' "$out" | grep -c 'FROM-FILE-VAULT')"
   rm -rf "$p" "$v_file" "$v_env" "$repo"
@@ -438,7 +439,7 @@ test_wrapper_reads_a_crlf_vault_root_file() {
   mkdir -p "$v/repos/widget"; echo "CRLF-VAULT-DOC" > "$v/repos/widget/index.md"
   bash "$INSTALLER" --prefix "$p/claude" >/dev/null 2>&1
   mkdir -p "$p/claude/hook-configs"; printf '%s\r\n' "$v" > "$p/claude/hook-configs/vault-root"
-  out=$( cd "$repo" && printf '{"source":"startup"}' | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
+  out=$( cd "$repo" && printf '%s' "$STARTUP_JSON" | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
   assert_contains "wrapper: a CRLF vault-root file still resolves the vault" "CRLF-VAULT-DOC" "$out"
   rm -rf "$p" "$v" "$repo"
   return $?
@@ -447,7 +448,7 @@ test_wrapper_reads_a_crlf_vault_root_file() {
 test_wrapper_without_any_vault_root_is_silent() {
   local p repo out st; p=$(mktemp -d); repo=$(mktemp -d)
   bash "$INSTALLER" --prefix "$p/claude" >/dev/null 2>&1
-  out=$( cd "$repo" && printf '{"source":"startup"}' | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 ); st=$?
+  out=$( cd "$repo" && printf '%s' "$STARTUP_JSON" | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 ); st=$?
   assert_eq "wrapper, no vault configured, outside any git repo: exit 0" "0" "$st"
   assert_eq "wrapper, no vault configured: prints nothing" "" "$out"
   rm -rf "$p" "$repo"

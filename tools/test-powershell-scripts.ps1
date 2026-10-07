@@ -34,8 +34,8 @@ $Self = (Get-Process -Id $PID).Path          # the pwsh / powershell running thi
 $IsWin = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
 
 function Assert-Eq($Desc, $Expected, $Actual) {
-    if ("$Expected" -ceq "$Actual") { Write-Host "PASS: $Desc"; $script:Pass++ }
-    else { Write-Host "FAIL: $Desc (expected [$Expected], got [$Actual])"; $script:Fail++ }
+    if ("$Expected" -ceq "$Actual") { Write-Output "PASS: $Desc"; $script:Pass++ }
+    else { Write-Output "FAIL: $Desc (expected [$Expected], got [$Actual])"; $script:Fail++ }
 }
 function Assert-Has($Desc, $Text, $Needle) {
     Assert-Eq $Desc 'yes' $(if (("$Text").Contains($Needle)) { 'yes' } else { 'no' })
@@ -45,9 +45,9 @@ function Assert-Lacks($Desc, $Text, $Needle) {
 }
 function Expect-Defect($Desc, $Desired, $Actual) {
     if ("$Desired" -ceq "$Actual") {
-        Write-Host "FAIL: $Desc is now fixed: change Expect-Defect to Assert-Eq"; $script:Fail++
+        Write-Output "FAIL: $Desc is now fixed: change Expect-Defect to Assert-Eq"; $script:Fail++
     } else {
-        Write-Host "KNOWN DEFECT: $Desc (wanted [$Desired], got [$Actual])"; $script:KnownDefects++
+        Write-Output "KNOWN DEFECT: $Desc (wanted [$Desired], got [$Actual])"; $script:KnownDefects++
     }
 }
 function New-Dir {

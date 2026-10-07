@@ -109,7 +109,7 @@ test_every_suite_is_described_in_the_testing_doc() {
 test_every_shell_script_parses() {
   local f
   for f in $(shell_scripts); do
-    assert_eq "bash -n $(rel "$f")" "ok" "$(bash -n "$f" 2>/dev/null && echo ok || echo "syntax error")"
+    assert_eq "bash -n $(rel "$f")" "ok" "$(bash -n "$f" 2>/dev/null && echo ok || echo "does not parse")"
   done
   return 0
 }
@@ -147,7 +147,7 @@ test_javascript_files_parse() {
   local f
   if ! command -v node >/dev/null 2>&1; then skip "node --check (node not installed)"; return 0; fi
   for f in "$TOOLS_DIR"/command-templates/test/*.mjs; do
-    assert_eq "node --check $(rel "$f")" "ok" "$(node --check "$f" 2>/dev/null && echo ok || echo "syntax error")"
+    assert_eq "node --check $(rel "$f")" "ok" "$(node --check "$f" 2>/dev/null && echo ok || echo "does not parse")"
   done
   return 0
 }
@@ -263,7 +263,7 @@ test_shellcheck_reports_no_errors() {
     out=$(shellcheck -S error -x "$f" 2>&1 || true)
     if [[ -z "$out" ]]; then assert_eq "shellcheck (errors only) $(rel "$f")" "" "$out"
     elif [[ "${STRUCTURE_SHELLCHECK_STRICT:-0}" = "1" ]]; then assert_eq "shellcheck (errors only) $(rel "$f")" "" "$out"
-    else echo "NOTE: shellcheck reports error-level findings in $(rel "$f") (advisory, set STRUCTURE_SHELLCHECK_STRICT=1 to enforce)"; fi
+    else echo "NOTE: shellcheck reports error-level findings in $(rel "$f") (advisory, set STRUCTURE_SHELLCHECK_STRICT=1 to enforce)" >&2; fi
   done
   return 0
 }

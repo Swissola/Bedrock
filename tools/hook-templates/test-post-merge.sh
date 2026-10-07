@@ -22,6 +22,7 @@ set -u
 HOOK_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/post-merge"
 PASS=0
 FAIL=0
+WRITE_TOOL="mcp__obsidian__vault_write"
 # literals the tests repeat many times
 LOG_EXIT_0="exit=0"
 LOG_EXIT_3="exit=3"
@@ -690,7 +691,7 @@ test_default_backend_allows_rest_api_tools_only() {
   printf '#!/bin/bash\necho "$@" > "%s"\nexit 0\n' "$capture" > "$bindir/claude"; chmod +x "$bindir/claude"
   run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" MCP_CONFIG="$bindir/none.json"
   local waited=0; while [[ ! -s "$capture" ]] && [[ "$waited" -lt 50 ]]; do sleep 0.1; waited=$((waited + 1)); done
-  assert_eq "default backend: allows mcp__obsidian__vault_write" "1" "$([[ "$(gcount "mcp__obsidian__vault_write" "$capture")" -ge 1 ]] && echo 1 || echo 0)"
+  assert_eq "default backend: allows mcp__obsidian__vault_write" "1" "$([[ "$(gcount "$WRITE_TOOL" "$capture")" -ge 1 ]] && echo 1 || echo 0)"
   assert_eq "default backend: does not allow mcpvault tool names" "0" "$(gcount "mcp__obsidian__write_note" "$capture")"
   rm -rf "$repo" "$vault" "$logdir" "$bindir"
   return $?
@@ -705,7 +706,7 @@ test_mcpvault_backend_detected_from_mcp_config() {
   run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" MCP_CONFIG="$mcp"
   local waited=0; while [[ ! -s "$capture" ]] && [[ "$waited" -lt 50 ]]; do sleep 0.1; waited=$((waited + 1)); done
   assert_eq "mcpvault config: allows read_note, write_note, list_directory" "3" "$(grep -o -E "mcp__obsidian__(read_note|write_note|list_directory)" "$capture" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
-  assert_eq "mcpvault config: does not allow vault_write" "0" "$(gcount "mcp__obsidian__vault_write" "$capture")"
+  assert_eq "mcpvault config: does not allow vault_write" "0" "$(gcount "$WRITE_TOOL" "$capture")"
   assert_eq "mcpvault config: prompt tells the run to use write_note" "1" "$([[ "$(gcount "mcp__obsidian__write_note of the complete updated document" "$capture")" -ge 1 ]] && echo 1 || echo 0)"
   rm -rf "$repo" "$vault" "$logdir" "$bindir"
   return $?
@@ -720,7 +721,7 @@ test_backend_key_in_vault_config_overrides_detection() {
   printf '#!/bin/bash\necho "$@" > "%s"\nexit 0\n' "$capture" > "$bindir/claude"; chmod +x "$bindir/claude"
   run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" MCP_CONFIG="$mcp"
   local waited=0; while [[ ! -s "$capture" ]] && [[ "$waited" -lt 50 ]]; do sleep 0.1; waited=$((waited + 1)); done
-  assert_eq "backend: rest-api in vault-config overrides an mcpvault-looking MCP config" "1" "$([[ "$(gcount "mcp__obsidian__vault_write" "$capture")" -ge 1 ]] && echo 1 || echo 0)"
+  assert_eq "backend: rest-api in vault-config overrides an mcpvault-looking MCP config" "1" "$([[ "$(gcount "$WRITE_TOOL" "$capture")" -ge 1 ]] && echo 1 || echo 0)"
   rm -rf "$repo" "$vault" "$logdir" "$bindir"
   return $?
 }
@@ -807,7 +808,7 @@ fx_new() {
   return 0
 }
 
-has_text() { [[ -f "$2" ]] && grep -qF -- "$1" "$2" && echo yes || echo no; return 0; }
+has_text() { local needle="$1" file="$2"; [[ -f "$file" ]] && grep -qF -- "$needle" "$file" && echo yes || echo no; return 0; }
 
 # Stub claude: records its arguments on one line to $1/argv.txt, optionally writes the
 # index (3rd arg = content) and prints $2, then exits $4 (default 0).
@@ -821,6 +822,7 @@ echo "$say"
 exit $code
 EOF
   chmod +x "$bindir/claude"
+  return $?
 }
 
 # Waits up to $2 tenths of a second for a non-empty file.
@@ -862,6 +864,7 @@ test_noise_and_secret_shaped_files_never_reach_the_prompt() {
   for f in "${kept[@]}"; do
     assert_eq "kept in the prompt: $f" "yes" "$(has_text "\"$f\"" "$FX_BIN/argv.txt")"
   done
+  return $?
 }
 
 test_prompt_and_arguments_carry_the_right_context() {
@@ -882,9 +885,10 @@ test_prompt_and_arguments_carry_the_right_context() {
   assert_eq "prompt tells the model what to print when the vault is unreachable" "yes" "$(has_text "MCP_OBSIDIAN_UNAVAILABLE" "$argv")"
   assert_eq "only the changed file is listed" "yes" "$(has_text '["README.md"]' "$argv")"
   assert_eq "allowed tools: read" "yes" "$(has_text "mcp__obsidian__vault_read" "$argv")"
-  assert_eq "allowed tools: write" "yes" "$(has_text "mcp__obsidian__vault_write" "$argv")"
+  assert_eq "allowed tools: write" "yes" "$(has_text "$WRITE_TOOL" "$argv")"
   assert_eq "allowed tools: no patch tool granted" "no" "$(has_text "mcp__obsidian__vault_patch" "$argv")"
   assert_eq "allowed tools: no Bash granted" "no" "$(has_text "Bash" "$argv")"
+  return $?
 }
 
 test_log_records_range_files_commit_and_output() {
@@ -903,6 +907,7 @@ test_log_records_range_files_commit_and_output() {
   assert_eq "log keeps claude's own output" "yes" "$(has_text "claude said hello" "$LOG_FILE")"
   assert_eq "log is closed with an end marker" "yes" "$(has_text "=== end run ===" "$LOG_FILE")"
   assert_eq "a successful run adds nothing to FAILURES.log" "no" "$([[ -s "$FX_LOG/FAILURES.log" ]] && echo yes || echo no)"
+  return $?
 }
 
 test_auto_commit_touches_only_the_doc_and_is_never_pushed() {
@@ -922,6 +927,7 @@ test_auto_commit_touches_only_the_doc_and_is_never_pushed() {
   assert_eq "commit message names the doc and the pulled sha" "Auto-update repos/$REPO_NAME/index.md via post-merge hook ($(git -C "$FX_REPO" rev-parse --short HEAD))" "$(git -C "$FX_VAULT" log -1 --format=%s)"
   assert_eq "the vault is one commit ahead of its origin" "1" "$(git -C "$FX_VAULT" rev-list --count origin/main..main 2>/dev/null || git -C "$FX_VAULT" rev-list --count "$origin_before"..HEAD)"
   assert_eq "origin itself did not move: the hook never pushes" "$origin_before" "$(git -C "$bare" rev-parse main)"
+  return $?
 }
 
 test_a_failed_run_is_logged_and_never_committed_and_never_blocks_the_pull() {
@@ -936,6 +942,7 @@ test_a_failed_run_is_logged_and_never_committed_and_never_blocks_the_pull() {
   assert_eq "claude exits 1: log records exit=1" "1" "$(gcount "exit=1" "$LOG_FILE")"
   assert_eq "claude exits 1: nothing is auto-committed" "0" "$(git -C "$FX_VAULT" log --oneline | grep -c 'Auto-update' || true)"
   assert_eq "claude exits 1: the failure is recorded for the next session to see" "1" "$(gcount "$REPO_NAME exit=1" "$FX_LOG/FAILURES.log")"
+  return $?
 }
 
 test_each_vault_unreachable_message_downgrades_to_exit_2_and_skips_the_commit() {
@@ -951,6 +958,7 @@ test_each_vault_unreachable_message_downgrades_to_exit_2_and_skips_the_commit() 
     assert_eq "message '$msg': exit downgraded to 2" "1" "$(gcount "exit=2" "$LOG_FILE")"
     assert_eq "message '$msg': not auto-committed" "0" "$(git -C "$FX_VAULT" log --oneline | grep -c 'Auto-update' || true)"
   done
+  return $?
 }
 
 test_the_hook_returns_before_a_slow_claude_finishes() {
@@ -975,6 +983,7 @@ STUB
   : > "$FX_BIN/release"
   wait_for_file "$FX_LOG/widget-service-post-merge.log" 600   # let the background run finish before cleanup
   assert_eq "slow claude: once released, the background run completes and is logged" "yes" "$(has_text "slow stub done" "$FX_LOG/widget-service-post-merge.log")"
+  return $?
 }
 
 test_unacknowledged_failures_are_surfaced_once_then_only_new_ones() {
@@ -993,6 +1002,7 @@ test_unacknowledged_failures_are_surfaced_once_then_only_new_ones() {
   assert_eq "third run: only the new failure shown" "yes" "$(printf '%s' "$out" | grep -qF 'third failure line' && echo yes || echo no)"
   assert_eq "third run: the already-seen ones are not repeated" "no" "$(printf '%s' "$out" | grep -qF 'first failure line' && echo yes || echo no)"
   assert_eq "third run: seen-marker advanced to 3" "3" "$(cat "$FX_LOG/.failures-seen")"
+  return $?
 }
 
 test_no_default_branch_or_a_detached_head_does_nothing() {
@@ -1009,6 +1019,7 @@ test_no_default_branch_or_a_detached_head_does_nothing() {
   ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
   sleep 1
   assert_eq "detached HEAD: claude never invoked" "no" "$([[ -f "$FX_BIN/argv.txt" ]] && echo yes || echo no)"
+  return $?
 }
 
 test_repo_name_comes_from_the_origin_url_in_every_common_form() {
@@ -1026,6 +1037,7 @@ test_repo_name_comes_from_the_origin_url_in_every_common_form() {
     ( cd "$repo" && env VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
     assert_eq "origin $url: repo name derived as $name" "yes" "$([[ -f "$logdir/${name}-post-merge.log" ]] && echo yes || echo no)"
   done
+  return $?
 }
 
 test_a_repo_with_no_origin_is_called_unknown_repo() {
@@ -1035,6 +1047,7 @@ test_a_repo_with_no_origin_is_called_unknown_repo() {
   ( cd "$repo" && env VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
   assert_eq "no origin remote: the log is named unknown-repo" "yes" "$([[ -f "$logdir/unknown-repo-post-merge.log" ]] && echo yes || echo no)"
   assert_eq "no origin remote: the log asks for repos/unknown-repo/index.md" "yes" "$(has_text "repos/unknown-repo/index.md not found" "$logdir/unknown-repo-post-merge.log")"
+  return $?
 }
 
 test_noise_and_secret_shaped_files_never_reach_the_prompt

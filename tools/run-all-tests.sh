@@ -74,6 +74,7 @@ run_suite() {
       ps=$(command -v pwsh 2>/dev/null || command -v powershell 2>/dev/null || true)
       if [[ -z "$ps" ]]; then echo "skip: PowerShell is not installed" > "$OUT_DIR/$n.status"; return 0; fi
       "$ps" -NoProfile -File "$path" > "$OUT_DIR/$n.out" 2>&1; [[ $? -eq 0 ]] && echo pass > "$OUT_DIR/$n.status" || echo fail > "$OUT_DIR/$n.status" ;;
+    *) echo "unknown suite kind: $kind" > "$OUT_DIR/$n.out"; echo fail > "$OUT_DIR/$n.status" ;;
   esac
   return 0
 }
