@@ -229,8 +229,8 @@ test_every_suite_cleans_up_after_itself_with_a_trap() {
 test_mutation_config_is_well_formed_and_every_mutant_applies() {
   local f="$TOOLS_DIR/mutation/mutants.txt" bad out
   assert_eq "tools/mutation/mutants.txt exists" "yes" "$([[ -f "$f" ]] && echo yes || echo no)"
-  bad=$(grep -v '^[[:space:]]*\(#.*\)\?$' "$f" | awk -F'@@' 'NF != 5 || $1 == "" || $2 == "" || $3 == "" || $4 == "" || $5 == "" { print NR": "$0 }')
-  assert_eq "every mutant line has the five @@-separated fields" "" "$bad"
+  bad=$(grep -v '^[[:space:]]*\(#.*\)\?$' "$f" | awk -F'@@' '(NF != 5 && NF != 6) || $1 == "" || $2 == "" || $3 == "" || $4 == "" || $5 == "" || (NF == 6 && $6 != "not-observable-on-windows") { print NR": "$0 }')
+  assert_eq "every mutant line has five @@-separated fields, plus at most one known tag" "" "$bad"
   assert_eq "mutant names are unique" "" "$(grep -v '^[[:space:]]*\(#.*\)\?$' "$f" | awk -F'@@' '{ print $2 }' | sort | uniq -d)"
   out=$(bash "$TOOLS_DIR/run-mutation-tests.sh" --check-applies 2>&1 | grep -v '^ok ' || true)
   assert_eq "every mutant changes its target, leaves valid bash, and has a suite" "$(echo "$out" | grep -c ' checked, 0 broken')" "1"

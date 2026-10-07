@@ -126,6 +126,7 @@ run_mutant() {
   g=$(field "$line" 1); target=$(field "$line" 3); expr=$(field "$line" 4)
   suite=$(suite_for "$g")
   if ! check_one "$line" > "$WORK/$idx.why"; then echo "BROKEN" > "$WORK/$idx.status"; return 0; fi
+  if [[ "$(field "$line" 6)" = "not-observable-on-windows" ]] && [[ "$(uname -s)" =~ MINGW|MSYS|CYGWIN ]]; then echo "SKIPPED" > "$WORK/$idx.status"; return 0; fi
   d=$(fresh_copy); f="$d/$target"
   sed "$expr" "$f" > "$f.mut" && cat "$f.mut" > "$f" && rm -f "$f.mut"   # cat keeps the file's mode
   if run_suite "$d" "$suite"; then
@@ -139,7 +140,7 @@ run_mutant() {
 }
 
 began=$SECONDS
-total_killed=0; total_survived=0; total_broken=0; total_baseline_broken=0
+total_killed=0; total_survived=0; total_broken=0; total_baseline_broken=0; total_skipped=0
 
 for g in $groups; do
   suite=$(suite_for "$g")
@@ -169,11 +170,13 @@ for g in $groups; do
     case "$status" in
       KILLED)   total_killed=$((total_killed + 1)); printf '   killed    %-6s %s (%s failing checks)\n' "$(field "$line" 2)" "$(field "$line" 5)" "$(cat "$WORK/$key.why" 2>/dev/null)" ;;
       SURVIVED) total_survived=$((total_survived + 1)); printf '   SURVIVED  %-6s %s   <-- the suite did not notice\n' "$(field "$line" 2)" "$(field "$line" 5)" ;;
+      SKIPPED)  total_skipped=$((total_skipped + 1)); printf '   skipped   %-6s %s   (not observable on Windows: file modes are emulated; runs on Linux and macOS)
+' "$(field "$line" 2)" "$(field "$line" 5)" ;;
       *)        total_broken=$((total_broken + 1)); printf '   BROKEN    %-6s %s\n' "$(field "$line" 2)" "$(cat "$WORK/$key.why" 2>/dev/null)" ;;
     esac
   done < "$WORK/index.$g"
 done
 
 echo
-echo "killed $total_killed, survived $total_survived, broken $total_broken, baselines failing $total_baseline_broken, in $((SECONDS - began))s"
+echo "killed $total_killed, survived $total_survived, skipped $total_skipped, broken $total_broken, baselines failing $total_baseline_broken, in $((SECONDS - began))s"
 [[ "$total_survived" -eq 0 && "$total_broken" -eq 0 && "$total_baseline_broken" -eq 0 ]]
