@@ -44,8 +44,8 @@ jobs:
       - name: Install betterleaks (ubuntu only)
         if: matrix.name == 'ubuntu'
         env:
-          BETTERLEAKS_VERSION: "1.8.1"
-          BETTERLEAKS_SHA256: efa407244e1ea8e35f582b8a42becdeac08bdead04f68eb752adda722d583c2a
+          BETTERLEAKS_VERSION: "1.9.0"
+          BETTERLEAKS_SHA256: f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7
         run: |
           set -euo pipefail
           url="https://github.com/betterleaks/betterleaks/releases/download/v${BETTERLEAKS_VERSION}/betterleaks_${BETTERLEAKS_VERSION}_linux_x64.tar.gz"
