@@ -118,16 +118,31 @@ vault_ahead() {
   git init -q --bare "$WORK/origin.git"
   git -C "$VAULT" remote add origin "$WORK/origin.git"
   git -C "$VAULT" push -q origin main
-  for i in $(seq 1 "$n"); do
+  i=1
+  while [ "$i" -le "$n" ]; do
     printf 'line-%s\n' "$i" >> "$VAULT/f.md"
     git -C "$VAULT" commit -qam "$subject $i"
+    i=$((i + 1))
   done
 }
 
 # PATH with every directory that holds jq removed, so the "no jq" tests behave the
 # same on a machine that has it installed.
 path_without_jq() {
-  local out="" dir
+  local jq_path jq_dir out="" dir shim c p
+  jq_path=$(command -v jq) || { printf '%s' "$PATH"; return 0; }   # no jq at all: nothing to hide
+  jq_dir=$(dirname "$jq_path")
+  if [[ "$(dirname "$(command -v bash)")" = "$jq_dir" || "$(dirname "$(command -v git)")" = "$jq_dir" ]]; then
+    # jq lives next to bash and git (Linux: /usr/bin), so dropping its directory would drop
+    # them too and the hook could not start. Build a PATH of links to just what the hook
+    # needs, without jq.
+    shim="$WORK/nojq-bin"; mkdir -p "$shim"
+    for c in bash git cat grep sed awk date stat touch mkdir tr wc head cut sort dirname basename rm env sleep; do
+      p=$(command -v "$c" 2>/dev/null) && [[ -x "$p" ]] && ln -sf "$p" "$shim/$c"
+    done
+    printf '%s' "$shim"
+    return 0
+  fi
   local IFS=:
   for dir in $PATH; do
     [[ -x "$dir/jq" || -x "$dir/jq.exe" ]] && continue

@@ -107,9 +107,11 @@ vault_ahead() {
   git init -q --bare "$WORK/origin.git"
   git -C "$VAULT" remote add origin "$WORK/origin.git"
   git -C "$VAULT" push -q origin main
-  for i in $(seq 1 "$n"); do
+  i=1
+  while [ "$i" -le "$n" ]; do
     printf 'line-%s\n' "$i" >> "$VAULT/f.md"
     git -C "$VAULT" commit -qam "$subject $i"
+    i=$((i + 1))
   done
 }
 
