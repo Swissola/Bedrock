@@ -224,6 +224,33 @@ test_every_suite_cleans_up_after_itself_with_a_trap() {
   return 0
 }
 
+# --- mutation checks: configuration and workflow -------------------------------------------------
+
+test_mutation_config_is_well_formed_and_every_mutant_applies() {
+  local f="$TOOLS_DIR/mutation/mutants.txt" bad out
+  assert_eq "tools/mutation/mutants.txt exists" "yes" "$([[ -f "$f" ]] && echo yes || echo no)"
+  bad=$(grep -v '^[[:space:]]*\(#.*\)\?$' "$f" | awk -F'@@' 'NF != 5 || $1 == "" || $2 == "" || $3 == "" || $4 == "" || $5 == "" { print NR": "$0 }')
+  assert_eq "every mutant line has the five @@-separated fields" "" "$bad"
+  assert_eq "mutant names are unique" "" "$(grep -v '^[[:space:]]*\(#.*\)\?$' "$f" | awk -F'@@' '{ print $2 }' | sort | uniq -d)"
+  out=$(bash "$TOOLS_DIR/run-mutation-tests.sh" --check-applies 2>&1 | grep -v '^ok ' || true)
+  assert_eq "every mutant changes its target, leaves valid bash, and has a suite" "$(echo "$out" | grep -c ' checked, 0 broken')" "1"
+  return 0
+}
+
+test_the_manual_workflow_offers_exactly_the_mutation_groups() {
+  local wf="$ROOT/.github/workflows/mutation-tests.yml" in_file in_wf
+  in_file=$(bash "$TOOLS_DIR/run-mutation-tests.sh" --list | awk '{ print $1 }' | sort | tr '\n' ' ')
+  in_wf=$(awk '/^      hook:/ { on = 1 } /^      jobs_per_group:/ { on = 0 } on && /^          - / { print $2 }' "$wf" | grep -v '^all$' | sort | tr '\n' ' ')
+  assert_eq "the workflow's hook dropdown lists every group in mutants.txt, and nothing else" "$in_file" "$in_wf"
+  assert_eq "the mutation workflow can only be started by hand (workflow_dispatch)" "1" "$(awk '/^on:/ { on = 1; next } /^[a-z]/ { on = 0 } on && /^  [a-z_]+:/ { n++ } END { print n }' "$wf")"
+  assert_eq "...and that one trigger is workflow_dispatch" "yes" "$(grep -qE '^  workflow_dispatch:' "$wf" && echo yes || echo no)"
+  assert_eq "no push, pull_request or schedule trigger" "no" "$(grep -qE '^  (push|pull_request|pull_request_target|schedule):' "$wf" && echo yes || echo no)"
+  assert_eq "the normal test workflow does not run the mutation checks" "no" "$(grep -qF 'run-mutation-tests' "$ROOT/.github/workflows/shell-tests.yml" && echo yes || echo no)"
+  assert_eq "docs/testing.md documents run-mutation-tests.sh" "yes" "$(grep -qF 'run-mutation-tests.sh' "$ROOT/docs/testing.md" 2>/dev/null && echo yes || echo no)"
+  assert_eq "docs/testing.md documents the manual workflow" "yes" "$(grep -qF 'mutation-tests.yml' "$ROOT/docs/testing.md" 2>/dev/null && echo yes || echo no)"
+  return 0
+}
+
 # --- shellcheck, advisory ---------------------------------------------------------------
 
 # Reports error-level findings. Advisory unless STRUCTURE_SHELLCHECK_STRICT=1, in which case
@@ -257,6 +284,8 @@ test_every_command_template_carries_a_version_stamp
 test_test_scripts_avoid_bash_4_only_features
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback
 test_every_suite_cleans_up_after_itself_with_a_trap
+test_mutation_config_is_well_formed_and_every_mutant_applies
+test_the_manual_workflow_offers_exactly_the_mutation_groups
 test_shellcheck_reports_no_errors
 
 echo "--- $PASS passed, $FAIL failed, $SKIPS skipped ---"

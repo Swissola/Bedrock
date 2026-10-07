@@ -291,7 +291,43 @@ Checks that no single suite can make:
 
 ## Adding a hook or a suite
 
-Add the hook, then add `tools/hook-templates/test-<hook>.sh`, then add it to `tools/run-all-tests.sh`, `.github/workflows/shell-tests.yml` and this page. `bash tools/test-structure.sh` tells you which of those you have not done yet.
+Add the hook, then add `tools/hook-templates/test-<hook>.sh`, then add it to `tools/run-all-tests.sh`, `.github/workflows/shell-tests.yml` and this page. `bash tools/test-structure.sh` tells you which of those you have not done yet. If the hook is worth mutation-checking, add a few mutants for it too (see [Mutation checks](#mutation-checks)).
 
 New suites follow the shape of the existing ones: a throwaway fixture per test, `HOME` redirected if the hook keeps state, stubs on `PATH`, specific expected values rather than "did not crash", names that say the scenario and the outcome, and cleanup from an exit trap.
 
+## Mutation checks
+
+A suite that cannot fail is worth nothing. A mutation check proves each one can: it takes a script, makes one small deliberate break (flip a condition, drop a line, change a number, which is a "mutant"), and runs that script's own suite against the broken copy. The suite should fail. If it still passes, that behaviour is not really being checked, and the mutant is a "survivor".
+
+It is slow on purpose, a full suite run per mutant (minutes each, so hours for everything), so it is **not part of the normal build**.
+
+```bash
+bash tools/run-mutation-tests.sh --list                 # the groups and how many mutants each has
+bash tools/run-mutation-tests.sh --hook pre-push        # one group (repeat, or comma-separate, for several)
+bash tools/run-mutation-tests.sh                        # everything
+bash tools/run-mutation-tests.sh --hook pre-push --jobs 4   # four mutants at once
+bash tools/run-mutation-tests.sh --check-applies        # fast: does every mutant still apply? runs no suite
+```
+
+- **The mutants** are in `tools/mutation/mutants.txt`, one per line: the group (the hook or script name), a short name, the file to change, a `sed` expression, and what it breaks. Add one by adding a line; the file explains the format.
+- **Nothing in the repo is changed.** Each mutant is applied to a copy of `tools/` in a temp folder, with a throwaway `HOME`.
+- **A broken suite baseline is reported, not hidden.** Each group's suite is run once unmodified first. If that fails, the group's mutants are not run, because "the suite failed" would prove nothing.
+- **A mutant that stops applying is reported as broken**, as is one that leaves invalid bash. A refactor that moves the target text cannot quietly turn a mutant into a no-op, and `tools/test-structure.sh` runs the same fast check on every build.
+- **Exit status** is 0 only if every mutant applied and was killed.
+
+### In CI: manual only
+
+`.github/workflows/mutation-tests.yml` runs it. The only trigger is **Run workflow** on the Actions tab (`workflow_dispatch`), so no push, pull request or schedule ever starts it. The form asks for:
+
+- **hook:** one hook or script by name, or `all`. For `all`, each group becomes its own job and they run side by side, so the wall-clock time is the slowest group, not the sum.
+- **jobs_per_group:** how many mutants to run at once within a group (1, 2 or 4).
+
+`tools/test-structure.sh` checks that the dropdown lists exactly the groups in `mutants.txt`, so adding a group without adding it to the workflow fails the normal build.
+
+### What has been checked
+
+When this was set up, every mutant was confirmed to apply cleanly (`--check-applies`), and the runner itself was tested end to end (it reports a harmless change as a survivor, a real break as killed, and exits 1 if anything survived). Locally, 21 of the 32 mutants have been run against their suites, and all 21 were killed with none surviving: the six `pre-commit` ones, the six `pre-push` ones (five by hand earlier, the sixth in the runner test), the four `setup-mcp` ones (by hand earlier) and the five `session-start-vault-check` ones. The rest (`post-merge`, `session-start-vault-context` and the installer, 11 mutants) are slow and have **not been run yet**: the first manual run of the workflow for those groups is their first real test, and a survivor there would mean a gap in the suite, or a mutant that needs adjusting.
+
+Which mutants are killed changes whenever a suite does, so treat the result of a run, not this paragraph, as the current answer.
+
+Stryker is not used: it supports C#, JavaScript/TypeScript and Scala, and these scripts are bash and PowerShell, which it cannot mutate.

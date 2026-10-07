@@ -1,0 +1,85 @@
+name: mutation tests (manual)
+
+# Proves the test suites can fail, by running each one against deliberately broken copies of
+# its script (tools/mutation/mutants.txt). Every mutant is a full suite run, so this takes a
+# long time and is NOT part of the normal build: it only runs when someone starts it from the
+# Actions tab ("Run workflow"), and nothing else (push, pull request, schedule) can trigger it.
+# Pick one hook, or "all". Details: docs/testing.md, "Mutation checks".
+
+on:
+  workflow_dispatch:
+    inputs:
+      hook:
+        description: Which hook or script to mutation-test ("all" runs every group, in parallel jobs)
+        type: choice
+        default: all
+        options:
+          - all
+          - pre-commit
+          - pre-push
+          - post-merge
+          - session-start-vault-check
+          - session-start-vault-context
+          - install-claude-config
+          - setup-mcp
+      jobs_per_group:
+        description: Mutants to run at the same time within a group
+        type: choice
+        default: "2"
+        options:
+          - "1"
+          - "2"
+          - "4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-tests
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: choose groups
+    runs-on: ubuntu-latest
+    outputs:
+      groups: ${{ steps.pick.outputs.groups }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        env:
+          HOOK: ${{ inputs.hook }}
+        run: |
+          # "all" becomes one job per group listed in the mutants file; anything else is that one group.
+          if [ "$HOOK" = "all" ]; then
+            groups=$(bash tools/run-mutation-tests.sh --list | awk '{print "\"" $1 "\""}' | paste -sd, -)
+          else
+            groups="\"$HOOK\""
+          fi
+          echo "groups=[$groups]" >> "$GITHUB_OUTPUT"
+          echo "Will run: [$groups]"
+      - name: every mutant still applies (fast, runs no suite)
+        run: bash tools/run-mutation-tests.sh --check-applies
+
+  mutate:
+    name: ${{ matrix.group }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.plan.outputs.groups) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tool versions
+        run: |
+          bash --version | head -n1
+          git --version
+          jq --version
+          for t in timeout perl; do printf '%s: ' "$t"; command -v "$t" || echo "not installed"; done
+      - name: mutation tests
+        env:
+          GROUP: ${{ matrix.group }}
+          JOBS: ${{ inputs.jobs_per_group }}
+        run: bash tools/run-mutation-tests.sh --hook "$GROUP" --jobs "$JOBS"
