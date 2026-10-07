@@ -14,6 +14,7 @@ set -u
 HOOK_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-start-vault-context"
 PASS=0
 FAIL=0
+EXIT_ZERO="EXIT=0"
 # literals the tests repeat many times
 DOC_MARKER="REPODOC-MARKER"
 STARTUP_EVENT='{"source":"startup"}'
@@ -383,11 +384,11 @@ test_the_hook_always_exits_zero() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
   write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
-  out=$(run_hook_status "$repo" "" "$STARTUP_EVENT");        assert_contains "exit 0 with no VAULT_ROOT" "EXIT=0" "$out"
-  out=$(run_hook_status "$repo" "$vault" '{"source":"compact"}'); assert_contains "exit 0 on compact" "EXIT=0" "$out"
-  out=$(run_hook_status "$repo" "$vault" "$STARTUP_EVENT");  assert_contains "exit 0 on a normal load" "EXIT=0" "$out"
-  out=$(run_hook_status "$repo" "$(fx_dir)" "$STARTUP_EVENT"); assert_contains "exit 0 when the repo has no doc" "EXIT=0" "$out"
-  out=$(run_hook_status "$repo" "/no/such/vault" "$STARTUP_EVENT"); assert_contains "exit 0 when the vault does not exist" "EXIT=0" "$out"
+  out=$(run_hook_status "$repo" "" "$STARTUP_EVENT");        assert_contains "exit 0 with no VAULT_ROOT" "$EXIT_ZERO" "$out"
+  out=$(run_hook_status "$repo" "$vault" '{"source":"compact"}'); assert_contains "exit 0 on compact" "$EXIT_ZERO" "$out"
+  out=$(run_hook_status "$repo" "$vault" "$STARTUP_EVENT");  assert_contains "exit 0 on a normal load" "$EXIT_ZERO" "$out"
+  out=$(run_hook_status "$repo" "$(fx_dir)" "$STARTUP_EVENT"); assert_contains "exit 0 when the repo has no doc" "$EXIT_ZERO" "$out"
+  out=$(run_hook_status "$repo" "/no/such/vault" "$STARTUP_EVENT"); assert_contains "exit 0 when the vault does not exist" "$EXIT_ZERO" "$out"
   return 0
 }
 
@@ -573,7 +574,7 @@ test_update_stops_at_the_next_heading_and_counts_earlier_updates() {
   return 0
 }
 
-test_a_reposPath_without_a_placeholder_names_one_fixed_doc() {
+test_a_repos_path_without_a_placeholder_names_one_fixed_doc() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_dir); mkdir -p "$vault/docs"
   printf -- '---\nreposPath: docs/overview.md\n---\n' > "$vault/vault-config.md"
@@ -622,7 +623,7 @@ test_a_note_with_windows_line_endings_is_still_loaded
 test_the_hook_never_writes_to_the_vault
 test_update_cap_can_be_changed_with_update_max_lines
 test_update_stops_at_the_next_heading_and_counts_earlier_updates
-test_a_reposPath_without_a_placeholder_names_one_fixed_doc
+test_a_repos_path_without_a_placeholder_names_one_fixed_doc
 test_config_values_with_trailing_comments_and_empty_values
 test_a_longer_config_key_is_not_mistaken_for_a_shorter_one
 

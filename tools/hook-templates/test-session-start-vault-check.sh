@@ -22,6 +22,7 @@ set -u
 HOOK_SCRIPT="${HOOK_UNDER_TEST:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-start-vault-check}"  # override: point at a mutated copy to prove the suite fails
 PASS=0
 FAIL=0
+UNPUSHED_TEXT="unpushed commit(s)"; ONE_PENDING="has 1 unpushed commit(s)"
 CLEANUP_DIRS=()
 LAST_CHECK_REL=".claude/hook-logs/.vault-nudge-last-check"
 SECRET_SUBJECT="SUBJECT_MARKER_DO_NOT_ECHO"
@@ -31,41 +32,48 @@ POST='{"hook_event_name":"PostToolUse"}'
 # Removes every fixture even when the script is interrupted or a check fails.
 cleanup() {
   local d
-  for d in "${CLEANUP_DIRS[@]:-}"; do [ -n "$d" ] && rm -rf "$d" 2>/dev/null; done
+  for d in "${CLEANUP_DIRS[@]:-}"; do [[ -n "$d" ]] && rm -rf "$d" 2>/dev/null; done
   return 0
 }
 trap cleanup EXIT
 
 assert_eq() {
   local desc="$1" expected="$2" actual="$3"
-  if [ "$expected" = "$actual" ]; then
+  if [[ "$expected" = "$actual" ]]; then
     echo "PASS: $desc"
     PASS=$((PASS + 1))
   else
     echo "FAIL: $desc (expected [$expected], got [$actual])"
     FAIL=$((FAIL + 1))
   fi
+  return $?
 }
 
 # assert_has <desc> <file> <literal>: the file contains the text.
 assert_has() {
-  assert_eq "$1" "yes" "$(grep -qF -- "$3" "$2" 2>/dev/null && echo yes || echo no)"
+  local desc="$1" file="$2" needle="$3"
+  assert_eq "$desc" "yes" "$(grep -qF -- "$needle" "$file" 2>/dev/null && echo yes || echo no)"
+  return $?
 }
 
 # assert_lacks <desc> <file> <literal>: the file does not contain the text.
 assert_lacks() {
-  assert_eq "$1" "no" "$(grep -qF -- "$3" "$2" 2>/dev/null && echo yes || echo no)"
+  local desc="$1" file="$2" needle="$3"
+  assert_eq "$desc" "no" "$(grep -qF -- "$needle" "$file" 2>/dev/null && echo yes || echo no)"
+  return $?
 }
 
 # assert_silent <desc> <file>: the file exists and is empty.
 assert_silent() {
-  assert_eq "$1" "empty" "$([ -f "$2" ] && [ ! -s "$2" ] && echo empty || echo "not-empty")"
+  local desc="$1" file="$2"
+  assert_eq "$desc" "empty" "$([[ -f "$file" ]] && [[ ! -s "$file" ]] && echo empty || echo "not-empty")"
+  return $?
 }
 
-now() { date +%s; }
+now() { date +%s; return $?; }
 
 # mtime_of <file>: seconds since the epoch, GNU or BSD stat.
-mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+mtime_of() { local file="$1"; stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null; return $?; }
 
 # age_file <file> <seconds>: set the file's mtime that many seconds in the past.
 # GNU `touch -d @N` does not exist on macOS, so build a touch -t stamp instead.
@@ -74,15 +82,18 @@ age_file() {
   epoch=$(( $(now) - secs ))
   stamp=$(date -d "@$epoch" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$epoch" +%Y%m%d%H%M.%S)
   touch -t "$stamp" "$f"
+  return $?
 }
 
-marker_exists() { [ -f "$FAKE_HOME/$LAST_CHECK_REL" ] && echo yes || echo no; }
+marker_exists() { [[ -f "$FAKE_HOME/$LAST_CHECK_REL" ]] && echo yes || echo no; return $?; }
 
 # make_marker <age-seconds>: a throttle marker last touched that long ago.
 make_marker() {
+  local age="$1"
   mkdir -p "$FAKE_HOME/.claude/hook-logs"
   : > "$FAKE_HOME/$LAST_CHECK_REL"
-  age_file "$FAKE_HOME/$LAST_CHECK_REL" "$1"
+  age_file "$FAKE_HOME/$LAST_CHECK_REL" "$age"
+  return $?
 }
 
 new_workdir() {
@@ -93,21 +104,23 @@ new_workdir() {
   OUT="$WORK/stdout.log"
   ERR="$WORK/stderr.log"
   mkdir -p "$FAKE_HOME"
+  return $?
 }
 
-drop_workdir() { rm -rf "$WORK"; }
+drop_workdir() { rm -rf "$WORK"; return $?; }
 
 init_repo() {
-  # $1 = dir, $2 = branch name
-  mkdir -p "$1"
-  git -C "$1" init -q
-  git -C "$1" config user.email "test@example.com"
-  git -C "$1" config user.name "Test"
-  git -C "$1" config core.autocrlf false
-  printf 'a\n' > "$1/f.md"
-  git -C "$1" add -A
-  git -C "$1" commit -q -m "init"
-  git -C "$1" branch -M "$2"
+  local dir="$1" branch="$2"
+  mkdir -p "$dir"
+  git -C "$dir" init -q
+  git -C "$dir" config user.email "test@example.com"
+  git -C "$dir" config user.name "Test"
+  git -C "$dir" config core.autocrlf false
+  printf 'a\n' > "$dir/f.md"
+  git -C "$dir" add -A
+  git -C "$dir" commit -q -m "init"
+  git -C "$dir" branch -M "$branch"
+  return $?
 }
 
 # vault_ahead <n> [subject-prefix]: vault on main, pushed once to a bare origin,
@@ -119,11 +132,12 @@ vault_ahead() {
   git -C "$VAULT" remote add origin "$WORK/origin.git"
   git -C "$VAULT" push -q origin main
   i=1
-  while [ "$i" -le "$n" ]; do
+  while [[ "$i" -le "$n" ]]; do
     printf 'line-%s\n' "$i" >> "$VAULT/f.md"
     git -C "$VAULT" commit -qam "$subject $i"
     i=$((i + 1))
   done
+  return $?
 }
 
 # PATH with every directory that holds jq removed, so the "no jq" tests behave the
@@ -159,12 +173,13 @@ run_hook() {
   local vroot="$1" input="$2" path="${3:-$PATH}"
   : > "$OUT"; : > "$ERR"
   mkdir -p "$WORK/elsewhere"
-  if [ -n "$vroot" ]; then
+  if [[ -n "$vroot" ]]; then
     ( cd "$WORK/elsewhere" && printf '%s' "$input" | env PATH="$path" HOME="$FAKE_HOME" VAULT_ROOT="$vroot" bash "$HOOK_SCRIPT" ) > "$OUT" 2> "$ERR"
   else
     ( cd "$WORK/elsewhere" && printf '%s' "$input" | env -u VAULT_ROOT PATH="$path" HOME="$FAKE_HOME" bash "$HOOK_SCRIPT" ) > "$OUT" 2> "$ERR"
   fi
   STATUS=$?
+  return $?
 }
 
 # --- nothing to report --------------------------------------------------------
@@ -176,6 +191,7 @@ test_silent_and_exit_0_when_vault_root_cannot_be_derived() {
   assert_silent "no vault root: nothing on stdout" "$OUT"
   assert_eq "no vault root: no marker (no check happened)" "no" "$(marker_exists)"
   drop_workdir
+  return $?
 }
 
 test_silent_when_vault_has_no_main_branch() {
@@ -186,6 +202,7 @@ test_silent_when_vault_has_no_main_branch() {
   assert_silent "no main branch: nothing on stdout" "$OUT"
   assert_eq "no main branch: no marker (no check happened)" "no" "$(marker_exists)"
   drop_workdir
+  return $?
 }
 
 test_silent_when_vault_has_no_origin() {
@@ -196,6 +213,7 @@ test_silent_when_vault_has_no_origin() {
   assert_silent "no origin remote: nothing on stdout" "$OUT"
   assert_eq "no origin remote: no marker (no check happened)" "no" "$(marker_exists)"
   drop_workdir
+  return $?
 }
 
 test_in_sync_is_silent_but_records_that_a_check_ran() {
@@ -206,6 +224,7 @@ test_in_sync_is_silent_but_records_that_a_check_ran() {
   assert_silent "in sync: nothing on stdout" "$OUT"
   assert_eq "in sync: marker written, the check genuinely ran" "yes" "$(marker_exists)"
   drop_workdir
+  return $?
 }
 
 test_silent_when_vault_is_only_behind_origin() {
@@ -224,6 +243,7 @@ test_silent_when_vault_is_only_behind_origin() {
   assert_eq "behind only: exit 0" "0" "$STATUS"
   assert_silent "behind only: nothing unpushed, so nothing on stdout" "$OUT"
   drop_workdir
+  return $?
 }
 
 test_compact_source_skips_even_with_pending_commits() {
@@ -234,6 +254,7 @@ test_compact_source_skips_even_with_pending_commits() {
   assert_silent "compact: no reminder when the session is only recompacting" "$OUT"
   assert_eq "compact: no marker, the check was skipped entirely" "no" "$(marker_exists)"
   drop_workdir
+  return $?
 }
 
 # --- the reminder -----------------------------------------------------------------
@@ -250,6 +271,7 @@ test_session_start_reports_count_hashes_and_commands() {
   assert_silent "session start: stderr stays empty" "$ERR"
   assert_eq "session start: marker written" "yes" "$(marker_exists)"
   drop_workdir
+  return $?
 }
 
 test_reminder_lists_exactly_the_pending_short_hashes() {
@@ -263,14 +285,16 @@ test_reminder_lists_exactly_the_pending_short_hashes() {
   assert_has "hashes: older pending commit listed" "$OUT" "$h2"
   assert_has "hashes: comma separated, newest first" "$OUT" "($h1, $h2)"
   drop_workdir
+  return $?
 }
 
 test_single_pending_commit_is_reported() {
   new_workdir
   vault_ahead 1
   run_hook "$VAULT" "$START"
-  assert_has "1 pending: count" "$OUT" "has 1 unpushed commit(s)"
+  assert_has "1 pending: count" "$OUT" "$ONE_PENDING"
   drop_workdir
+  return $?
 }
 
 test_counts_only_local_commits_when_origin_has_diverged() {
@@ -289,16 +313,18 @@ test_counts_only_local_commits_when_origin_has_diverged() {
   run_hook "$VAULT" "$START"
   assert_has "diverged: only the 2 local-only commits are counted" "$OUT" "has 2 unpushed commit(s)"
   drop_workdir
+  return $?
 }
 
 test_commit_subjects_are_never_echoed() {
   new_workdir
   vault_ahead 2 "$SECRET_SUBJECT"
   run_hook "$VAULT" "$START"
-  assert_has "subjects: the reminder is still shown" "$OUT" "unpushed commit(s)"
+  assert_has "subjects: the reminder is still shown" "$OUT" "$UNPUSHED_TEXT"
   assert_lacks "subjects: commit message text is not echoed to stdout" "$OUT" "$SECRET_SUBJECT"
   assert_lacks "subjects: commit message text is not echoed to stderr" "$ERR" "$SECRET_SUBJECT"
   drop_workdir
+  return $?
 }
 
 test_vault_path_with_a_space_is_handled() {
@@ -309,6 +335,7 @@ test_vault_path_with_a_space_is_handled() {
   assert_eq "space in vault path: exit 0" "0" "$STATUS"
   assert_has "space in vault path: push command names the full path" "$OUT" "git -C \"$VAULT\" push"
   drop_workdir
+  return $?
 }
 
 # --- throttling: PostToolUse only --------------------------------------------------
@@ -318,17 +345,19 @@ test_session_start_is_never_throttled() {
   vault_ahead 1
   make_marker 5
   run_hook "$VAULT" "$START"
-  assert_has "session start with a 5s-old marker: still reminds" "$OUT" "unpushed commit(s)"
+  assert_has "session start with a 5s-old marker: still reminds" "$OUT" "$UNPUSHED_TEXT"
   drop_workdir
+  return $?
 }
 
 test_post_tool_use_first_check_is_not_throttled() {
   new_workdir
   vault_ahead 1
   run_hook "$VAULT" "$POST"
-  assert_has "post-tool-use, no marker yet: reminds" "$OUT" "has 1 unpushed commit(s)"
+  assert_has "post-tool-use, no marker yet: reminds" "$OUT" "$ONE_PENDING"
   assert_eq "post-tool-use, no marker yet: marker written" "yes" "$(marker_exists)"
   drop_workdir
+  return $?
 }
 
 test_post_tool_use_within_cooldown_is_silent_and_leaves_marker() {
@@ -343,6 +372,7 @@ test_post_tool_use_within_cooldown_is_silent_and_leaves_marker() {
   assert_silent "post-tool-use within cooldown: throttled, silent" "$OUT"
   assert_eq "post-tool-use within cooldown: marker mtime unchanged" "$before" "$after"
   drop_workdir
+  return $?
 }
 
 test_post_tool_use_after_cooldown_reminds_and_refreshes_marker() {
@@ -350,9 +380,10 @@ test_post_tool_use_after_cooldown_reminds_and_refreshes_marker() {
   vault_ahead 2
   make_marker 3700
   run_hook "$VAULT" "$POST"
-  assert_has "post-tool-use at 3700s of 3600s: reminds" "$OUT" "unpushed commit(s)"
-  assert_eq "post-tool-use at 3700s: marker refreshed to now" "yes" "$([ $(( $(now) - $(mtime_of "$FAKE_HOME/$LAST_CHECK_REL") )) -lt 60 ] && echo yes || echo no)"
+  assert_has "post-tool-use at 3700s of 3600s: reminds" "$OUT" "$UNPUSHED_TEXT"
+  assert_eq "post-tool-use at 3700s: marker refreshed to now" "yes" "$([[ $(( $(now) - $(mtime_of "$FAKE_HOME/$LAST_CHECK_REL") )) -lt 60 ]] && echo yes || echo no)"
   drop_workdir
+  return $?
 }
 
 test_cooldown_boundary_just_inside_is_throttled() {
@@ -362,6 +393,7 @@ test_cooldown_boundary_just_inside_is_throttled() {
   run_hook "$VAULT" "$POST"
   assert_silent "3570s old (cooldown 3600s): still throttled" "$OUT"
   drop_workdir
+  return $?
 }
 
 test_cooldown_boundary_just_outside_reminds() {
@@ -369,20 +401,22 @@ test_cooldown_boundary_just_outside_reminds() {
   vault_ahead 1
   make_marker 3630
   run_hook "$VAULT" "$POST"
-  assert_has "3630s old (cooldown 3600s): reminds" "$OUT" "unpushed commit(s)"
+  assert_has "3630s old (cooldown 3600s): reminds" "$OUT" "$UNPUSHED_TEXT"
   drop_workdir
+  return $?
 }
 
 test_throttled_post_tool_use_still_reminds_at_next_session_start() {
   new_workdir
   vault_ahead 1
   run_hook "$VAULT" "$POST"
-  assert_has "first post-tool-use: reminds" "$OUT" "unpushed commit(s)"
+  assert_has "first post-tool-use: reminds" "$OUT" "$UNPUSHED_TEXT"
   run_hook "$VAULT" "$POST"
   assert_silent "second post-tool-use straight after: throttled" "$OUT"
   run_hook "$VAULT" "$START"
-  assert_has "session start straight after: not throttled" "$OUT" "unpushed commit(s)"
+  assert_has "session start straight after: not throttled" "$OUT" "$UNPUSHED_TEXT"
   drop_workdir
+  return $?
 }
 
 # --- fail open ------------------------------------------------------------------
@@ -393,16 +427,18 @@ test_without_jq_it_still_checks_and_never_throttles() {
   make_marker 5
   run_hook "$VAULT" "$POST" "$(path_without_jq)"
   assert_eq "no jq: exit 0" "0" "$STATUS"
-  assert_has "no jq: event unknown, treated as session start, so it reminds even inside the cooldown" "$OUT" "has 1 unpushed commit(s)"
+  assert_has "no jq: event unknown, treated as session start, so it reminds even inside the cooldown" "$OUT" "$ONE_PENDING"
   drop_workdir
+  return $?
 }
 
 test_without_jq_compact_cannot_be_detected_so_it_still_checks() {
   new_workdir
   vault_ahead 1
   run_hook "$VAULT" '{"source":"compact"}' "$(path_without_jq)"
-  assert_has "no jq + compact: the skip needs jq, so the safe direction is to check" "$OUT" "unpushed commit(s)"
+  assert_has "no jq + compact: the skip needs jq, so the safe direction is to check" "$OUT" "$UNPUSHED_TEXT"
   drop_workdir
+  return $?
 }
 
 test_malformed_stdin_still_checks() {
@@ -410,8 +446,9 @@ test_malformed_stdin_still_checks() {
   vault_ahead 1
   run_hook "$VAULT" "this is not json"
   assert_eq "malformed stdin: exit 0" "0" "$STATUS"
-  assert_has "malformed stdin: still reminds" "$OUT" "has 1 unpushed commit(s)"
+  assert_has "malformed stdin: still reminds" "$OUT" "$ONE_PENDING"
   drop_workdir
+  return $?
 }
 
 test_empty_stdin_still_checks() {
@@ -419,8 +456,9 @@ test_empty_stdin_still_checks() {
   vault_ahead 1
   run_hook "$VAULT" ""
   assert_eq "empty stdin: exit 0" "0" "$STATUS"
-  assert_has "empty stdin: still reminds" "$OUT" "has 1 unpushed commit(s)"
+  assert_has "empty stdin: still reminds" "$OUT" "$ONE_PENDING"
   drop_workdir
+  return $?
 }
 
 test_json_without_an_event_name_is_treated_as_unthrottled() {
@@ -428,8 +466,9 @@ test_json_without_an_event_name_is_treated_as_unthrottled() {
   vault_ahead 1
   make_marker 5
   run_hook "$VAULT" '{"session_id":"abc"}'
-  assert_has "json with no hook_event_name: not throttled" "$OUT" "unpushed commit(s)"
+  assert_has "json with no hook_event_name: not throttled" "$OUT" "$UNPUSHED_TEXT"
   drop_workdir
+  return $?
 }
 
 test_silent_and_exit_0_when_vault_root_cannot_be_derived
@@ -458,4 +497,4 @@ test_empty_stdin_still_checks
 test_json_without_an_event_name_is_treated_as_unthrottled
 
 echo "--- $PASS passed, $FAIL failed ---"
-[ "$FAIL" -eq 0 ]
+[[ "$FAIL" -eq 0 ]]

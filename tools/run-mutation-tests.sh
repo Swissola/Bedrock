@@ -41,16 +41,17 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
-case "$JOBS" in ''|*[!0-9]*) echo "--jobs needs a number" >&2; exit 2 ;; esac
+case "$JOBS" in ''|*[!0-9]*) echo "--jobs needs a number" >&2; exit 2 ;; *) ;; esac
 [[ "$JOBS" -ge 1 ]] || JOBS=1
 
 # Mutant lines as "hook@@name@@target@@expr@@why", comments and blanks dropped.
 mutant_lines() { grep -v '^[[:space:]]*\(#.*\)\?$' "$MUTANTS"; return 0; }
-field() { printf '%s' "$1" | awk -F'@@' -v n="$2" '{ print $n }'; return 0; }
+field() { local line="$1" n="$2"; printf '%s' "$line" | awk -F'@@' -v n="$n" '{ print $n }'; return 0; }
 
 suite_for() {
-  if [[ -f "$ROOT/tools/hook-templates/test-$1.sh" ]]; then echo "tools/hook-templates/test-$1.sh"
-  else echo "tools/test-$1.sh"; fi
+  local group="$1"
+  if [[ -f "$ROOT/tools/hook-templates/test-$group.sh" ]]; then echo "tools/hook-templates/test-$group.sh"
+  else echo "tools/test-$group.sh"; fi
   return 0
 }
 
@@ -116,7 +117,8 @@ fresh_copy() {
 
 # run_suite <copy> <suite>: 0 if the suite passed.
 run_suite() {
-  ( cd "$1" && env HOME="$1/home" bash "$1/$2" ) > "$1/suite.out" 2>&1
+  local copy="$1" suite="$2"
+  ( cd "$copy" && env HOME="$copy/home" bash "$copy/$suite" ) > "$copy/suite.out" 2>&1
   return $?
 }
 
