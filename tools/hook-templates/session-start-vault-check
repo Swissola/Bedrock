@@ -99,8 +99,13 @@ touch "$LAST_CHECK_FILE" 2>/dev/null
 
 count=$(printf '%s\n' "$pending_hashes" | grep -c .)
 
+# Joined here, not inside the here-document below: bash 3.2 (macOS's system bash) does not
+# expand $'\n' in a ${var//pattern/replacement} that sits inside one, so the hashes came out
+# one per line there instead of comma separated.
+hashes_joined=$(printf '%s\n' "$pending_hashes" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+
 cat <<EOF
-Note: the vault at $VAULT_ROOT has $count unpushed commit(s) on $VAULT_BRANCH not yet on origin (${pending_hashes//$'\n'/, }) - this can include doc updates a post-merge hook auto-committed in the background while you were working elsewhere.
+Note: the vault at $VAULT_ROOT has $count unpushed commit(s) on $VAULT_BRANCH not yet on origin ($hashes_joined) - this can include doc updates a post-merge hook auto-committed in the background while you were working elsewhere.
 
 Review with: git -C "$VAULT_ROOT" log origin/$VAULT_BRANCH..$VAULT_BRANCH
 Push when ready: git -C "$VAULT_ROOT" push
