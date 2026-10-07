@@ -47,7 +47,7 @@ A skip is printed as `SKIP:` and is never counted as a pass.
 |---|---|---|
 | `post-merge`, perl timeout, hung-run | Running under Git Bash on Windows | MSYS perl loses the alarm across `exec`; Windows always has a real `timeout` so the branch is not used there. No ticket: it cannot be tested on that platform. |
 | `post-merge`, `gtimeout` | `gtimeout` not installed | The macOS CI job installs it. |
-| `pre-commit`, real `betterleaks` | `betterleaks` not installed | Needs the real binary. CI installs a pinned, checksum-verified copy (v1.8.1) on the Ubuntu job only, so they run there and skip on macOS and Windows. |
+| `pre-commit`, real `betterleaks` | `betterleaks` not installed | Needs the real binary. CI installs a pinned, checksum-verified copy (v1.9.0) on the Ubuntu job only, so they run there and skip on macOS and Windows. |
 | Installer, backslash vault path | No `cygpath` (not Windows) | Only meaningful with a Windows path. |
 | Installer, double quote in vault path | The filesystem cannot create such a folder | Windows. |
 | Structure, `shellcheck` | Not installed | Advisory locally. CI turns it into a gate on the Ubuntu job (see below). |
@@ -118,7 +118,10 @@ The secret scan on staged changes. Warns by default, blocks with `PRECOMMIT_SECR
 | `betterleaks_clean_exits_zero_no_banner` | A clean scan shows nothing. |
 | `betterleaks_dirty_warns_but_does_not_block_by_default` | A finding shows the banner and the scanner's own text but exits 0. |
 | `betterleaks_dirty_strict_mode_blocks` | The same finding with strict mode on exits 1. |
-| `scanner_is_called_to_scan_the_staged_changes_with_redaction` | The exact arguments passed to the scanner. |
+| `scanner_is_called_to_scan_the_staged_changes_with_redaction` | On betterleaks 1.x the scanner is called as `git --staged --redact -v`: staged changes only, secrets redacted, `-v` for per-finding detail. |
+| `betterleaks_2x_is_never_given_the_verbose_flag` | On 2.x (including release candidates) the call is `git --staged --redact` with no `-v`, because in 2.x `-v` switches on live validation of any credential found, not verbose output. |
+| `an_unreadable_betterleaks_version_gets_no_verbose_flag` | If the version cannot be read, or has no number in it, the safe form without `-v` is used. |
+| `a_2x_finding_still_blocks_in_strict_mode` | A finding reported by a 2.x scanner blocks the commit in strict mode and its text is shown. |
 | `deleted_files_alone_are_not_scanned` | A commit that only deletes files never invokes the scanner, even in strict mode. |
 | `modified_files_are_scanned` | A modified file is scanned. |
 | `renamed_and_edited_file_is_scanned` | Regression test for the rename bug above: a renamed-and-edited file is scanned and, in strict mode, blocked. |

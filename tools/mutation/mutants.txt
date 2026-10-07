@@ -25,8 +25,9 @@ pre-commit@@pc1@@tools/hook-templates/pre-commit@@s/ || \[ "\$STRICT" = "true" \
 pre-commit@@pc2@@tools/hook-templates/pre-commit@@s/--diff-filter=ACMR/--diff-filter=A/@@only newly added files are scanned (modified and renamed are skipped)
 pre-commit@@pc3@@tools/hook-templates/pre-commit@@s/^    echo "\$findings"$/    :/@@the scanner's findings are no longer shown in the banner
 pre-commit@@pc4@@tools/hook-templates/pre-commit@@s/\[ "\$scan_status" -eq 0 \] \&\& exit 0/[ "$scan_status" -ne 1 ] \&\& exit 0/@@a scanner crash (exit other than 1) is treated as a clean scan
-pre-commit@@pc5@@tools/hook-templates/pre-commit@@s/protect --staged --redact -v/protect --staged/@@the scanner is no longer asked to redact secrets in its output
+pre-commit@@pc5@@tools/hook-templates/pre-commit@@s/git --staged --redact $verbose_flag/git --staged $verbose_flag/@@the scanner is no longer asked to redact secrets in its output
 pre-commit@@pc6@@tools/hook-templates/pre-commit@@s/^    exit 0$/    exit 1/@@with no scanner installed the hook blocks every commit
+pre-commit@@pc7@@tools/hook-templates/pre-commit@@s/^\[ "\$bl_major" = "1" \] \&\& verbose_flag="-v"$/verbose_flag="-v"/@@-v is passed on every betterleaks version, which on 2.x validates found credentials over the network
 
 # ---- pre-push -----------------------------------------------------------------------------
 pre-push@@pp1@@tools/hook-templates/pre-push@@s/WARN_COOLDOWN_SECONDS=600/WARN_COOLDOWN_SECONDS=6000/@@the warning cooldown is ten times too long
