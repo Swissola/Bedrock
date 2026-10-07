@@ -45,14 +45,61 @@ jobs:
           git --version
           jq --version
           node --version
-          for t in timeout gtimeout perl; do printf '%s: ' "$t"; command -v "$t" || echo "not installed"; done
+          for t in timeout gtimeout perl shellcheck; do printf '%s: ' "$t"; command -v "$t" || echo "not installed"; done
       - name: pre-commit hook
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-pre-commit.sh
+      - name: pre-push hook
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-pre-push.sh
+      - name: session-start-vault-check hook
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-session-start-vault-check.sh
       - name: session-start-vault-context hook
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-session-start-vault-context.sh
       - name: post-merge hook
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-post-merge.sh
       - name: installer
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/test-install-claude-config.sh
-      - name: stub REST API MCP server (path guard)
+      - name: setup-mcp.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/test-setup-mcp.sh
+      # shellcheck is preinstalled on the Ubuntu runner only; elsewhere that one check skips.
+      # Error level is clean across every script, so any finding fails the build.
+      - name: repo structure and portability
+        env:
+          STRUCTURE_SHELLCHECK_STRICT: "1"
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/test-structure.sh
+      - name: stub REST API MCP server
         run: node tools/command-templates/test/test-stub-rest-api-mcp.mjs
+
+  # The PowerShell scripts run on Windows users' machines, usually under Windows PowerShell
+  # 5.1 (powershell.exe), so the suite runs under both that and PowerShell 7 (pwsh). The
+  # fast bash suites also run here, under Git for Windows' bash, which is what the
+  # installer wrapper and the hooks use on Windows. (post-merge is left to the Linux and
+  # macOS jobs: it takes several minutes on Windows.)
+  windows-tests:
+    name: windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell scripts, PowerShell 7
+        shell: pwsh
+        run: ./tools/test-powershell-scripts.ps1
+      - name: PowerShell scripts, Windows PowerShell 5.1
+        shell: powershell
+        run: ./tools/test-powershell-scripts.ps1
+      - name: pre-commit hook
+        shell: bash
+        run: bash tools/hook-templates/test-pre-commit.sh
+      - name: pre-push hook
+        shell: bash
+        run: bash tools/hook-templates/test-pre-push.sh
+      - name: session-start-vault-check hook
+        shell: bash
+        run: bash tools/hook-templates/test-session-start-vault-check.sh
+      - name: installer
+        shell: bash
+        run: bash tools/test-install-claude-config.sh
+      - name: setup-mcp.sh
+        shell: bash
+        run: bash tools/test-setup-mcp.sh
+      - name: repo structure and portability
+        shell: bash
+        run: bash tools/test-structure.sh

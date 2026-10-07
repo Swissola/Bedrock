@@ -776,6 +776,265 @@ test_with_timeout_every_branch() {
 }
 test_with_timeout_every_branch
 
+# ---------------------------------------------------------------------------
+# Extended coverage: the file filter, the prompt and arguments, the failures log,
+# repo-name derivation, branch guards, the commit, the log, and "never blocks a pull".
+# Everything above must keep passing unchanged. Fixtures here are registered for
+# cleanup by a trap, so a failed check cannot leak them.
+
+CLEANUP_DIRS=()
+cleanup() {
+  local d
+  for d in "${CLEANUP_DIRS[@]:-}"; do [[ -n "$d" ]] && rm -rf "$d" 2>/dev/null; done
+  return 0
+}
+trap cleanup EXIT
+
+# fx_dir: a fresh temp dir that is removed on exit. Prints its path.
+fx_dir() {
+  local d; d=$(mktemp -d); CLEANUP_DIRS+=("$d"); echo "$d"
+  return 0
+}
+
+# Registers a fixture repo, vault, log dir and stub dir. Sets FX_REPO FX_VAULT FX_LOG FX_BIN.
+fx_new() {
+  FX_REPO=$(make_other_repo "$REPO_NAME"); CLEANUP_DIRS+=("$FX_REPO")
+  FX_VAULT=$(make_test_vault "$REPO_NAME"); CLEANUP_DIRS+=("$FX_VAULT")
+  FX_LOG=$(fx_dir); FX_BIN=$(fx_dir)
+  return 0
+}
+
+has_text() { [[ -f "$2" ]] && grep -qF -- "$1" "$2" && echo yes || echo no; return 0; }
+
+# Stub claude: records its arguments on one line to $1/argv.txt, optionally writes the
+# index (3rd arg = content) and prints $2, then exits $4 (default 0).
+make_capturing_claude() {
+  local bindir="$1" say="${2:-stub done}" content="${3:-}" code="${4:-0}"
+  cat > "$bindir/claude" <<EOF
+#!/bin/bash
+echo "\$@" > "$bindir/argv.txt"
+[ -n "$content" ] && echo "$content" > "$FX_VAULT/repos/$REPO_NAME/index.md"
+echo "$say"
+exit $code
+EOF
+  chmod +x "$bindir/claude"
+}
+
+# Waits up to $2 tenths of a second for a non-empty file.
+wait_for_file() {
+  local f="$1" tenths="${2:-80}" n=0
+  while [[ ! -s "$f" ]] && [[ "$n" -lt "$tenths" ]]; do sleep 0.1; n=$((n + 1)); done
+  return 0
+}
+
+# Commits a batch of files (all with throwaway content) in one commit.
+commit_files() {
+  local repo="$1" f; shift
+  for f in "$@"; do
+    mkdir -p "$repo/$(dirname "$f")"
+    echo "content of $f" > "$repo/$f"
+    git -C "$repo" add -f -- "$f"
+  done
+  git -C "$repo" commit -q -m "batch"
+  return 0
+}
+
+test_noise_and_secret_shaped_files_never_reach_the_prompt() {
+  # One run: a commit holding every filtered kind of file plus ordinary ones. The captured
+  # prompt must list the ordinary files and none of the filtered ones, name by name.
+  local ignored kept f
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  ignored=(yarn.lock build.log scratch.tmp infra/terraform.tfstate infra/terraform.tfstate.backup
+    .cache/x.json app/.cache/y.json .terraform/providers.json .ansible/tmp.yml .env svc/.env.production
+    certs/server.pem certs/server.key certs/client.pfx certs/client.p12 .claude/settings.local.json
+    config/credentials.json keys/id_rsa keys/id_ed25519 keys/id_ecdsa keys/id_dsa .gitignore sub/.gitignore)
+  kept=(src/app.cs docs/environment.md src/cache/data.json package-lock.json notes/credentials-howto.md)
+  commit_files "$FX_REPO" "${ignored[@]}" "${kept[@]}"
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_BIN/argv.txt"
+  for f in "${ignored[@]}"; do
+    assert_eq "filtered out of the prompt: $f" "no" "$(has_text "\"$f\"" "$FX_BIN/argv.txt")"
+  done
+  for f in "${kept[@]}"; do
+    assert_eq "kept in the prompt: $f" "yes" "$(has_text "\"$f\"" "$FX_BIN/argv.txt")"
+  done
+}
+
+test_prompt_and_arguments_carry_the_right_context() {
+  local old new
+  fx_new
+  make_capturing_claude "$FX_BIN" "stub done" "$INDEX_CONTENT"
+  echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
+  git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
+  old=$(git -C "$FX_REPO" rev-parse --short HEAD~1); new=$(git -C "$FX_REPO" rev-parse --short HEAD)
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_LOG/widget-service-post-merge.log"
+  local argv="$FX_BIN/argv.txt"
+  assert_eq "prompt names the repo" "yes" "$(has_text "for the repo \"$REPO_NAME\"" "$argv")"
+  assert_eq "prompt carries the commit range" "yes" "$(has_text "Commit range: ${old}..${new}" "$argv")"
+  assert_eq "prompt names the doc to update" "yes" "$(has_text "existing doc at repos/$REPO_NAME/index.md" "$argv")"
+  assert_eq "prompt stamps today's date and the new sha" "yes" "$(has_text "Last updated: $(date +%Y-%m-%d) (${new})" "$argv")"
+  assert_eq "prompt forbids patch edits" "yes" "$(has_text "Never use vault_patch" "$argv")"
+  assert_eq "prompt tells the model what to print when the vault is unreachable" "yes" "$(has_text "MCP_OBSIDIAN_UNAVAILABLE" "$argv")"
+  assert_eq "only the changed file is listed" "yes" "$(has_text '["README.md"]' "$argv")"
+  assert_eq "allowed tools: read" "yes" "$(has_text "mcp__obsidian__vault_read" "$argv")"
+  assert_eq "allowed tools: write" "yes" "$(has_text "mcp__obsidian__vault_write" "$argv")"
+  assert_eq "allowed tools: no patch tool granted" "no" "$(has_text "mcp__obsidian__vault_patch" "$argv")"
+  assert_eq "allowed tools: no Bash granted" "no" "$(has_text "Bash" "$argv")"
+}
+
+test_log_records_range_files_commit_and_output() {
+  local old new
+  fx_new
+  make_capturing_claude "$FX_BIN" "claude said hello" "$INDEX_CONTENT"
+  echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
+  git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
+  old=$(git -C "$FX_REPO" rev-parse --short HEAD~1); new=$(git -C "$FX_REPO" rev-parse --short HEAD)
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  LOG_FILE="$FX_LOG/widget-service-post-merge.log"; wait_for_file "$LOG_FILE"
+  assert_eq "log header has the commit range and exit code" "yes" "$(grep -qE "^=== .* \| commit ${old}\.\.${new} \| exit=0 ===$" "$LOG_FILE" 2>/dev/null && echo yes || echo no)"
+  assert_eq "log lists the changed files" "yes" "$(has_text "Changed files:" "$LOG_FILE")"
+  assert_eq "log shows the changed file name" "yes" "$(has_text "README.md" "$LOG_FILE")"
+  assert_eq "log says the doc was auto-committed locally, not pushed" "yes" "$(has_text "repos/$REPO_NAME/index.md auto-committed locally (not pushed)" "$LOG_FILE")"
+  assert_eq "log keeps claude's own output" "yes" "$(has_text "claude said hello" "$LOG_FILE")"
+  assert_eq "log is closed with an end marker" "yes" "$(has_text "=== end run ===" "$LOG_FILE")"
+  assert_eq "a successful run adds nothing to FAILURES.log" "no" "$([[ -s "$FX_LOG/FAILURES.log" ]] && echo yes || echo no)"
+}
+
+test_auto_commit_touches_only_the_doc_and_is_never_pushed() {
+  local bare origin_before
+  fx_new
+  bare=$(fx_dir)
+  git init -q --bare "$bare"
+  git -C "$FX_VAULT" remote add origin "$bare"
+  git -C "$FX_VAULT" push -q origin HEAD:main
+  origin_before=$(git -C "$bare" rev-parse main)
+  make_capturing_claude "$FX_BIN" "stub done" "$INDEX_CONTENT"
+  echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
+  git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_LOG/widget-service-post-merge.log"
+  assert_eq "commit touches exactly the doc target" "repos/$REPO_NAME/index.md" "$(git -C "$FX_VAULT" show --name-only --format= HEAD)"
+  assert_eq "commit message names the doc and the pulled sha" "Auto-update repos/$REPO_NAME/index.md via post-merge hook ($(git -C "$FX_REPO" rev-parse --short HEAD))" "$(git -C "$FX_VAULT" log -1 --format=%s)"
+  assert_eq "the vault is one commit ahead of its origin" "1" "$(git -C "$FX_VAULT" rev-list --count origin/main..main 2>/dev/null || git -C "$FX_VAULT" rev-list --count "$origin_before"..HEAD)"
+  assert_eq "origin itself did not move: the hook never pushes" "$origin_before" "$(git -C "$bare" rev-parse main)"
+}
+
+test_a_failed_run_is_logged_and_never_committed_and_never_blocks_the_pull() {
+  local st
+  fx_new
+  make_capturing_claude "$FX_BIN" "claude blew up" "$INDEX_CONTENT" 1
+  echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
+  git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" ); st=$?
+  LOG_FILE="$FX_LOG/widget-service-post-merge.log"; wait_for_file "$LOG_FILE"
+  assert_eq "claude exits 1: the hook itself still exits 0 (git pull is never blocked)" "0" "$st"
+  assert_eq "claude exits 1: log records exit=1" "1" "$(gcount "exit=1" "$LOG_FILE")"
+  assert_eq "claude exits 1: nothing is auto-committed" "0" "$(git -C "$FX_VAULT" log --oneline | grep -c 'Auto-update' || true)"
+  assert_eq "claude exits 1: the failure is recorded for the next session to see" "1" "$(gcount "$REPO_NAME exit=1" "$FX_LOG/FAILURES.log")"
+}
+
+test_each_vault_unreachable_message_downgrades_to_exit_2_and_skips_the_commit() {
+  # MCP_OBSIDIAN_UNAVAILABLE is covered by the original suite; these are the other three.
+  local msg
+  for msg in "--restricted confines the file tools to the workspace" "I don't have permission to read that file" "this workspace has not been trusted yet"; do
+    fx_new
+    make_capturing_claude "$FX_BIN" "$msg" "$INDEX_CONTENT"
+    echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
+    git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
+    ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+    LOG_FILE="$FX_LOG/widget-service-post-merge.log"; wait_for_file "$LOG_FILE"
+    assert_eq "message '$msg': exit downgraded to 2" "1" "$(gcount "exit=2" "$LOG_FILE")"
+    assert_eq "message '$msg': not auto-committed" "0" "$(git -C "$FX_VAULT" log --oneline | grep -c 'Auto-update' || true)"
+  done
+}
+
+test_the_hook_returns_before_a_slow_claude_finishes() {
+  local began st took
+  fx_new
+  printf '#!/bin/bash\nsleep 12\necho "slow stub done"\nexit 0\n' > "$FX_BIN/claude"; chmod +x "$FX_BIN/claude"
+  echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
+  git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
+  began=$SECONDS
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" ); st=$?
+  took=$((SECONDS - began))
+  assert_eq "slow claude: hook exits 0 straight away" "0" "$st"
+  assert_eq "slow claude: hook returned in under 10s while claude needs 12s (it backgrounds the work)" "yes" "$([[ "$took" -lt 10 ]] && echo yes || echo no)"
+  wait_for_file "$FX_LOG/widget-service-post-merge.log" 250   # let the background run finish before cleanup
+}
+
+test_unacknowledged_failures_are_surfaced_once_then_only_new_ones() {
+  local out
+  fx_new
+  printf 'first failure line\nsecond failure line\n' > "$FX_LOG/FAILURES.log"
+  out=$( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" 2>&1 )
+  assert_eq "first run: heading shown" "yes" "$(printf '%s' "$out" | grep -qF -- '--- Unacknowledged hook failures' && echo yes || echo no)"
+  assert_eq "first run: first failure shown" "yes" "$(printf '%s' "$out" | grep -qF 'first failure line' && echo yes || echo no)"
+  assert_eq "first run: second failure shown" "yes" "$(printf '%s' "$out" | grep -qF 'second failure line' && echo yes || echo no)"
+  assert_eq "first run: seen-marker records 2 lines" "2" "$(cat "$FX_LOG/.failures-seen")"
+  out=$( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" 2>&1 )
+  assert_eq "second run: nothing repeated" "" "$out"
+  echo "third failure line" >> "$FX_LOG/FAILURES.log"
+  out=$( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" 2>&1 )
+  assert_eq "third run: only the new failure shown" "yes" "$(printf '%s' "$out" | grep -qF 'third failure line' && echo yes || echo no)"
+  assert_eq "third run: the already-seen ones are not repeated" "no" "$(printf '%s' "$out" | grep -qF 'first failure line' && echo yes || echo no)"
+  assert_eq "third run: seen-marker advanced to 3" "3" "$(cat "$FX_LOG/.failures-seen")"
+}
+
+test_no_default_branch_or_a_detached_head_does_nothing() {
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
+  git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
+  git -C "$FX_REPO" symbolic-ref --delete refs/remotes/origin/HEAD
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  sleep 1
+  assert_eq "origin/HEAD unknown: claude never invoked" "no" "$([[ -f "$FX_BIN/argv.txt" ]] && echo yes || echo no)"
+  git -C "$FX_REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  git -C "$FX_REPO" checkout -q --detach
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  sleep 1
+  assert_eq "detached HEAD: claude never invoked" "no" "$([[ -f "$FX_BIN/argv.txt" ]] && echo yes || echo no)"
+}
+
+test_repo_name_comes_from_the_origin_url_in_every_common_form() {
+  # The doc is missing on purpose: the hook then aborts in the foreground and logs the
+  # name it derived, which is a fast way to read REPO_NAME without a claude run.
+  local url name repo logdir vault
+  vault=$(fx_dir); git -C "$vault" init -q -b main
+  for url in "git@bitbucket.org:sharpgaming/sgp-bet-activity.git:sgp-bet-activity" \
+             "https://github.com/org/plain-name:plain-name" \
+             "https://github.com/org/with-suffix.git:with-suffix" \
+             "ssh://git@host.example/team/trailing-slash.git/:trailing-slash"; do
+    name="${url##*:}"; url="${url%:*}"
+    repo=$(fx_dir); logdir=$(fx_dir)
+    git -C "$repo" init -q -b main; git -C "$repo" remote add origin "$url"
+    ( cd "$repo" && env VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
+    assert_eq "origin $url: repo name derived as $name" "yes" "$([[ -f "$logdir/${name}-post-merge.log" ]] && echo yes || echo no)"
+  done
+}
+
+test_a_repo_with_no_origin_is_called_unknown_repo() {
+  local repo logdir vault
+  repo=$(fx_dir); logdir=$(fx_dir); vault=$(fx_dir)
+  git -C "$repo" init -q -b main
+  ( cd "$repo" && env VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
+  assert_eq "no origin remote: the log is named unknown-repo" "yes" "$([[ -f "$logdir/unknown-repo-post-merge.log" ]] && echo yes || echo no)"
+  assert_eq "no origin remote: the log asks for repos/unknown-repo/index.md" "yes" "$(has_text "repos/unknown-repo/index.md not found" "$logdir/unknown-repo-post-merge.log")"
+}
+
+test_noise_and_secret_shaped_files_never_reach_the_prompt
+test_prompt_and_arguments_carry_the_right_context
+test_log_records_range_files_commit_and_output
+test_auto_commit_touches_only_the_doc_and_is_never_pushed
+test_a_failed_run_is_logged_and_never_committed_and_never_blocks_the_pull
+test_each_vault_unreachable_message_downgrades_to_exit_2_and_skips_the_commit
+test_the_hook_returns_before_a_slow_claude_finishes
+test_unacknowledged_failures_are_surfaced_once_then_only_new_ones
+test_no_default_branch_or_a_detached_head_does_nothing
+test_repo_name_comes_from_the_origin_url_in_every_common_form
+test_a_repo_with_no_origin_is_called_unknown_repo
 
 echo "--- $PASS passed, $FAIL failed ---"
 [ "$FAIL" -eq 0 ]

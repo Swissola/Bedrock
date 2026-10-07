@@ -343,5 +343,288 @@ test_update_section_before_the_forward_sections
 test_note_without_updates_is_unchanged
 test_update_only_note_still_loads_in_full
 
+# ------------------------------------------------------------ extended coverage
+# Added on top of the scenarios above, which must keep passing unchanged. Fixtures
+# here are registered for cleanup by a trap, so a failed check cannot leak them.
+
+CLEANUP_DIRS=()
+cleanup() {
+  local d
+  for d in "${CLEANUP_DIRS[@]:-}"; do [[ -n "$d" ]] && rm -rf "$d" 2>/dev/null; done
+  return 0
+}
+trap cleanup EXIT
+
+fx_dir() { local d; d=$(mktemp -d); CLEANUP_DIRS+=("$d"); echo "$d"; return 0; }
+
+# A vault holding repos/widget/index.md, registered for cleanup.
+fx_vault() {
+  local v; v=$(fx_dir)
+  mkdir -p "$v/repos/widget"; echo "$DOC_MARKER" > "$v/repos/widget/index.md"
+  echo "$v"
+  return 0
+}
+
+# A code repo named $1 (via its origin), registered for cleanup.
+fx_repo() {
+  local r; r=$(make_code_repo "$1"); CLEANUP_DIRS+=("$r"); echo "$r"
+  return 0
+}
+
+# Like run_hook but also reports the exit status as the last line "EXIT=<n>".
+run_hook_status() {
+  local repo="$1" vault="${2:-}" stdin="${3:-}" out
+  out=$( cd "$repo" && printf '%s' "$stdin" | VAULT_ROOT="$vault" bash "$HOOK_SCRIPT" 2>&1; echo "EXIT=$?" )
+  printf '%s' "$out"
+  return 0
+}
+
+test_the_hook_always_exits_zero() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  out=$(run_hook_status "$repo" "" "$STARTUP_EVENT");        assert_contains "exit 0 with no VAULT_ROOT" "EXIT=0" "$out"
+  out=$(run_hook_status "$repo" "$vault" '{"source":"compact"}'); assert_contains "exit 0 on compact" "EXIT=0" "$out"
+  out=$(run_hook_status "$repo" "$vault" "$STARTUP_EVENT");  assert_contains "exit 0 on a normal load" "EXIT=0" "$out"
+  out=$(run_hook_status "$repo" "$(fx_dir)" "$STARTUP_EVENT"); assert_contains "exit 0 when the repo has no doc" "EXIT=0" "$out"
+  out=$(run_hook_status "$repo" "/no/such/vault" "$STARTUP_EVENT"); assert_contains "exit 0 when the vault does not exist" "EXIT=0" "$out"
+  return 0
+}
+
+test_every_source_except_compact_injects_context() {
+  local repo vault s out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  for s in startup resume clear fork somethingnew; do
+    out=$(run_hook "$repo" "$vault" "{\"source\":\"$s\"}")
+    assert_contains "source=$s: injects the repo doc" "$DOC_MARKER" "$out"
+  done
+  return 0
+}
+
+test_compact_is_recognised_whatever_the_json_layout() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  out=$(run_hook "$repo" "$vault" '{"source" : "compact"}');                          assert_eq "spaces around the colon" "" "$out"
+  out=$(run_hook "$repo" "$vault" '{"session_id":"x","source":"compact","cwd":"/a"}'); assert_eq "other fields around it" "" "$out"
+  out=$(run_hook "$repo" "$vault" "{
+  \"source\": \"compact\"
+}");                                                                                    assert_eq "pretty-printed over several lines" "" "$out"
+  out=$(run_hook "$repo" "$vault" '{"source":"startup","note":"compact"}');           assert_contains "the word compact in another field does not skip" "$DOC_MARKER" "$out"
+  return 0
+}
+
+test_repo_name_falls_back_to_the_folder_name_without_an_origin() {
+  local repo vault out
+  repo=$(fx_dir); mkdir -p "$repo/gadget-svc"; git -C "$repo/gadget-svc" init -q -b main
+  vault=$(fx_dir); mkdir -p "$vault/repos/gadget-svc"; echo "GADGET-DOC" > "$vault/repos/gadget-svc/index.md"
+  out=$(run_hook "$repo/gadget-svc" "$vault" "$STARTUP_EVENT")
+  assert_contains "no origin: the folder name is the repo name" "GADGET-DOC" "$out"
+  assert_contains "no origin: header names it" "Vault context for gadget-svc" "$out"
+  return 0
+}
+
+test_repo_name_comes_from_the_origin_in_every_common_form() {
+  local url name repo vault out
+  vault=$(fx_dir)
+  for url in "git@bitbucket.org:sharpgaming/ssh-style.git:ssh-style" "https://github.com/org/no-suffix:no-suffix" "https://github.com/org/with-suffix.git:with-suffix"; do
+    name="${url##*:}"; url="${url%:*}"
+    mkdir -p "$vault/repos/$name"; echo "DOC-OF-$name" > "$vault/repos/$name/index.md"
+    repo=$(fx_dir); git -C "$repo" init -q -b main; git -C "$repo" remote add origin "$url"
+    out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+    assert_contains "origin $url: loads repos/$name" "DOC-OF-$name" "$out"
+  done
+  return 0
+}
+
+test_output_starts_with_the_context_header() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "first line is the auto-loaded header" "--- Vault context for widget (auto-loaded, see runbooks/using-the-vault.md in the vault) ---" "$(printf '%s\n' "$out" | head -n1)"
+  return 0
+}
+
+test_a_note_with_only_one_forward_section_loads_just_that_one() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  mkdir -p "$vault/daily-notes/alice"
+  printf '## What Was Done\nHIST-ONE\n\n## Context for Future Sessions\nCTX-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-a.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "context only: the context section is loaded" "CTX-ONLY" "$out"
+  assert_contains "context only: says forward-looking sections only" "forward-looking sections only" "$out"
+  assert_not_contains "context only: history is not loaded" "HIST-ONE" "$out"
+  rm -f "$vault/daily-notes/alice/2026-10-05-a.md"
+  printf '## What Was Done\nHIST-TWO\n\n## Open Questions / Next Steps\n- [ ] NEXT-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-b.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "next steps only: that section is loaded" "NEXT-ONLY" "$out"
+  assert_not_contains "next steps only: history is not loaded" "HIST-TWO" "$out"
+  return 0
+}
+
+test_sections_end_at_the_next_heading_and_keep_their_subheadings() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
+  cat > "$vault/daily-notes/alice/2026-10-05-a.md" <<'EOF'
+## What Was Done
+HIST
+
+## Context for Future Sessions
+CTX-LINE-1
+### A sub-heading inside the context
+CTX-SUB-LINE
+
+## Problems Solved
+PROBLEMS-AFTER-CONTEXT
+
+## Open Questions / Next Steps
+- [ ] NEXT-LINE
+
+## Commands Used
+COMMANDS-AFTER-NEXT
+EOF
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "context: first line kept" "CTX-LINE-1" "$out"
+  assert_contains "context: a ### sub-heading and its text are part of the section" "CTX-SUB-LINE" "$out"
+  assert_not_contains "context ends at the next ## heading" "PROBLEMS-AFTER-CONTEXT" "$out"
+  assert_contains "next steps loaded" "NEXT-LINE" "$out"
+  assert_not_contains "next steps end at the next ## heading" "COMMANDS-AFTER-NEXT" "$out"
+  return 0
+}
+
+test_non_markdown_files_are_never_picked_as_the_latest_note() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  write_note "$vault/daily-notes/alice/2026-10-05-a.md" REALNOTE
+  echo "NOT-A-NOTE" > "$vault/daily-notes/alice/scratch.txt"
+  touch -t 202610051200 "$vault/daily-notes/alice/2026-10-05-a.md"
+  touch -t 202610052300 "$vault/daily-notes/alice/scratch.txt"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "a newer .txt file is ignored, the .md note wins" "CONTEXT-REALNOTE" "$out"
+  assert_not_contains "the .txt content never appears" "NOT-A-NOTE" "$out"
+  return 0
+}
+
+test_notes_in_nested_folders_and_with_spaces_in_the_name_are_found() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  write_note "$vault/daily-notes/alice/archive 2026/2026-10-05 my note.md" SPACED
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "nested folder with spaces, file name with spaces: found" "CONTEXT-SPACED" "$out"
+  assert_contains "the header shows the vault-relative path" "daily-notes/alice/archive 2026/2026-10-05 my note.md" "$out"
+  return 0
+}
+
+test_an_empty_daily_notes_folder_says_there_are_no_notes() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "daily-notes exists but holds no notes: says so" "(No daily notes in the vault yet.)" "$out"
+  assert_contains "…and still loads the repo doc" "$DOC_MARKER" "$out"
+  return 0
+}
+
+test_a_note_with_windows_line_endings_is_still_loaded() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
+  printf '## What Was Done\r\nHIST-CRLF\r\n\r\n## Context for Future Sessions\r\nCTX-CRLF\r\n\r\n## Open Questions / Next Steps\r\n- [ ] NEXT-CRLF\r\n' > "$vault/daily-notes/alice/2026-10-05-a.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "CRLF note: the context text reaches the session (section match or full fallback)" "CTX-CRLF" "$out"
+  assert_contains "CRLF note: the next-steps text reaches the session" "NEXT-CRLF" "$out"
+  return 0
+}
+
+test_the_hook_never_writes_to_the_vault() {
+  local repo vault before after
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  printf -- '---\nreposPath: repos/{repo}/index.md\n---\n' > "$vault/vault-config.md"
+  before=$(cd "$vault" && find . -type f -exec cksum {} + | sort; cd "$vault" && find . | sort)
+  run_hook "$repo" "$vault" "$STARTUP_EVENT" >/dev/null
+  after=$(cd "$vault" && find . -type f -exec cksum {} + | sort; cd "$vault" && find . | sort)
+  assert_eq "every vault file keeps its content, and none was added or removed" "$before" "$after"
+  return 0
+}
+
+test_update_cap_can_be_changed_with_update_max_lines() {
+  local repo vault out i
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  { printf '\n## Update (later same session) - long\n'; for i in $(seq 1 30); do echo "CAP-LINE-$i"; done; } >> "$vault/daily-notes/alice/2026-10-05-a.md"
+  out=$( cd "$repo" && printf '%s' "$STARTUP_EVENT" | VAULT_ROOT="$vault" UPDATE_MAX_LINES=5 bash "$HOOK_SCRIPT" 2>&1 )
+  assert_contains "cap of 5: the first lines are loaded" "CAP-LINE-3" "$out"
+  assert_not_contains "cap of 5: later lines are cut" "CAP-LINE-10" "$out"
+  assert_contains "cap of 5: the marker says how many lines were left" "update truncated" "$out"
+  out=$( cd "$repo" && printf '%s' "$STARTUP_EVENT" | VAULT_ROOT="$vault" UPDATE_MAX_LINES=500 bash "$HOOK_SCRIPT" 2>&1 )
+  assert_contains "cap of 500: the whole update is loaded" "CAP-LINE-30" "$out"
+  assert_not_contains "cap of 500: no truncation marker" "update truncated" "$out"
+  return 0
+}
+
+test_update_stops_at_the_next_heading_and_counts_earlier_updates() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  printf '\n## Update - one\nU1\n\n## Update - two\nU2\n\n## Update - three\nU3-IN\n\n## Appendix\nAPPENDIX-AFTER-UPDATE\n' >> "$vault/daily-notes/alice/2026-10-05-a.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "three updates: the last is loaded" "U3-IN" "$out"
+  assert_not_contains "three updates: content after it under another heading is not" "APPENDIX-AFTER-UPDATE" "$out"
+  assert_contains "three updates: says 2 earlier ones were left out" "2 earlier update(s) in the note not loaded" "$out"
+  return 0
+}
+
+test_a_reposPath_without_a_placeholder_names_one_fixed_doc() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_dir); mkdir -p "$vault/docs"
+  printf -- '---\nreposPath: docs/overview.md\n---\n' > "$vault/vault-config.md"
+  echo "FIXED-OVERVIEW" > "$vault/docs/overview.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "reposPath with no {repo}: that file is loaded" "FIXED-OVERVIEW" "$out"
+  assert_contains "…and the header shows it" "## docs/overview.md" "$out"
+  return 0
+}
+
+test_config_values_with_trailing_comments_and_empty_values() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_dir)
+  mkdir -p "$vault/Projects/widget" "$vault/repos/widget"
+  echo "COMMENTED-DOC" > "$vault/Projects/widget/index.md"; echo "$DOC_MARKER" > "$vault/repos/widget/index.md"
+  printf -- '---\nreposPath: Projects/{repo}/index.md   # where repo docs live\n---\n' > "$vault/vault-config.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "a trailing '# comment' is stripped from the value" "COMMENTED-DOC" "$out"
+  printf -- '---\nreposPath:\ndailyNotesPath: ""\n---\n' > "$vault/vault-config.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "empty values fall back to the defaults" "$DOC_MARKER" "$out"
+  return 0
+}
+
+test_a_longer_config_key_is_not_mistaken_for_a_shorter_one() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  printf -- '---\nreposPathExtra: elsewhere/{repo}.md\n---\n' > "$vault/vault-config.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "reposPathExtra is not read as reposPath: default doc still loads" "$DOC_MARKER" "$out"
+  return 0
+}
+
+test_the_hook_always_exits_zero
+test_every_source_except_compact_injects_context
+test_compact_is_recognised_whatever_the_json_layout
+test_repo_name_falls_back_to_the_folder_name_without_an_origin
+test_repo_name_comes_from_the_origin_in_every_common_form
+test_output_starts_with_the_context_header
+test_a_note_with_only_one_forward_section_loads_just_that_one
+test_sections_end_at_the_next_heading_and_keep_their_subheadings
+test_non_markdown_files_are_never_picked_as_the_latest_note
+test_notes_in_nested_folders_and_with_spaces_in_the_name_are_found
+test_an_empty_daily_notes_folder_says_there_are_no_notes
+test_a_note_with_windows_line_endings_is_still_loaded
+test_the_hook_never_writes_to_the_vault
+test_update_cap_can_be_changed_with_update_max_lines
+test_update_stops_at_the_next_heading_and_counts_earlier_updates
+test_a_reposPath_without_a_placeholder_names_one_fixed_doc
+test_config_values_with_trailing_comments_and_empty_values
+test_a_longer_config_key_is_not_mistaken_for_a_shorter_one
+
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]
