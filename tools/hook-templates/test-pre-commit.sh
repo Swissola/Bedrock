@@ -31,7 +31,7 @@ make_test_repo() {
 
 # Stub `betterleaks` on PATH. $1 = bindir, $2 = "clean" (exit 0, no output)
 # or "dirty" (exit 1, prints a fixed finding line). Stands in for the real
-# `betterleaks protect --staged --redact -v`.
+# `betterleaks git --staged --redact` (with -v on 1.x).
 make_stub_betterleaks() {
   local bindir="$1" mode="$2"
   mkdir -p "$bindir"
@@ -213,6 +213,7 @@ make_recording_stub() {
   mkdir -p "$bindir"
   cat > "$bindir/betterleaks" <<EOF
 #!/bin/bash
+if [ "\$1" = "version" ]; then echo "\${STUB_BL_VERSION-1.8.1}"; exit 0; fi
 echo "\$*" > "$bindir/args.log"
 touch "$bindir/ran"
 [ -n "$out" ] && echo "$out"
@@ -248,7 +249,40 @@ test_scanner_is_called_to_scan_the_staged_changes_with_redaction() {
   make_recording_stub "$CASE_BIN" 0
   stage_file "$CASE_REPO" a.md
   run_extended "$UNSET_STRICT" "$CASE_BIN"
-  assert_eq "scanner is asked to scan staged changes, redacted, verbose" "protect --staged --redact -v" "$(cat "$CASE_ARGS" 2>/dev/null)"
+  assert_eq "betterleaks 1.x: asked to scan the staged changes, redacted, with -v for per-finding detail" "git --staged --redact -v" "$(cat "$CASE_ARGS" 2>/dev/null)"
+  return $?
+}
+
+test_betterleaks_2x_is_never_given_the_verbose_flag() {
+  # In 2.x, -v means "validate" (live checks of any credential found), not "verbose".
+  new_case
+  make_recording_stub "$CASE_BIN" 0
+  stage_file "$CASE_REPO" a.md
+  STUB_BL_VERSION="2.0.0-rc.2" run_extended "$UNSET_STRICT" "$CASE_BIN"
+  assert_eq "betterleaks 2.x: no -v, so nothing is validated over the network" "git --staged --redact" "$(cat "$CASE_ARGS" 2>/dev/null)"
+  STUB_BL_VERSION="2.3.1" run_extended "$UNSET_STRICT" "$CASE_BIN"
+  assert_eq "betterleaks 2.3.1: still no -v" "git --staged --redact" "$(cat "$CASE_ARGS" 2>/dev/null)"
+  return $?
+}
+
+test_an_unreadable_betterleaks_version_gets_no_verbose_flag() {
+  new_case
+  make_recording_stub "$CASE_BIN" 0
+  stage_file "$CASE_REPO" a.md
+  STUB_BL_VERSION="" run_extended "$UNSET_STRICT" "$CASE_BIN"
+  assert_eq "version unreadable: the safe form, no -v" "git --staged --redact" "$(cat "$CASE_ARGS" 2>/dev/null)"
+  STUB_BL_VERSION="dev-build" run_extended "$UNSET_STRICT" "$CASE_BIN"
+  assert_eq "version with no number in it: the safe form, no -v" "git --staged --redact" "$(cat "$CASE_ARGS" 2>/dev/null)"
+  return $?
+}
+
+test_a_2x_finding_still_blocks_in_strict_mode() {
+  new_case
+  make_recording_stub "$CASE_BIN" 1 "$FINDING_TEXT"
+  stage_file "$CASE_REPO" a.md
+  STUB_BL_VERSION="2.0.0" run_extended 1 "$CASE_BIN"
+  assert_eq "betterleaks 2.x, finding, strict: blocks" "1" "$STATUS"
+  assert_has "betterleaks 2.x, finding: the scanner's text is shown" "$OUT" "$FINDING_TEXT"
   return $?
 }
 
@@ -507,6 +541,9 @@ test_betterleaks_clean_exits_zero_no_banner
 test_betterleaks_dirty_warns_but_does_not_block_by_default
 test_betterleaks_dirty_strict_mode_blocks
 test_scanner_is_called_to_scan_the_staged_changes_with_redaction
+test_betterleaks_2x_is_never_given_the_verbose_flag
+test_an_unreadable_betterleaks_version_gets_no_verbose_flag
+test_a_2x_finding_still_blocks_in_strict_mode
 test_deleted_files_alone_are_not_scanned
 test_modified_files_are_scanned
 test_renamed_and_edited_file_is_scanned

@@ -61,7 +61,16 @@ if ! command -v betterleaks >/dev/null 2>&1; then
     exit 0
 fi
 
-findings=$(betterleaks protect --staged --redact -v 2>&1)
+# `git --staged --redact` is the form betterleaks documents for pre-commit hooks (its own
+# .pre-commit-hooks.yaml and the v2 migration guide); `protect` is the old name and goes away
+# in v2. -v is only wanted on 1.x, where it adds the per-finding detail (file, rule, line) to
+# the output. In 2.x it means "validate" (live checks of any credential found) and findings
+# print by default, so it must NOT be passed there. An unreadable version gets no -v.
+bl_major=$(betterleaks version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | cut -d. -f1)
+verbose_flag=""
+[ "$bl_major" = "1" ] && verbose_flag="-v"
+# shellcheck disable=SC2086  # verbose_flag is either empty or the single word -v
+findings=$(betterleaks git --staged --redact $verbose_flag 2>&1)
 scan_status=$?
 
 [ "$scan_status" -eq 0 ] && exit 0

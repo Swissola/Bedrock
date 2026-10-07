@@ -52,7 +52,7 @@ cp tools/hook-templates/pre-commit .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
-Uses [`betterleaks`](https://betterleaks.com/) only, no other engine. Betterleaks is a newer secrets scanner with substantially better recall than older entropy-based tools (its token-efficiency detection scored around 98.6% versus roughly 70% for plain entropy detection on the CredData benchmark).
+Uses [`betterleaks`](https://betterleaks.com/) only, no other engine. Betterleaks is a newer secrets scanner with substantially better recall than older entropy-based tools (its token-efficiency detection scored around 98.6% versus roughly 70% for plain entropy detection on the CredData benchmark). It is called as `betterleaks git --staged --redact`, the form the project documents for pre-commit hooks, with `-v` added on 1.x only (it adds the per-finding detail there; on 2.x `-v` means live validation of any credential found, so it is never passed). The same call works on the 1.9.0 release and the 2.0 release candidates.
 
 **No hand-rolled regex fallback if it isn't installed, deliberately.** A home-grown pattern set would be weaker than a real tool (the whole reason betterleaks is used here is that regex/entropy detection alone has poor recall), while adding real code and test surface of its own, for a false sense of coverage arguably worse than knowing plainly there's none. Instead, no scanner found means no scan at all, just a loud, *unthrottled* reminder every commit to go install it. That's a small enough per-commit cost, and honest about the actual gap, unlike a throttled nag that could let "we're not really checking anything" go unnoticed for a while.
 
