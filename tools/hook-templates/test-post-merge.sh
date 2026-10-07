@@ -526,7 +526,7 @@ run_hook_and_wait() {
   ( cd "$repo" && env PATH="$bindir:$PATH" VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" "$@" bash "$HOOK_SCRIPT" )
   LOG_FILE="$logdir/widget-service-post-merge.log"
   local waited=0
-  while [[ ! -s "$LOG_FILE" ]] && [[ "$waited" -lt 80 ]]; do sleep 0.1; waited=$((waited + 1)); done
+  while [[ ! -s "$LOG_FILE" ]] && [[ "$waited" -lt "${WAIT_TENTHS:-80}" ]]; do sleep 0.1; waited=$((waited + 1)); done
   return $?
 }
 
@@ -760,10 +760,13 @@ check_timeout_impl() {
   fi
   repo=$(make_other_repo "$REPO_NAME"); vault=$(make_test_vault "$REPO_NAME")
   logdir=$(mktemp -d); bindir=$(mktemp -d)
-  printf '#!/bin/bash\nexec sleep 30\n' > "$bindir/claude"; chmod +x "$bindir/claude"
-  local began=$SECONDS
-  run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" HOOK_TIMEOUT_IMPL="$impl" TIMEOUT_SECS=1 RETRY_DELAY=0
-  assert_eq "timeout impl $impl: a hung run is cut off quickly" "1" "$([[ -s "$LOG_FILE" && $((SECONDS - began)) -lt 20 ]] && echo 1 || echo 0)"
+  # No clock: a stub that would hang for two minutes, then print a completion marker. If the
+  # timeout works the run is cut off after about a second and the marker is never printed;
+  # if it does not, no log appears inside the wait below and the check fails.
+  printf '#!/bin/bash\nn=0\nwhile [ $n -lt 1200 ]; do sleep 0.1; n=$((n + 1)); done\necho HUNG-STUB-COMPLETED\nexit 0\n' > "$bindir/claude"; chmod +x "$bindir/claude"
+  WAIT_TENTHS=600 run_hook_and_wait "$repo" "$vault" "$logdir" "$bindir" HOOK_TIMEOUT_IMPL="$impl" TIMEOUT_SECS=1 RETRY_DELAY=0
+  assert_eq "timeout impl $impl: a hung run is cut off (a log appears long before the stub would have finished)" "1" "$([[ -s "$LOG_FILE" ]] && echo 1 || echo 0)"
+  assert_eq "timeout impl $impl: the hung stub never ran to completion" "0" "$(gcount "HUNG-STUB-COMPLETED" "$LOG_FILE")"
   assert_eq "timeout impl $impl: the cut-off is logged as a failure" "1" "$(grep -cE 'exit=[1-9]' "$LOG_FILE" 2>/dev/null || echo 0)"
   assert_eq "timeout impl $impl: a timeout is not mistaken for 'not found' and retried" "0" "$(gcount "exit=127" "$LOG_FILE")"
   rm -rf "$repo" "$vault" "$logdir" "$bindir"
@@ -951,17 +954,27 @@ test_each_vault_unreachable_message_downgrades_to_exit_2_and_skips_the_commit() 
 }
 
 test_the_hook_returns_before_a_slow_claude_finishes() {
-  local began st took
+  # No clock: the stub claude waits until this test releases it, so "the hook returned while
+  # the run was still going" is proved by the run log not existing yet, however slow or
+  # loaded the machine is.
+  local st
   fx_new
-  printf '#!/bin/bash\nsleep 12\necho "slow stub done"\nexit 0\n' > "$FX_BIN/claude"; chmod +x "$FX_BIN/claude"
+  cat > "$FX_BIN/claude" <<STUB
+#!/bin/bash
+n=0
+while [ ! -f "$FX_BIN/release" ] && [ \$n -lt 1200 ]; do sleep 0.1; n=\$((n + 1)); done
+echo "slow stub done"
+exit 0
+STUB
+  chmod +x "$FX_BIN/claude"
   echo "$CHANGE_MSG" >> "$FX_REPO/README.md"
   git -C "$FX_REPO" commit -aq -m "$CHANGE_MSG"
-  began=$SECONDS
   ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" ); st=$?
-  took=$((SECONDS - began))
-  assert_eq "slow claude: hook exits 0 straight away" "0" "$st"
-  assert_eq "slow claude: hook returned in under 10s while claude needs 12s (it backgrounds the work)" "yes" "$([[ "$took" -lt 10 ]] && echo yes || echo no)"
-  wait_for_file "$FX_LOG/widget-service-post-merge.log" 250   # let the background run finish before cleanup
+  assert_eq "slow claude: hook exits 0 while claude is still waiting" "0" "$st"
+  assert_eq "slow claude: the run has not finished when the hook returns (it backgrounds the work)" "no" "$([[ -s "$FX_LOG/widget-service-post-merge.log" ]] && echo yes || echo no)"
+  : > "$FX_BIN/release"
+  wait_for_file "$FX_LOG/widget-service-post-merge.log" 600   # let the background run finish before cleanup
+  assert_eq "slow claude: once released, the background run completes and is logged" "yes" "$(has_text "slow stub done" "$FX_LOG/widget-service-post-merge.log")"
 }
 
 test_unacknowledged_failures_are_surfaced_once_then_only_new_ones() {
