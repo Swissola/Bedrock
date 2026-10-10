@@ -115,13 +115,16 @@ native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; els
 
 # The status line command to write into settings.json. An absolute, forward-slash path,
 # not "~": Claude Code on Windows may run it through PowerShell, which does not expand ~.
+# Claude Code hands the command to a shell, so a path with anything unusual in it is wrapped
+# in SINGLE quotes (nothing inside them is expanded by bash or PowerShell). A path holding a
+# single quote or a line break cannot be quoted safely, so none is written for it.
 statusline_command() {
   local abs script
   case "$PREFIX" in /*|[A-Za-z]:*) abs="$PREFIX" ;; *) abs="$PWD/${PREFIX#./}" ;; esac
   script="$(native_path "$abs/statusline.mjs")"
   case "$script" in
-    *'"'*) return 1 ;;
-    *[!A-Za-z0-9_./:~-]*) printf 'node "%s"' "$script" ;;
+    *"'"*|*$'\n'*|*$'\r'*) return 1 ;;
+    *[!A-Za-z0-9_./:~-]*) printf "node '%s'" "$script" ;;
     *) printf 'node %s' "$script" ;;
   esac
   return 0
@@ -133,7 +136,7 @@ statusline_command() {
 configure_statusline() {
   local mode="${1:-}" settings="$PREFIX/settings.json" cmd extra="" helper rc major
   if ! cmd="$(statusline_command)"; then
-    echo "warning: not configuring settings.json: the install path contains a double quote."; NEED_ATTENTION=1; return 0
+    echo "warning: not configuring settings.json: the install path contains a single quote or a line break, which cannot be quoted safely in a command."; NEED_ATTENTION=1; return 0
   fi
   if ! command -v node >/dev/null 2>&1; then
     if [[ "$mode" = "--check" ]]; then echo "unknown  settings.json statusLine (node is not on PATH, so it cannot be read)"

@@ -39,7 +39,7 @@ bash tools/install-claude-config.sh --statusline
 Add `--dry-run` first to see what it would do, and `--check` afterwards to see whether the installed copy is current. It is opt-in: without `--statusline` the installer does not touch any of this, and it can be combined with the other options (`--vault`, `--backend`, `--no-skills`).
 
 - It copies the script to `~/.claude/statusline.mjs` (or `<prefix>/statusline.mjs` with `--prefix`).
-- It sets `statusLine` in `settings.json` only if none is set, writing `node` followed by the **absolute path** with forward slashes, so it does not depend on how the shell expands `~`. A path containing a space is double-quoted.
+- It sets `statusLine` in `settings.json` only if none is set, writing `node` followed by the **absolute path** with forward slashes, so it does not depend on how the shell expands `~`. A path with anything unusual in it (a space, say) is wrapped in single quotes, and one containing a single quote or a line break is refused rather than quoted unsafely.
 - If a different `statusLine` is already set, it is kept and the snippet to switch by hand is printed. `--force` replaces it.
 - Before it changes an existing `settings.json` it copies it to `settings.json.bak-<timestamp>`, and every other key is preserved. A file that is not valid JSON is left alone and the installer exits 1, so you notice.
 - It needs Node 18 or later. If `node` is not on `PATH` the script is still copied, `settings.json` is not changed, and the snippet is printed for later.

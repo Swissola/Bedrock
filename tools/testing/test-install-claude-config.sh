@@ -607,6 +607,7 @@ test_statusline_check_mode() {
   assert_eq "statusline check with the script current but no statusLine set: exit 1" "1" "$st"
   assert_contains "statusline check with the script current but no statusLine set: reports the setting missing" "missing  settings.json statusLine" "$out"
   assert_contains "statusline check with the script current but no statusLine set: the script itself is current" "current  statusline.mjs" "$out"
+  assert_eq "statusline check with the script current but no statusLine set: not reported as a helper failure" "0" "$(printf '%s' "$out" | grep -c 'exited')"
   printf '// stale\n' >> "$p/claude/statusline.mjs"
   out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --check 2>&1); st=$?
   assert_eq "statusline check with a modified script: exit 1" "1" "$st"
@@ -644,7 +645,60 @@ test_statusline_path_with_a_space_is_quoted() {
   p=$(mktemp -d)
   bash "$INSTALLER" --prefix "$p/with space/claude" --statusline >/dev/null 2>&1
   cmd=$(sl_cmd "$p/with space/claude/settings.json")
-  assert_eq "path with a space: the script path is double-quoted" "1" "$(printf '%s' "$cmd" | grep -c -E '^node ".* .*/statusline\.mjs"$')"
+  assert_eq "path with a space: the script path is single-quoted" "1" "$(printf '%s' "$cmd" | grep -c -E "^node '.* .*/statusline[.]mjs'\$")"
+  rm -rf "$p"
+  return 0
+}
+
+# Claude Code hands the command to a shell, so nothing in the install path may be expanded.
+test_statusline_command_never_lets_a_shell_expand_the_install_path() {
+  local p prefix cmd marker; need_node "statusline command injection" || return 0
+  p=$(mktemp -d); marker="$p/PWNED"
+  prefix="$p/x\$(touch $marker)y \`touch $marker\` \$HOME/claude"
+  bash "$INSTALLER" --prefix "$prefix" --statusline >/dev/null 2>&1
+  cmd=$(sl_cmd "$prefix/settings.json")
+  assert_contains "shell metacharacters in the install path: the command is single-quoted" "node '" "$cmd"
+  # run the command text the way a shell would, with node swapped for echo
+  bash -c "${cmd/#node/echo}" >/dev/null 2>&1
+  assert_eq "shell metacharacters in the install path: nothing is executed or expanded" "no" "$(exists "$marker")"
+  assert_contains "shell metacharacters in the install path: the characters are kept literally" '$HOME/claude/statusline.mjs' "$cmd"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_refuses_a_path_that_cannot_be_quoted_safely() {
+  local p out st; need_node "statusline unquotable path" || return 0
+  p=$(mktemp -d)
+  mkdir -p "$p/it's" 2>/dev/null || { echo "SKIP: statusline path with a single quote (this filesystem cannot create one)"; rm -rf "$p"; return 0; }
+  out=$(bash "$INSTALLER" --prefix "$p/it's/claude" --statusline 2>&1); st=$?
+  assert_eq "path with a single quote: settings.json is not written" "no" "$(exists "$p/it's/claude/settings.json")"
+  assert_contains "path with a single quote: says why" "cannot be quoted safely" "$out"
+  assert_eq "path with a single quote: exit 1 so it is noticed" "1" "$st"
+  assert_eq "path with a single quote: the script itself is still copied" "yes" "$(exists "$p/it's/claude/statusline.mjs")"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_reinstall_recognises_its_own_quoted_command() {
+  local p out; need_node "statusline quoted idempotence" || return 0
+  p=$(mktemp -d)
+  bash "$INSTALLER" --prefix "$p/Jane (work)/claude" --statusline >/dev/null 2>&1
+  out=$(bash "$INSTALLER" --prefix "$p/Jane (work)/claude" --statusline --force 2>&1)
+  assert_contains "a quoted path with parentheses: the second run recognises the command as its own" "unchanged" "$out"
+  assert_eq "a quoted path with parentheses: no backup on the second run" "0" "$(count_backups "$p/Jane (work)/claude")"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_settings_file_modes_are_kept() {
+  local p; need_node "statusline file modes" || return 0
+  if command -v cygpath >/dev/null 2>&1; then echo "SKIP: statusline file modes (Windows does not have Unix permission bits)"; return 0; fi
+  p=$(mktemp -d); mkdir -p "$p/claude"
+  printf '{"env":{"A":"1"}}\n' > "$p/claude/settings.json"; chmod 600 "$p/claude/settings.json"
+  bash "$INSTALLER" --prefix "$p/claude" --statusline >/dev/null 2>&1
+  assert_eq "an existing 0600 settings.json is still 0600 after the edit" "-rw-------" "$(ls -l "$p/claude/settings.json" | cut -c1-10)"
+  bash "$INSTALLER" --prefix "$p/fresh" --statusline >/dev/null 2>&1
+  assert_eq "a settings.json the installer creates is private to its owner" "-rw-------" "$(ls -l "$p/fresh/settings.json" | cut -c1-10)"
   rm -rf "$p"
   return 0
 }
@@ -732,6 +786,10 @@ test_statusline_check_mode
 test_statusline_check_does_not_fail_for_a_different_status_line
 test_statusline_relative_prefix_gives_an_absolute_command
 test_statusline_path_with_a_space_is_quoted
+test_statusline_command_never_lets_a_shell_expand_the_install_path
+test_statusline_refuses_a_path_that_cannot_be_quoted_safely
+test_statusline_reinstall_recognises_its_own_quoted_command
+test_statusline_settings_file_modes_are_kept
 test_statusline_without_node_copies_the_script_and_warns
 test_help_documents_the_statusline_flag
 test_force_without_statusline_never_edits_settings
