@@ -82,4 +82,4 @@ Command templates are prompts, so they are tested by running them for real. `nod
 
 It is **manual** (every scenario spends model calls) and never touches a real vault. It judges a run by the files actually written and the tool calls actually made, read from the event log, never by the model's own summary, which can claim a write that landed somewhere else. The stub does not reproduce the plugin's exact response shapes (they aren't documented) and always refuses `vault_patch`.
 
-The hooks and the installer have ordinary shell test suites that need no model: `tools/hook-templates/test-post-merge.sh`, `test-session-start-vault-context.sh`, `test-pre-commit.sh`, and `tools/test-install-claude-config.sh`.
+The hooks and the installer have ordinary shell test suites that need no model: `tools/hook-templates/test-post-merge.sh`, `test-session-start-vault-context.sh`, `test-pre-commit.sh`, and `tools/testing/test-install-claude-config.sh`.

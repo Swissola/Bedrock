@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test harness for tools/setup-mcp.sh.
-# Run: bash tools/test-setup-mcp.sh
+# Run: bash tools/testing/test-setup-mcp.sh
 #
 # setup-mcp.sh registers the Obsidian "Local REST API" plugin as a Claude Code MCP
 # server in five steps: Claude Code is present, the plugin is installed, its HTTP
@@ -14,7 +14,7 @@
 # is the fixture the script reads and edits.
 
 set -u
-SRC_SCRIPT="${SCRIPT_UNDER_TEST:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/setup-mcp.sh}"  # override: point at a mutated copy to prove the suite fails
+SRC_SCRIPT="${SCRIPT_UNDER_TEST:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/setup-mcp.sh}"  # override: point at a mutated copy to prove the suite fails
 PASS=0
 FAIL=0
 CLEANUP_DIRS=()

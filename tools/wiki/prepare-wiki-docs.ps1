@@ -22,7 +22,7 @@ param(
 )
 
 if (-not (Test-Path $ConfigFile)) {
-    Write-Error "$ConfigFile not found. Copy tools/wiki-publish.example.json to $ConfigFile and edit it first."
+    Write-Error "$ConfigFile not found. Copy tools/wiki/wiki-publish.example.json to $ConfigFile and edit it first."
     exit 1
 }
 

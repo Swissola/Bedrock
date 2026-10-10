@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Test harness for tools/install-claude-config.sh.
-# Run: bash tools/test-install-claude-config.sh
+# Run: bash tools/testing/test-install-claude-config.sh
 #
 # Every run installs into a throwaway --prefix under mktemp, so nothing here
 # can touch a real ~/.claude. Fixtures are throwaway vault folders and repos.
 
 set -u
-TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="$TOOLS_DIR/install-claude-config.sh"
 PASS=0
 FAIL=0

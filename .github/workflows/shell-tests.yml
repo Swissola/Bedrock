@@ -76,15 +76,15 @@ jobs:
       - name: post-merge hook
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-post-merge.sh
       - name: installer
-        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/test-install-claude-config.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/testing/test-install-claude-config.sh
       - name: setup-mcp.sh
-        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/test-setup-mcp.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/testing/test-setup-mcp.sh
       # shellcheck is preinstalled on the Ubuntu runner only; elsewhere that one check skips.
       # Error level is clean across every script, so any finding fails the build.
       - name: repo structure and portability
         env:
           STRUCTURE_SHELLCHECK_STRICT: "1"
-        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/test-structure.sh
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/testing/test-structure.sh
       - name: stub REST API MCP server
         run: node tools/command-templates/test/test-stub-rest-api-mcp.mjs
       - name: status line
@@ -102,10 +102,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: PowerShell scripts, PowerShell 7
         shell: pwsh
-        run: ./tools/test-powershell-scripts.ps1
+        run: ./tools/testing/test-powershell-scripts.ps1
       - name: PowerShell scripts, Windows PowerShell 5.1
         shell: powershell
-        run: ./tools/test-powershell-scripts.ps1
+        run: ./tools/testing/test-powershell-scripts.ps1
       - name: pre-commit hook
         shell: bash
         run: bash tools/hook-templates/test-pre-commit.sh
@@ -117,13 +117,13 @@ jobs:
         run: bash tools/hook-templates/test-session-start-vault-check.sh
       - name: installer
         shell: bash
-        run: bash tools/test-install-claude-config.sh
+        run: bash tools/testing/test-install-claude-config.sh
       - name: setup-mcp.sh
         shell: bash
-        run: bash tools/test-setup-mcp.sh
+        run: bash tools/testing/test-setup-mcp.sh
       - name: repo structure and portability
         shell: bash
-        run: bash tools/test-structure.sh
+        run: bash tools/testing/test-structure.sh
       - name: status line
         shell: bash
         run: node tools/statusline/test-statusline.mjs

@@ -5,7 +5,7 @@
 ## The pattern
 
 1. **The vault stays the source of truth.** Nobody edits the wiki copy directly — every wiki page is generated from a specific `.md` file in this repo.
-2. **A small manifest lists which files get published, and under what title.** `tools/wiki-publish.example.json` is a starting point:
+2. **A small manifest lists which files get published, and under what title.** `tools/wiki/wiki-publish.example.json` is a starting point:
 
    ```json
    {
@@ -26,7 +26,7 @@
 
    Copy it to `wiki-publish.json`, point `source` at whichever files you actually want mirrored, and set `space` to your real space/site key.
 
-3. **A prepare script turns each source file into wiki-ready output.** `tools/prepare-wiki-docs.ps1` reads the manifest, strips the leading `# Title` heading (the wiki page title already carries that), and stages the result into `.wiki-stage/` (already in `.gitignore`).
+3. **A prepare script turns each source file into wiki-ready output.** `tools/wiki/prepare-wiki-docs.ps1` reads the manifest, strips the leading `# Title` heading (the wiki page title already carries that), and stages the result into `.wiki-stage/` (already in `.gitignore`).
 4. **A CI job runs the prepare script and pushes the result to your wiki**, on a schedule or on every merge to your default branch, however your CI platform does that. Two minimal examples:
 
    **GitHub Actions** (`.github/workflows/publish-docs.yml`):
@@ -42,7 +42,7 @@
          - uses: actions/checkout@v4
          - name: Prepare wiki docs
            shell: pwsh
-           run: ./tools/prepare-wiki-docs.ps1
+           run: ./tools/wiki/prepare-wiki-docs.ps1
          - name: Publish
            run: |
              # Replace with your actual wiki's publish step/action —
@@ -61,7 +61,7 @@
                    branch 'main' // confirm this matches your repo's actual default branch
                }
                steps {
-                   powershell 'tools/prepare-wiki-docs.ps1'
+                   powershell 'tools/wiki/prepare-wiki-docs.ps1'
                    // Replace with your actual publish step, e.g. a
                    // Confluence-publisher plugin step pointed at .wiki-stage/
                }

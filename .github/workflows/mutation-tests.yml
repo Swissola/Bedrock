@@ -1,7 +1,7 @@
 name: mutation tests (manual)
 
 # Proves the test suites can fail, by running each one against deliberately broken copies of
-# its script (tools/mutation/mutants.txt). Every mutant is a full suite run, so this takes a
+# its script (tools/testing/mutation/mutants.txt). Every mutant is a full suite run, so this takes a
 # long time and is NOT part of the normal build: it only runs when someone starts it from the
 # Actions tab ("Run workflow"), and nothing else (push, pull request, schedule) can trigger it.
 # Pick one hook, or "all". Details: docs/testing.md, "Mutation checks".
@@ -53,14 +53,14 @@ jobs:
         run: |
           # "all" becomes one job per group listed in the mutants file; anything else is that one group.
           if [ "$HOOK" = "all" ]; then
-            groups=$(bash tools/run-mutation-tests.sh --list | awk '{print "\"" $1 "\""}' | paste -sd, -)
+            groups=$(bash tools/testing/run-mutation-tests.sh --list | awk '{print "\"" $1 "\""}' | paste -sd, -)
           else
             groups="\"$HOOK\""
           fi
           echo "groups=[$groups]" >> "$GITHUB_OUTPUT"
           echo "Will run: [$groups]"
       - name: every mutant still applies (fast, runs no suite)
-        run: bash tools/run-mutation-tests.sh --check-applies
+        run: bash tools/testing/run-mutation-tests.sh --check-applies
 
   mutate:
     name: ${{ matrix.group }}
@@ -83,4 +83,4 @@ jobs:
         env:
           GROUP: ${{ matrix.group }}
           JOBS: ${{ inputs.jobs_per_group }}
-        run: bash tools/run-mutation-tests.sh --hook "$GROUP" --jobs "$JOBS"
+        run: bash tools/testing/run-mutation-tests.sh --hook "$GROUP" --jobs "$JOBS"
