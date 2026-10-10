@@ -1037,7 +1037,7 @@ test_no_default_branch_or_a_detached_head_does_nothing() {
 fx_named_repo() {  # a repo in a folder called $1 whose origin says $2; prints the repo path
   local name="$1" remote="$2" d
   d=$(fx_dir); mkdir -p "$d/$name"; git -C "$d/$name" init -q -b main
-  [ -n "$remote" ] && git -C "$d/$name" remote add origin "https://example.com/org/${remote}.git"
+  [[ -n "$remote" ]] && git -C "$d/$name" remote add origin "https://example.com/org/${remote}.git"
   echo "$d/$name"
   return 0
 }
@@ -1091,12 +1091,12 @@ test_the_global_kill_switch_stops_the_hook_in_every_repo() {
   echo "$CHANGE_MSG" >> "$repo/README.md"; git -C "$repo" commit -aq -m "$CHANGE_MSG"
   ( cd "$repo" && PATH="$bindir:$PATH" VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" VAULT_HOOK_DISABLED_FILE="$global" bash "$HOOK_SCRIPT" )
   sleep 0.5
-  assert_eq "claude not invoked while the global DISABLED file exists" "no" "$([ -f "$marker" ] && echo yes || echo no)"
-  assert_eq "...and nothing is logged for the repo" "no" "$([ -f "$logdir/$REPO_NAME-post-merge.log" ] && echo yes || echo no)"
+  assert_eq "claude not invoked while the global DISABLED file exists" "no" "$([[ -f "$marker" ]] && echo yes || echo no)"
+  assert_eq "...and nothing is logged for the repo" "no" "$([[ -f "$logdir/$REPO_NAME-post-merge.log" ]] && echo yes || echo no)"
   rm -f "$global"
   ( cd "$repo" && PATH="$bindir:$PATH" VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" VAULT_HOOK_DISABLED_FILE="$global" bash "$HOOK_SCRIPT" )
   sleep 0.5
-  assert_eq "with the file gone, the same hook runs claude again" "yes" "$([ -f "$marker" ] && echo yes || echo no)"
+  assert_eq "with the file gone, the same hook runs claude again" "yes" "$([[ -f "$marker" ]] && echo yes || echo no)"
   return $?
 }
 
