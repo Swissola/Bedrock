@@ -177,8 +177,10 @@ Added:
 | `the_hook_returns_before_a_slow_claude_finishes` | With a `claude` that waits until the test releases it, the hook itself returns (exit 0) while the run is still going, so no run log exists yet; once released, the background run completes and is logged. It uses no clock, so a busy machine cannot make it flake. |
 | `unacknowledged_failures_are_surfaced_once_then_only_new_ones` | Earlier failures are printed once, not repeated, and only new ones appear afterwards. |
 | `no_default_branch_or_a_detached_head_does_nothing` | No `origin/HEAD`, or a detached `HEAD`: `claude` is never called. |
-| `repo_name_comes_from_the_origin_url_in_every_common_form` | SSH, HTTPS with and without `.git`, and a trailing slash all give the right repo name. |
-| `a_repo_with_no_origin_is_called_unknown_repo` | The documented fallback name. |
+| `the_repo_is_named_after_its_folder_not_its_remote` | A folder and a remote with different names: the log and the doc it asks for use the folder's. |
+| `a_repo_with_no_origin_is_named_after_its_folder` | No remote needed. |
+| `the_repo_name_is_lowercased_by_default_and_kept_with_repo_name_case_keep` | Default and `lower` lowercase the log name and the doc path, `keep` uses the folder's case. |
+| `the_global_kill_switch_stops_the_hook_in_every_repo` | `~/.claude/hook-templates/DISABLED` (or `VAULT_HOOK_DISABLED_FILE`) stops the run before it starts, and removing it lets the hook run again. |
 
 ### `tools/hook-templates/test-session-start-vault-context.sh`: the `session-start-vault-context` hook
 
