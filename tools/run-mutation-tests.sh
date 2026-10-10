@@ -126,7 +126,7 @@ fresh_copy() {
 run_suite() {
   local copy="$1" suite="$2"
   local runner=bash
-  case "$suite" in *.mjs) runner=node ;; esac
+  case "$suite" in *.mjs) runner=node ;; *) ;; esac
   ( cd "$copy" && env HOME="$copy/home" "$runner" "$copy/$suite" ) > "$copy/suite.out" 2>&1
   return $?
 }

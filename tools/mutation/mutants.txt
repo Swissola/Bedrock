@@ -70,16 +70,18 @@ setup-mcp@@sm4@@tools/setup-mcp.sh@@s/echo "\[Step 4\] OK - registered\./echo "[
 # ---- statusline ---------------------------------------------------------------------------
 statusline@@sl1@@tools/statusline/statusline.mjs@@s#if (five === null \&\& week === null \&\& spend === null)#if (!five \&\& !week \&\& !spend)#@@a 0% reading is treated as missing and falls through to the cost display
 statusline@@sl2@@tools/statusline/statusline.mjs@@s#five === null \&\& week === null#five === null || week === null#@@one subscription window on its own is shown together with the cost
-statusline@@sl3@@tools/statusline/statusline.mjs@@s#pct >= r ? C.red#pct > r ? C.red#@@red starts one point late
+statusline@@sl3@@tools/statusline/statusline.mjs@@s#if (pct >= r) return#if (pct > r) return#@@red starts one point late
 statusline@@sl4@@tools/statusline/statusline.mjs@@s#pct >= y ? C.yellow#pct > y ? C.yellow#@@yellow starts one point late
 statusline@@sl5@@tools/statusline/statusline.mjs@@s#p >= 50 \&\& num#p >= 60 \&\& num#@@the seven day reset is hidden until 60% instead of 50%
 statusline@@sl6@@tools/statusline/statusline.mjs@@s#gauge(p, 60, 80)#gauge(p, 70, 90)#@@usage bars use the context thresholds
 statusline@@sl7@@tools/statusline/statusline.mjs@@s#folder !== repoName#folder === repoName#@@the folder tag is shown only when it repeats the repo name
 statusline@@sl8@@tools/statusline/statusline.mjs@@s#head.slice(0, 7)#head.slice(0, 8)#@@a detached HEAD shows eight characters
-statusline@@sl9@@tools/statusline/statusline.mjs@@s#ref\[1\] === '.invalid'#ref[1] === '.invalidx'#@@the reftable placeholder is printed as the branch
+statusline@@sl9@@tools/statusline/statusline.mjs@@s#name === '.invalid' ? '' : name#name === '.invalidx' ? '' : name#@@the reftable placeholder is printed as the branch
 statusline@@sl10@@tools/statusline/statusline.mjs@@s#Buffer.concat(chunks).toString('utf8')#chunks.join('')#@@stdin chunks are decoded one at a time, mangling a multi-byte character split across two
 statusline@@sl11@@tools/statusline/statusline.mjs@@s#Math.floor(num(d.context_window#Math.round(num(d.context_window#@@the context percentage is rounded instead of floored
 statusline@@sl12@@tools/statusline/statusline.mjs@@s#d.workspace?.current_dir ?? d.cwd ?? process.cwd()#process.cwd()#@@the branch comes from the process directory, not the session directory
 statusline@@sl13@@tools/statusline/statusline.mjs@@s#num(s.used_usd) !== null \&\& num(s.limit_usd) !== null#num(s.used_usd) !== null || num(s.limit_usd) !== null#@@spend amounts are printed when only one of them is supplied
 statusline@@sl14@@tools/statusline/statusline.mjs@@s#Math.max(0, Math.floor(epoch#Math.max(-99999999, Math.floor(epoch#@@a reset time in the past is shown as a negative duration
 statusline@@sl15@@tools/statusline/statusline.mjs@@s#toFixed(2)}`);#toFixed(1)}`);#@@the session cost is shown to one decimal place
+statusline@@sl16@@tools/statusline/statusline.mjs@@s#target.startsWith(HEADS) ? target.slice(HEADS.length) : ''#target.slice(HEADS.length)#@@a HEAD pointing outside refs/heads is shown as a branch
+statusline@@sl17@@tools/statusline/statusline.mjs@@s#if (!head.startsWith('ref:')) return#if (head.startsWith('ref:')) return#@@a branch HEAD is shown as a short SHA and a detached one as a branch

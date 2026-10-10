@@ -5,15 +5,14 @@
 //   - API / pay-as-you-go / anything else: estimated session cost (list price,
 //     may differ from the bill)
 //
-// Needs only Node 18+. No dependencies, and normally no child processes: the
-// branch is read straight from .git/HEAD, so each refresh is a single
-// short-lived process. The one exception is a reftable repository, where HEAD
-// holds a placeholder and a single `git branch --show-current` is run instead.
+// Needs only Node 18+. No dependencies and no child processes: the branch is
+// read straight from .git/HEAD, so each refresh is a single short-lived process
+// and nothing in the directory being viewed is ever executed. (A reftable
+// repository keeps only a placeholder in HEAD, so its branch is left out.)
 //
 // Registered via settings.json (see docs/statusline.md for the exact line):
 //   "statusLine": { "type": "command", "command": "node ~/.claude/statusline.mjs" }
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -38,7 +37,10 @@ try { d = JSON.parse((await readStdin()) || '{}') ?? {}; } catch { /* render wit
 // Green below yellowAt, yellow up to redAt, red at or above. Context uses 70/90;
 // usage limits use 60/80 because running out mid-session is more disruptive
 // than a compaction.
-const color = (pct, y = 70, r = 90) => (pct >= r ? C.red : pct >= y ? C.yellow : C.green);
+const color = (pct, y = 70, r = 90) => {
+  if (pct >= r) return C.red;
+  return pct >= y ? C.yellow : C.green;
+};
 const bar = (pct, w = 10) => {
   const filled = Math.floor((Math.min(100, Math.max(0, pct)) * w) / 100);
   return '▓'.repeat(filled) + '░'.repeat(w - filled);
@@ -53,37 +55,45 @@ const until = (epoch) => {
   return days > 0 ? `${days}d ${hours}h` : `${hours}h ${Math.floor((s % 3600) / 60)}m`;
 };
 
-const currentBranch = (cwd) => {
-  try {
-    return execFileSync('git', ['branch', '--show-current'], { cwd, encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch { return ''; }
-};
+const HEADS = 'refs/heads/';
 
-// Branch (or short SHA when detached) without spawning git. Walks up to find
-// .git; a .git *file* (worktree or submodule) points at the real git dir.
-function branchOf(start) {
+// The nearest .git (a folder, or a file for a worktree or submodule) at or above
+// `start`, as { dir, dotGit, isFile }, or null.
+function findDotGit(start) {
   let dir = resolve(start);
   for (;;) {
     const dotGit = join(dir, '.git');
-    let st = null;
-    try { st = statSync(dotGit); } catch { /* not here, try the parent */ }
-    if (st) {
-      let gitDir = dotGit;
-      if (st.isFile()) {
-        const m = /^gitdir:\s*(.+)$/m.exec(read(dotGit) ?? '');
-        if (!m) return '';
-        gitDir = resolve(dir, m[1].trim());
-      }
-      const head = (read(join(gitDir, 'HEAD')) ?? '').trim();
-      const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
-      // Reftable repositories keep a fixed placeholder here; ask git instead.
-      if (ref && ref[1] === '.invalid') return currentBranch(dir);
-      return ref ? ref[1] : head.slice(0, 7);
-    }
+    try { return { dir, dotGit, isFile: statSync(dotGit).isFile() }; } catch { /* not here, try the parent */ }
     const parent = dirname(dir);
-    if (parent === dir) return '';
+    if (parent === dir) return null;
     dir = parent;
   }
+}
+
+// The real git directory: the .git folder itself, or the target of a .git file's
+// "gitdir:" line. null when the file has no such line.
+function gitDirOf({ dir, dotGit, isFile }) {
+  if (!isFile) return dotGit;
+  const line = (read(dotGit) ?? '').split('\n').find((l) => l.startsWith('gitdir:'));
+  return line ? resolve(dir, line.slice('gitdir:'.length).trim()) : null;
+}
+
+// Branch name from HEAD, the short SHA when detached, or '' when HEAD points
+// somewhere that is not a branch. A reftable repository keeps the fixed
+// placeholder ".invalid" here, which is never a real branch name (a ref
+// component cannot start with a dot), so it is treated as unknown.
+function branchFromHead(head) {
+  if (!head.startsWith('ref:')) return head.slice(0, 7);
+  const target = head.slice('ref:'.length).trim();
+  const name = target.startsWith(HEADS) ? target.slice(HEADS.length) : '';
+  return name === '.invalid' ? '' : name;
+}
+
+// Branch (or short SHA when detached) without spawning git.
+function branchOf(start) {
+  const found = findDotGit(start);
+  const gitDir = found && gitDirOf(found);
+  return gitDir ? branchFromHead((read(join(gitDir, 'HEAD')) ?? '').trim()) : '';
 }
 
 const model = d.model?.display_name ?? '';
@@ -94,7 +104,9 @@ const ctxPct = Math.floor(num(d.context_window?.used_percentage) ?? 0);
 const dir = d.workspace?.current_dir ?? d.cwd ?? process.cwd();
 const branch = branchOf(dir);
 const repoName = d.workspace?.repo?.name ?? '';
-const repo = repoName ? `📦 ${d.workspace.repo.owner ? d.workspace.repo.owner + '/' : ''}${repoName} ` : '';
+const owner = d.workspace?.repo?.owner;
+const slug = owner ? `${owner}/${repoName}` : repoName;
+const repo = repoName ? `📦 ${slug} ` : '';
 
 // Folder name only when it differs from the repo name, so it earns its space.
 const folder = basename(resolve(dir));

@@ -282,7 +282,7 @@ Run with `node` (18 or later). Each case feeds the script the JSON Claude Code w
 - **Gateway spend limit:** the bar, amounts and reset; a 0% spend shown; amounts shown only when both are supplied; the cost display replaced.
 - **Pay-as-you-go:** the cost to two places; an empty `rate_limits` and a non-numeric value both give the cost.
 - **Tags:** worktree name and branch, agent name, and nothing added when absent.
-- **Repository and branch:** owner and name; the folder marker hidden when it matches the repo name and shown when it does not; a subdirectory; a branch containing a slash; the `cwd` fallback; the branch read from the session directory and not the process directory (a regression test); a real linked worktree; a detached HEAD; no repository; an unusable or dangling `.git` file; a real reftable repository (when git is 2.45 or later) and the `.invalid` placeholder never printed as a branch.
+- **Repository and branch:** owner and name; the folder marker hidden when it matches the repo name and shown when it does not; a subdirectory; a branch containing a slash; the `cwd` fallback; the branch read from the session directory and not the process directory (a regression test); a real linked worktree; a detached HEAD; no repository; an unusable or dangling `.git` file; a real reftable repository (when git is 2.45 or later) and the `.invalid` placeholder both showing no branch, a `HEAD` that points outside `refs/heads` showing none, and a fake `git` first on `PATH` that must never fire (the script runs nothing).
 - **Slow stdin:** JSON arriving in chunks with pauses, one cut inside a multi-byte character.
 - **The exact command:** `node ~/.claude/statusline.mjs` run under bash with `HOME` pointed at a temp folder.
 

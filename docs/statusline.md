@@ -24,7 +24,7 @@ Usage bars are green below 60%, yellow from 60% and red from 80%, because runnin
 ## Requirements
 
 - Node.js 18 or later. Claude Code itself is a native binary, so Node is not guaranteed to be on the machine.
-- `git` is not needed in normal use. The branch is read straight from `.git/HEAD`, which keeps each refresh to one short-lived process. The one exception is a repository created with `git init --ref-format=reftable`, where `HEAD` holds a placeholder; the script then runs a single `git branch --show-current`.
+- `git` is not needed and is never run. The branch is read straight from `.git/HEAD`, so each refresh is one short-lived process and nothing in the folder being viewed is executed. A repository created with `git init --ref-format=reftable` keeps only a placeholder in `HEAD`, so for those the branch is left out.
 - A terminal font with the emoji used (📁 📦 🌿 🧠 🌳 👤).
 - The spend bar needs Claude Code 2.1.251 or later, and the `$used/$limit` amounts need 2.1.284 or later. On older versions the fields are simply absent and the script falls back to what is there.
 

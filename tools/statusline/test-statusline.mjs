@@ -16,7 +16,10 @@ import { fileURLToPath } from 'node:url';
 const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'statusline.mjs');
 let pass = 0, fail = 0, skips = 0;
 const check = (desc, ok, extra = '') => {
-  if (ok) { pass++; console.log(`PASS: ${desc}`); } else { fail++; console.log(`FAIL: ${desc}${extra ? ` (${extra})` : ''}`); }
+  if (ok) { pass++; console.log(`PASS: ${desc}`); return; }
+  fail++;
+  const detail = extra ? ' (' + extra + ')' : '';
+  console.log(`FAIL: ${desc}${detail}`);
 };
 const skip = (desc) => { skips++; console.log(`SKIP: ${desc}`); };
 
@@ -33,10 +36,10 @@ const cleanEnv = () => {
 };
 
 // Runs the script with `input` on stdin (an object is serialised, a string is sent as is).
-function run(input, { cwd = os.tmpdir() } = {}) {
+function run(input, { cwd = os.tmpdir(), env = cleanEnv() } = {}) {
   const r = spawnSync(process.execPath, [script], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
-    encoding: 'utf8', cwd, env: cleanEnv(), timeout: 20000,
+    encoding: 'utf8', cwd, env, timeout: 20000,
   });
   const raw = r.stdout ?? '';
   const lines = plain(raw).split('\n');
@@ -64,9 +67,29 @@ function runChunked(json, cuts, { cwd = os.tmpdir() } = {}) {
   });
 }
 
-const git = (cwd, ...args) => spawnSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: cleanEnv() });
+// Absolute path of a program found on PATH, or null. Spawning by absolute path means a
+// program of the same name in the working directory can never be picked up instead.
+function findOnPath(name) {
+  const exts = process.platform === 'win32' ? ['.exe', '.cmd'] : [''];
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter((d) => path.isAbsolute(d))) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, name + ext);
+      try { if (fs.statSync(candidate).isFile()) return candidate; } catch { /* not in this folder */ }
+    }
+  }
+  return null;
+}
+const gitPath = findOnPath('git');
+const bashPath = findOnPath('bash');
+
+const git = (cwd, ...args) => !gitPath ? { status: 127, stdout: '', stderr: 'git not found' } : spawnSync(gitPath, ['-c', 'user.name=test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: cleanEnv() });
 const hasGit = git(os.tmpdir(), '--version').status === 0;
-const gitVersion = (() => { const m = /(\d+)\.(\d+)/.exec(git(os.tmpdir(), '--version').stdout ?? ''); return m ? [Number(m[1]), Number(m[2])] : [0, 0]; })();
+// "git version 2.55.0.windows.3" -> [2, 55]
+const gitVersion = (() => {
+  const word = (git(os.tmpdir(), '--version').stdout ?? '').split(/\s+/).find((w) => /^\d/.test(w)) ?? '';
+  const [major, minor] = word.split('.').map(Number);
+  return [major || 0, minor || 0];
+})();
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 
@@ -158,9 +181,9 @@ for (const [desc, input] of [
   check('0% spend is shown and does not fall through to the cost', zero.line2.includes('spend ░░░░░░░░░░ 0%') && !zero.line2.includes('💰'), zero.line2);
   check('spend without amounts or a reset shows only the bar', !zero.line2.includes('$') && !zero.line2.includes('(') , zero.line2);
 
-  for (const [which, fields] of [['used only', { used_usd: 5 }], ['limit only', { limit_usd: 50 }]]) {
+  for (const [label, fields] of [['used only', { used_usd: 5 }], ['limit only', { limit_usd: 50 }]]) {
     const partial = run({ rate_limits: { spend_limit: { used_percentage: 10, ...fields } } });
-    check(`spend amounts are shown only when both are supplied (${which})`, partial.status === 0 && partial.line2.includes('spend ▓░░░░░░░░░ 10%') && !partial.line2.includes('$'), partial.line2);
+    check(`spend amounts are shown only when both are supplied (${label})`, partial.status === 0 && partial.line2.includes('spend ▓░░░░░░░░░ 10%') && !partial.line2.includes('$'), partial.line2);
   }
 }
 
@@ -260,7 +283,7 @@ if (!hasGit) {
   const dg = run({ workspace: { current_dir: dangling } });
   check('a gitdir that does not exist gives no branch and no error', dg.status === 0 && !dg.line1.includes('🌿'), dg.line1);
 
-  // Reftable: HEAD holds a placeholder, so the script has to ask git.
+  // Reftable: HEAD holds only a placeholder, so the branch is left out (the script runs nothing).
   const reftable = path.join(base, 'reftable-repo');
   fs.mkdirSync(reftable);
   const [major, minor] = gitVersion;
@@ -273,7 +296,8 @@ if (!hasGit) {
     const head = fs.readFileSync(path.join(reftable, '.git', 'HEAD'), 'utf8');
     check('a reftable repository really does keep the placeholder in .git/HEAD', head.includes('.invalid'), head.trim());
     const rt = run({ workspace: { current_dir: reftable } });
-    check('a reftable repository shows the real branch, not ".invalid"', rt.line1.includes('🌿 reftable-branch') && !rt.line1.includes('.invalid'), rt.line1);
+    check('a reftable repository shows no branch, and never ".invalid"', rt.status === 0 && !rt.line1.includes('🌿') && !rt.line1.includes('.invalid'), rt.line1);
+    check('...but the rest of line 1 is still there', rt.line1.includes('📁 reftable-repo'), rt.line1);
   }
   // The placeholder in a repository git cannot resolve must never be shown as a branch.
   const fake = path.join(base, 'fake-placeholder');
@@ -281,7 +305,35 @@ if (!hasGit) {
   fs.mkdirSync(path.join(fake, '.git'));
   fs.writeFileSync(path.join(fake, '.git', 'HEAD'), 'ref: refs/heads/.invalid\n');
   const fk = run({ workspace: { current_dir: fake } });
-  check('the ".invalid" placeholder is never printed as a branch', fk.status === 0 && !fk.line1.includes('.invalid'), fk.line1);
+  check('the ".invalid" placeholder is never printed as a branch', fk.status === 0 && !fk.line1.includes('.invalid') && !fk.line1.includes('🌿'), fk.line1);
+
+  // HEAD pointing somewhere that is not a branch is not shown as one either.
+  const remote = path.join(base, 'remote-head');
+  fs.mkdirSync(remote);
+  fs.mkdirSync(path.join(remote, '.git'));
+  fs.writeFileSync(path.join(remote, '.git', 'HEAD'), 'ref: refs/remotes/origin/main\n');
+  const rm = run({ workspace: { current_dir: remote } });
+  check('a HEAD that points outside refs/heads shows no branch', rm.status === 0 && !rm.line1.includes('🌿'), rm.line1);
+
+  // The script must run nothing at all. Put a fake git first on PATH (and, on Windows, a copy
+  // of node.exe called git.exe plus a script called "branch" for it to run) and check that a
+  // reftable-style placeholder never makes it fire. This fails against a script that shells out.
+  const trap = mkTmp('nospawn');
+  const trapBin = path.join(trap, 'bin');
+  const trapRepo = path.join(trap, 'repo');
+  fs.mkdirSync(trapBin);
+  fs.mkdirSync(path.join(trapRepo, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(trapRepo, '.git', 'HEAD'), 'ref: refs/heads/.invalid\n');
+  const marker = path.join(trap, 'was-run.txt');
+  if (process.platform === 'win32') {
+    try { fs.linkSync(process.execPath, path.join(trapBin, 'git.exe')); } catch { fs.copyFileSync(process.execPath, path.join(trapBin, 'git.exe')); }
+    fs.writeFileSync(path.join(trapRepo, 'branch'), 'require("fs").writeFileSync(' + JSON.stringify(marker) + ', "x");\n');
+  } else {
+    fs.writeFileSync(path.join(trapBin, 'git'), '#!/bin/sh\n: > "' + marker + '"\n', { mode: 0o755 });
+  }
+  const trapEnv = { ...cleanEnv(), PATH: trapBin + path.delimiter + (process.env.PATH ?? '') };
+  const tr = run({ workspace: { current_dir: trapRepo } }, { cwd: trapRepo, env: trapEnv });
+  check('a reftable placeholder never makes the script run git (or anything else)', tr.status === 0 && !fs.existsSync(marker) && !tr.line1.includes('🌿'), tr.line1);
 }
 
 // --- stdin arriving slowly, in pieces ----------------------------------------------------
@@ -300,11 +352,10 @@ if (!hasGit) {
   const home = mkTmp('home');
   fs.mkdirSync(path.join(home, '.claude'));
   fs.copyFileSync(script, path.join(home, '.claude', 'statusline.mjs'));
-  const bash = spawnSync('bash', ['--version'], { encoding: 'utf8' });
-  if (bash.status !== 0) {
+  if (!bashPath) {
     skip('node ~/.claude/statusline.mjs under bash (bash is not on PATH)');
   } else {
-    const r = spawnSync('bash', ['-c', 'node ~/.claude/statusline.mjs'], {
+    const r = spawnSync(bashPath, ['-c', 'node ~/.claude/statusline.mjs'], {
       input: JSON.stringify({ model: { display_name: 'Widget 1' }, context_window: { used_percentage: 20 } }),
       encoding: 'utf8', cwd: os.tmpdir(), timeout: 20000,
       env: { ...cleanEnv(), HOME: home, USERPROFILE: home },
@@ -314,5 +365,6 @@ if (!hasGit) {
   }
 }
 
-console.log(`--- ${pass} passed, ${fail} failed${skips ? `, ${skips} skipped` : ''} ---`);
+const skipNote = skips ? ', ' + skips + ' skipped' : '';
+console.log(`--- ${pass} passed, ${fail} failed${skipNote} ---`);
 process.exit(fail ? 1 : 0);
