@@ -46,6 +46,7 @@ The distinction that matters throughout: **`daily-notes/` is a session log; `rep
 - [`docs/mcp-setup.md`](docs/mcp-setup.md) — connect Claude Code to the vault (one-time, per machine)
 - [`docs/mcp-tools-reference.md`](docs/mcp-tools-reference.md) — everything the vault connection can actually do
 - [`docs/automation.md`](docs/automation.md) — optional slash commands, skills, and git hooks that remove most of the remembering
+- [`docs/statusline.md`](docs/statusline.md) — optional: a cross-platform Claude Code status line (model, branch, context and usage bars)
 - [`docs/testing.md`](docs/testing.md) — how to run the test suites, what each one checks in plain English, the manual mutation checks, and what is deliberately not covered
 - [`runbooks/using-the-vault.md`](runbooks/using-the-vault.md) — the three recurring workflows, as plain-English prompts
 - [`runbooks/daily-workflow.md`](runbooks/daily-workflow.md) — a return-to checklist, plus worked examples including how merge conflicts happen and get resolved

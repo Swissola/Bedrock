@@ -177,6 +177,7 @@ Deliberately rejected. Having a hook push its own commit immediately would remov
 
 ## Related
 
+- [`statusline.md`](statusline.md) — an optional status line for Claude Code, separate from the vault commands and hooks
 - [`../runbooks/using-the-vault.md`](../runbooks/using-the-vault.md) — the manual workflows this automates
 - [`../runbooks/daily-workflow.md`](../runbooks/daily-workflow.md) — where hooks fit into an actual session, and the worked example of catching up on unpushed commits
 

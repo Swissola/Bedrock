@@ -22,6 +22,7 @@ on:
           - session-start-vault-context
           - install-claude-config
           - setup-mcp
+          - statusline
       jobs_per_group:
         description: Mutants to run at the same time within a group
         type: choice
