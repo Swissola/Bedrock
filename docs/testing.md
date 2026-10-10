@@ -182,9 +182,9 @@ Added:
 
 ### `tools/hook-templates/test-session-start-vault-context.sh`: the `session-start-vault-context` hook
 
-Loads the repo's vault doc and the latest daily note's forward-looking sections at session start.
+Loads the repo's vault doc and, for each contributor, the latest daily note about this repo (forward-looking sections only) at session start.
 
-Original scenarios: no vault root, no repo doc, the default layout, the newest note by modification time across contributors, `compact` and malformed stdin, a note with no forward sections, no notes, `vault-config.md` paths and quoting and CRLF, an unclosed config, unsafe config paths, the `{author}` placeholder, and the appended-update handling (latest only, truncation, position, update-only notes).
+Original scenarios: no vault root, no repo doc, the default layout, the latest note from each contributor, `compact` and malformed stdin, a note with no forward sections, no notes, `vault-config.md` paths and quoting and CRLF, an unclosed config, unsafe config paths, the `{author}` placeholder, and the appended-update handling (latest only, truncation, position, update-only notes).
 
 Added:
 
@@ -194,7 +194,18 @@ Added:
 | `every_source_except_compact_injects_context` | `startup`, `resume`, `clear`, `fork` and an unknown source all load. |
 | `compact_is_recognised_whatever_the_json_layout` | Spaces around the colon, other fields, several lines; and the word "compact" in another field does not skip. |
 | `repo_name_falls_back_to_the_folder_name_without_an_origin` | No `origin`: the folder name is used. |
-| `repo_name_comes_from_the_origin_in_every_common_form` | SSH, HTTPS, with and without `.git`. |
+| `the_repo_is_named_after_its_folder_not_its_remote` | A folder and a remote with different names: the folder's doc is loaded. |
+| `the_repo_name_is_lowercased_by_default_and_kept_with_repo_name_case_keep` | Default and `lower` lowercase, `keep` uses the folder's case, an unknown value is the default. |
+| `the_case_setting_also_decides_which_notes_belong_to_the_repo` | With `keep`, a note named in a different case is a different repo's. |
+| `a_linked_worktree_is_the_same_repo_as_its_main_checkout` / `a_subfolder_of_the_repo_is_still_the_repo` / `claude_project_dir_wins_over_the_working_directory` / `outside_a_git_repo_the_folder_name_is_used` | The ways the hook can be started, all naming the repo correctly. |
+| `every_contributors_latest_note_is_loaded_most_recent_first` / `only_each_contributors_newest_note_is_loaded` | One note per contributor, newest first, labelled with who wrote it. |
+| `the_contributor_limit_defaults_to_three_and_can_be_changed` | Three by default with a "more contributors" line, `CONTEXT_MAX_CONTRIBUTORS` 1 and 9, and a non-number falling back to three. |
+| `the_filename_date_beats_the_modification_time` / `the_modification_time_breaks_a_tie_on_the_same_date` | A git checkout's pull times do not decide which note is latest; same date: the newer file. |
+| `another_repos_newer_note_is_never_loaded` / `a_repo_with_no_notes_says_so_even_when_others_have_some` | The repo filter, and "No daily notes yet for this repo." |
+| `the_repo_filter_needs_the_whole_name_between_separators` / `glob_characters_in_a_repo_name_match_literally` | `widgetry` and `mywidget` are not `widget`; brackets and a star in a repo name are literal. |
+| `the_repo_filter_works_together_with_contributor_folders` / `without_a_repo_in_the_pattern_every_note_is_a_candidate` | Contributors with no note about this repo are skipped; with no `{repo}` in the pattern nothing is filtered. |
+| `hidden_conflict_and_non_markdown_files_are_never_candidates` | Dot-files, files in dot-folders, Syncthing conflict copies, `.txt` and temp files. |
+| `the_personal_vault_layout_end_to_end` | A flat vault, repo in the filename, `repoNameCase: keep`: another repo's newer note never reaches this session. |
 | `output_starts_with_the_context_header` | The exact first line. |
 | `a_note_with_only_one_forward_section_loads_just_that_one` | Context only, and next-steps only, without the history. |
 | `sections_end_at_the_next_heading_and_keep_their_subheadings` | A section stops at the next `##` and keeps its `###` content. |

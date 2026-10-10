@@ -165,7 +165,7 @@ test_never_touches_real_home_without_prefix_in_tests() {
 test_session_start_wrapper_uses_vault_root_file() {
   # End to end: install with --vault, then run the installed wrapper the way a
   # project's SessionStart hook would (no VAULT_ROOT in the environment).
-  local p v repo out; p=$(mktemp -d); v=$(mktemp -d); repo=$(mktemp -d)
+  local p v repo out; p=$(mktemp -d); v=$(mktemp -d); repo=$(mktemp -d)/widget; mkdir -p "$repo"
   git -C "$repo" init -q -b main; git -C "$repo" remote add origin "https://example.com/org/widget.git"
   mkdir -p "$v/repos/widget" "$v/daily-notes/alice"
   echo "REPODOC-MARKER" > "$v/repos/widget/index.md"
@@ -176,7 +176,7 @@ test_session_start_wrapper_uses_vault_root_file() {
   assert_contains "wrapper: loads the latest note's context" "CTX-MARKER" "$out"
   out=$( cd "$repo" && printf '{"source":"compact"}' | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
   assert_eq "wrapper: passes stdin through (compact still skipped)" "" "$out"
-  rm -rf "$p" "$v" "$repo"
+  rm -rf "$p" "$v" "$(dirname "$repo")"
   return $?
 }
 
@@ -421,7 +421,7 @@ test_vault_path_with_a_double_quote_is_not_written_into_the_json() {
 }
 
 test_wrapper_prefers_vault_root_from_the_environment_over_the_file() {
-  local p v_file v_env repo out; p=$(mktemp -d); v_file=$(mktemp -d); v_env=$(mktemp -d); repo=$(mktemp -d)
+  local p v_file v_env repo out; p=$(mktemp -d); v_file=$(mktemp -d); v_env=$(mktemp -d); repo=$(mktemp -d)/widget; mkdir -p "$repo"
   git -C "$repo" init -q -b main; git -C "$repo" remote add origin "https://example.com/org/widget.git"
   mkdir -p "$v_file/repos/widget" "$v_env/repos/widget"
   echo "FROM-FILE-VAULT" > "$v_file/repos/widget/index.md"
@@ -430,19 +430,19 @@ test_wrapper_prefers_vault_root_from_the_environment_over_the_file() {
   out=$( cd "$repo" && printf '%s' "$STARTUP_JSON" | env VAULT_ROOT="$v_env" bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
   assert_contains "wrapper: VAULT_ROOT from the environment wins" "FROM-ENV-VAULT" "$out"
   assert_eq "wrapper: the vault-root file's vault is not used" "0" "$(printf '%s' "$out" | grep -c 'FROM-FILE-VAULT')"
-  rm -rf "$p" "$v_file" "$v_env" "$repo"
+  rm -rf "$p" "$v_file" "$v_env" "$(dirname "$repo")"
   return $?
 }
 
 test_wrapper_reads_a_crlf_vault_root_file() {
-  local p v repo out; p=$(mktemp -d); v=$(mktemp -d); repo=$(mktemp -d)
+  local p v repo out; p=$(mktemp -d); v=$(mktemp -d); repo=$(mktemp -d)/widget; mkdir -p "$repo"
   git -C "$repo" init -q -b main; git -C "$repo" remote add origin "https://example.com/org/widget.git"
   mkdir -p "$v/repos/widget"; echo "CRLF-VAULT-DOC" > "$v/repos/widget/index.md"
   bash "$INSTALLER" --prefix "$p/claude" >/dev/null 2>&1
   mkdir -p "$p/claude/hook-configs"; printf '%s\r\n' "$v" > "$p/claude/hook-configs/vault-root"
   out=$( cd "$repo" && printf '%s' "$STARTUP_JSON" | env -u VAULT_ROOT bash "$p/claude/hook-templates/session-start-vault-context.sh" 2>&1 )
   assert_contains "wrapper: a CRLF vault-root file still resolves the vault" "CRLF-VAULT-DOC" "$out"
-  rm -rf "$p" "$v" "$repo"
+  rm -rf "$p" "$v" "$(dirname "$repo")"
   return $?
 }
 

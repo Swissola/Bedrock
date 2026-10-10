@@ -2,7 +2,7 @@
 description: Catch up on the vault — read the hub note and recent daily notes
 argument-hint: [optional topic or person to focus on]
 ---
-<!-- bedrock-template: vault-context, version 2 -->
+<!-- bedrock-template: vault-context, version 3 -->
 
 See `runbooks/using-the-vault.md` in the vault, section 1, for the manual version of this workflow and its rationale — this command just automates it. Per-vault differences are optional and live in a `vault-config.md` note at the vault root; see `docs/vault-config.md`. With no `vault-config.md`, every setting below takes its default and this behaves exactly as it always has.
 
@@ -27,7 +27,8 @@ If you have neither set of tools, stop and say so.
 | `hubNote` | `index.md` | The vault's hub note. `none` means there isn't one, skip step 1 |
 | `dailyNotesPath` | `daily-notes/{author}` | Where daily notes live. `{author}` stands for each contributor's subfolder, so scan every subfolder; a path with no `{author}` is a single flat folder |
 | `reposPath` | `repos/{repo}/index.md` | Where a repo's own reference doc lives |
-| `contextReadsRepoDoc` | `false` | If `true`, also read the current repo's doc at `reposPath` (`{repo}` is the basename of `git rev-parse --show-toplevel`, lowercased) when it exists |
+| `repoNameCase` | `lower` | `lower`: the repo name used for `{repo}` is lowercased. `keep`: used exactly as the repo's folder is named. |
+| `contextReadsRepoDoc` | `false` | If `true`, also read the current repo's doc at `reposPath` (`{repo}` is the basename of `git rev-parse --show-toplevel`, lowercased unless `repoNameCase` is `keep`) when it exists |
 
 ## Steps
 

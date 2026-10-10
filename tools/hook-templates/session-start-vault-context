@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# SessionStart hook: auto-loads this repo's own vault context - repos/<name>/
-# index.md, plus the single most recent daily note across every contributor
-# - at the start of a session in THIS repo, so work resumes without
-# re-explaining anything or remembering to ask for /vault-context.
+# SessionStart hook: auto-loads this repo's own vault context - its repo doc
+# (repos/<name>/index.md by default), plus the latest daily note about this
+# repo from each contributor - at the start of a session in THIS repo, so work
+# resumes without re-explaining anything or remembering to ask for /vault-context.
 #
 # This is a DIFFERENT hook from session-start-vault-check: that one fires
 # everywhere (user-scope) and only ever reminds you the vault has unpushed
@@ -25,15 +25,37 @@
 # a deliberate exception to the MCP-only convention in
 # obsidian-vault-conventions: this is plumbing that runs before the model's
 # own tool-calling loop begins, not an in-session action, and the vault is a
-# plain git clone on disk regardless of how the model itself is told to
+# plain directory on disk regardless of how the model itself is told to
 # access it.
 #
-# Silent no-op if this repo has no repos/<name>/index.md yet (not opted in,
-# or not bootstrapped) - same precondition as post-merge: run /vault-populate
-# (or ask your assistant directly) first. Where that doc and the daily notes
-# live can be changed per vault with `reposPath` / `dailyNotesPath` in an
-# optional vault-config.md, see docs/vault-config.md; the paths above are the
-# defaults.
+# Silent no-op if this repo has no repo doc yet (not opted in, or not
+# bootstrapped) - same precondition as post-merge: run /vault-populate (or ask
+# your assistant directly) first. Where that doc and the daily notes live, how
+# notes are named and how the repo name is cased can be changed per vault with
+# `reposPath`, `dailyNotesPath`, `filenamePattern` and `repoNameCase` in an
+# optional vault-config.md, see docs/vault-config.md; the defaults are
+# described there.
+#
+# WHICH REPO. The repo name is the name of the folder the repo lives in (the
+# main checkout, so a linked worktree gets the same name as its main one), the
+# same name the vault commands use, lowercased unless repoNameCase is `keep`.
+# It is not taken from the git remote: a remote can be spelt differently from
+# the folder, and the commands never look at it.
+#
+# WHICH NOTES. When filenamePattern contains {repo}, only notes whose filename
+# matches the pattern for THIS repo are considered, so a busy day in another
+# repo cannot push this repo's last session out. Without {repo} in the pattern
+# there is nothing to tell repos apart by and every note is a candidate.
+#
+# WHOSE NOTES. When dailyNotesPath contains {author}, each subfolder of its base
+# is one contributor and the latest note from each is loaded, most recent first,
+# up to CONTEXT_MAX_CONTRIBUTORS (default 3) of them. Otherwise everything is
+# one group and just the latest note is loaded. "Latest" is the newest date in
+# the filename, then the newest file modification time among notes sharing that
+# date: a git checkout stamps every file with the time it was pulled, so the
+# modification time alone would mean "last pulled", not "last written". Hidden
+# files, anything that is not .md and Syncthing conflict copies are never
+# candidates.
 #
 # Skips entirely on a mid-session /compact. Claude Code passes
 # {"source": "startup"|"resume"|"clear"|"compact"|"fork", ...} on stdin; a
@@ -43,27 +65,19 @@
 # rather than risk silently skipping a genuine session start - the safer
 # failure mode for a hook whose entire job is not letting context go missing.
 #
-# The daily note is loaded trimmed to its two forward-looking sections only
+# Each note is loaded trimmed to its two forward-looking sections only
 # ("## Context for Future Sessions", "## Open Questions / Next Steps", from
 # the template in runbooks/using-the-vault.md) - the historical sections
-# ("What Was Done", "Decisions Made", "Problems Solved", "Commands Used")
 # stay in the vault, reachable on request, not needed automatically every
 # session. Falls back to loading the full note if neither forward-looking
 # section is present (an older note, or one that's pure history), rather
 # than silently showing nothing.
 #
-# If the note also has appended "## Update ..." sections (what /vault-log adds
+# If a note also has appended "## Update ..." sections (what /vault-log adds
 # when a note for the same session already exists), the MOST RECENT one is
 # loaded too, capped at UPDATE_MAX_LINES (default 40) lines, with a count of any
 # earlier updates left out. An append can't rewrite the forward-looking
 # sections, so without this the latest state never reached the next session.
-#
-# "Most recent daily note" is found by actual file modification time across
-# EVERY daily-notes/<person>/ subfolder, not by a filename or directory
-# sort - a plain per-directory `ls -t` can't compare mtimes across multiple
-# sibling subfolders, and a filename sort would be wrong on any day with
-# more than one note written (it sorts by topic slug text, not by which one
-# was actually written last).
 
 set -u
 
@@ -77,16 +91,11 @@ SOURCE=$(printf '%s' "$STDIN_JSON" | grep -o '"source"[[:space:]]*:[[:space:]]*"
 VAULT_ROOT="${VAULT_ROOT:-}"
 [ -z "$VAULT_ROOT" ] && exit 0
 
-REPO_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"
-[ -z "$REPO_NAME" ] && REPO_NAME="$(basename "$(pwd)")"
-
-# Optional per-vault settings (docs/vault-config.md): `reposPath` and
-# `dailyNotesPath`, read from the frontmatter of vault-config.md at the vault
-# root. With no such file, or no such key, the defaults below apply and this
-# behaves exactly as it did before the file existed. Parsed in plain bash
-# because this hook runs before any MCP tool is available. A config whose
-# frontmatter has no closing `---` is ignored entirely, rather than guessing
-# where it ends.
+# Optional per-vault settings (docs/vault-config.md), read from the frontmatter
+# of vault-config.md at the vault root. With no such file, or no such key, the
+# defaults below apply. Parsed in plain bash because this hook runs before any
+# MCP tool is available. A config whose frontmatter has no closing `---` is
+# ignored entirely, rather than guessing where it ends.
 config_value() {
   [ -f "$VAULT_ROOT/vault-config.md" ] || return 0
   tr -d '\r' < "$VAULT_ROOT/vault-config.md" | awk -v k="$1" '
@@ -110,12 +119,38 @@ safe_rel() {
   return 0
 }
 
+# --- which repo --------------------------------------------------------------
+
+# The folder of the repo's main checkout. In a linked worktree the git common
+# directory is still the main checkout's .git, so a worktree named after its
+# branch does not become a different repo. Falls back to the top of the
+# working tree, then to the working directory itself outside any repo.
+repo_folder() {
+  local start common top
+  start="${CLAUDE_PROJECT_DIR:-.}"
+  common="$(cd "$start" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  case "$common" in
+    */.git) printf '%s' "${common%/.git}"; return 0 ;;
+  esac
+  top="$(cd "$start" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"
+  if [ -n "$top" ]; then printf '%s' "$top"; else (cd "$start" 2>/dev/null && pwd); fi
+  return 0
+}
+
+REPO_NAME="$(basename "$(repo_folder)")"
+case "$(config_value repoNameCase)" in
+  keep) ;;
+  *) REPO_NAME="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]')" ;;
+esac
+
 REPOS_PATH="$(config_value reposPath)"
 safe_rel "$REPOS_PATH" || REPOS_PATH="repos/{repo}/index.md"
 INDEX_REL="${REPOS_PATH//\{repo\}/$REPO_NAME}"
 INDEX_FILE="$VAULT_ROOT/$INDEX_REL"
 
 [ -f "$INDEX_FILE" ] || exit 0
+
+# --- which notes -------------------------------------------------------------
 
 # Daily notes are scanned from the part of dailyNotesPath before its first
 # placeholder, so `daily-notes/{author}` scans every contributor's subfolder
@@ -126,12 +161,94 @@ DAILY_BASE="${DAILY_PATH%%\{*}"
 DAILY_BASE="${DAILY_BASE%/}"
 [ -n "$DAILY_BASE" ] || DAILY_BASE="daily-notes"
 DAILY_DIR="$VAULT_ROOT/$DAILY_BASE"
-LATEST_NOTE=""
+HAS_AUTHOR=0
+case "$DAILY_PATH" in *"{author}"*) HAS_AUTHOR=1 ;; esac
+
+# The filename pattern as a glob. With {repo} in it, only this repo's notes
+# match; every other {placeholder} becomes a wildcard. Glob characters in the
+# repo name itself are escaped so they match literally.
+NAME_PATTERN="$(config_value filenamePattern)"
+[ -n "$NAME_PATTERN" ] || NAME_PATTERN="{date}-{topic}"
+REPO_FILTERED=0
+NOTE_GLOB="*"
+case "$NAME_PATTERN" in
+  *"{repo}"*)
+    REPO_FILTERED=1
+    REPO_GLOB="$(printf '%s' "$REPO_NAME" | sed 's/[][*?\\]/\\&/g')"
+    NOTE_GLOB="${NAME_PATTERN//\{repo\}/$REPO_GLOB}"
+    NOTE_GLOB="$(printf '%s' "$NOTE_GLOB" | sed -E 's/\{[A-Za-z]+\}/*/g')"
+    ;;
+esac
+NOTE_GLOB="$NOTE_GLOB.md"
+
+MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-3}"
+case "$MAX_CONTRIBUTORS" in ""|*[!0-9]*|0) MAX_CONTRIBUTORS=3 ;; esac
+
+TAB="$(printf '\t')"
+
+# Modification time in seconds, GNU or BSD stat.
+if stat -c %Y / >/dev/null 2>&1; then STAT_FLAVOUR=gnu; else STAT_FLAVOUR=bsd; fi
+mtime_of() {
+  if [ "$STAT_FLAVOUR" = gnu ]; then stat -c %Y "$1" 2>/dev/null; else stat -f %m "$1" 2>/dev/null; fi
+  return 0
+}
+
+# The latest note in one folder (searched recursively), as
+# "<date><TAB><mtime><TAB><path>", or nothing. The date comes from the filename,
+# so no process is started per note; only notes sharing the newest date are
+# asked for a modification time.
+DATE_RE='([0-9]{4}-[0-9]{2}-[0-9]{2})'
+latest_in() {
+  local dir="$1" f name d best="" tied="" m best_m=-1 best_f=""
+  while IFS= read -r f; do
+    name="${f##*/}"
+    d="0000-00-00"
+    if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
+    if [ -z "$best" ] || [[ "$d" > "$best" ]]; then best="$d"; tied="$f"
+    elif [ "$d" = "$best" ]; then tied="$tied
+$f"
+    fi
+  done < <(cd "$dir" 2>/dev/null && find . -type f -name "$NOTE_GLOB" ! -name '*.sync-conflict-*' ! -path '*/.*' 2>/dev/null)
+  [ -n "$best" ] || return 0
+  while IFS= read -r f; do
+    m="$(mtime_of "$dir/${f#./}")"
+    m="${m:-0}"
+    if [ "$m" -gt "$best_m" ]; then best_m="$m"; best_f="$f"; fi
+  done <<EOF
+$tied
+EOF
+  printf '%s%s%s%s%s\n' "$best" "$TAB" "$best_m" "$TAB" "$dir/${best_f#./}"
+  return 0
+}
+
+# One line per contributor: "<date><TAB><mtime><TAB><path><TAB><contributor>".
+CANDIDATES=""
 if [ -d "$DAILY_DIR" ]; then
-  LATEST_NOTE=$(find "$DAILY_DIR" -name '*.md' -type f -exec ls -t {} + 2>/dev/null | head -n1)
+  if [ "$HAS_AUTHOR" = 1 ]; then
+    while IFS= read -r dir; do
+      line="$(latest_in "$dir")"
+      [ -n "$line" ] && CANDIDATES="$CANDIDATES$line$TAB${dir##*/}
+"
+    done < <(find "$DAILY_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.*' 2>/dev/null)
+  else
+    line="$(latest_in "$DAILY_DIR")"
+    [ -n "$line" ] && CANDIDATES="$line$TAB
+"
+  fi
 fi
 
-echo "--- Vault context for $REPO_NAME (auto-loaded, see runbooks/using-the-vault.md in the vault) ---"
+# Most recent first: newest date, then newest modification time.
+SELECTED=""
+TOTAL=0
+if [ -n "$CANDIDATES" ]; then
+  SORTED="$(printf '%s' "$CANDIDATES" | sort -t "$TAB" -k1,1r -k2,2nr)"
+  TOTAL="$(printf '%s\n' "$SORTED" | grep -c .)"
+  SELECTED="$(printf '%s\n' "$SORTED" | head -n "$MAX_CONTRIBUTORS")"
+fi
+
+# --- output ------------------------------------------------------------------
+
+echo "--- Vault context for $REPO_NAME (auto-loaded) ---"
 echo
 echo "## $INDEX_REL"
 cat "$INDEX_FILE"
@@ -159,16 +276,19 @@ extract_last_update() {
 # Cap on how much of that update is loaded (UPDATE_MAX_LINES to override).
 UPDATE_MAX_LINES="${UPDATE_MAX_LINES:-40}"
 
-if [ -n "$LATEST_NOTE" ]; then
-  REL_NOTE="${LATEST_NOTE#"$VAULT_ROOT/"}"
-  CONTEXT_SECTION=$(extract_section "$LATEST_NOTE" "## Context for Future Sessions")
-  NEXT_STEPS_SECTION=$(extract_section "$LATEST_NOTE" "## Open Questions / Next Steps")
+# render_note <path> <contributor, or empty>
+render_note() {
+  local note="$1" who="$2" rel label context next update total earlier update_note lines
+  rel="${note#"$VAULT_ROOT/"}"
+  if [ -n "$who" ]; then label="Latest note from $who"; else label="Most recent daily note"; fi
+  context=$(extract_section "$note" "## Context for Future Sessions")
+  next=$(extract_section "$note" "## Open Questions / Next Steps")
 
-  if [ -n "$CONTEXT_SECTION" ] || [ -n "$NEXT_STEPS_SECTION" ]; then
+  if [ -n "$context" ] || [ -n "$next" ]; then
     echo
-    echo "## Most recent daily note, any contributor: $REL_NOTE (forward-looking sections only; read the note itself, or ask, for full history)"
-    [ -n "$CONTEXT_SECTION" ] && { echo; echo "$CONTEXT_SECTION"; }
-    [ -n "$NEXT_STEPS_SECTION" ] && { echo; echo "$NEXT_STEPS_SECTION"; }
+    echo "## $label: $rel (forward-looking sections only; read the note itself, or ask, for full history)"
+    [ -n "$context" ] && { echo; echo "$context"; }
+    [ -n "$next" ] && { echo; echo "$next"; }
 
     # An appended "## Update ..." section (what /vault-log adds when a note for
     # the same session already exists) can't rewrite the two sections above, so
@@ -176,25 +296,41 @@ if [ -n "$LATEST_NOTE" ]; then
     # forward-looking sections could be out of date. Load the MOST RECENT update
     # only, capped, and say how many earlier ones were left out: the older ones
     # are history, which this hook deliberately doesn't load.
-    UPDATE_SECTION=$(extract_last_update "$LATEST_NOTE")
-    if [ -n "$UPDATE_SECTION" ]; then
-      UPDATE_TOTAL=$(grep -c '^## Update' "$LATEST_NOTE" 2>/dev/null || true)
-      UPDATE_EARLIER=$(( ${UPDATE_TOTAL:-1} - 1 ))
-      UPDATE_NOTE=""
-      [ "$UPDATE_EARLIER" -gt 0 ] && UPDATE_NOTE=" - $UPDATE_EARLIER earlier update(s) in the note not loaded"
+    update=$(extract_last_update "$note")
+    if [ -n "$update" ]; then
+      total=$(grep -c '^## Update' "$note" 2>/dev/null || true)
+      earlier=$(( ${total:-1} - 1 ))
+      update_note=""
+      [ "$earlier" -gt 0 ] && update_note=" - $earlier earlier update(s) in the note not loaded"
       echo
-      echo "## Appended to that note, most recent update (a later same-session addition; it supersedes the sections above where they differ)$UPDATE_NOTE"
-      UPDATE_LINES=$(printf '%s\n' "$UPDATE_SECTION" | wc -l | tr -d ' ')
-      printf '%s\n' "$UPDATE_SECTION" | head -n "$UPDATE_MAX_LINES"
-      if [ "$UPDATE_LINES" -gt "$UPDATE_MAX_LINES" ]; then
-        echo "(update truncated: $((UPDATE_LINES - UPDATE_MAX_LINES)) more lines in the note)"
+      echo "## Appended to that note, most recent update (a later same-session addition; it supersedes the sections above where they differ)$update_note"
+      lines=$(printf '%s\n' "$update" | wc -l | tr -d ' ')
+      printf '%s\n' "$update" | head -n "$UPDATE_MAX_LINES"
+      if [ "$lines" -gt "$UPDATE_MAX_LINES" ]; then
+        echo "(update truncated: $((lines - UPDATE_MAX_LINES)) more lines in the note)"
       fi
     fi
   else
     echo
-    echo "## Most recent daily note, any contributor: $REL_NOTE (no forward-looking sections, loading in full)"
-    cat "$LATEST_NOTE"
+    echo "## $label: $rel (no forward-looking sections, loading in full)"
+    cat "$note"
   fi
+  return 0
+}
+
+if [ -n "$SELECTED" ]; then
+  while IFS="$TAB" read -r _date _mtime path who; do
+    [ -n "$path" ] && render_note "$path" "$who"
+  done <<EOF
+$SELECTED
+EOF
+  if [ "$TOTAL" -gt "$MAX_CONTRIBUTORS" ]; then
+    echo
+    echo "($((TOTAL - MAX_CONTRIBUTORS)) more contributor(s) have notes too; CONTEXT_MAX_CONTRIBUTORS=$TOTAL would load them all)"
+  fi
+elif [ "$REPO_FILTERED" = 1 ]; then
+  echo
+  echo "(No daily notes yet for this repo.)"
 else
   echo
   echo "(No daily notes in the vault yet.)"

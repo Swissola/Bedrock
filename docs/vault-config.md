@@ -16,7 +16,7 @@ All keys are optional. Each command reads only the keys it needs, noted in the l
 |---|---|---|---|
 | `backend` | detected | `rest-api` or `mcpvault`. Normally leave it out: the command works out which `obsidian` MCP server it has from the tools actually available, because it has to know the tool names before it can read this file at all. Set it only to override | all commands, `post-merge` |
 | `dailyNotesPath` | `daily-notes/{author}` | Folder for daily notes. `{author}` (from `git config user.name`, or each contributor's subfolder when reading) and `{repo}` are filled in | log, context, populate, `session-start-vault-context` |
-| `filenamePattern` | `{date}-{topic}` | Note filename without `.md` | log |
+| `filenamePattern` | `{date}-{topic}` | Note filename without `.md`. With `{repo}` in it, `session-start-vault-context` only loads notes named for the current repo | log, `session-start-vault-context` |
 | `appendRule` | `same-day-any-topic` | `same-day-any-topic`: any note from today in the folder is appended to. `exact-path`: only the exact path is appended to, otherwise a new note is created. Use `exact-path` where several notes per day on different topics is normal | log |
 | `tags` | chosen per note | A fixed list, e.g. `[daily-note, "{repo}"]` | log |
 | `frontmatterExtras` | none | Extra fields to write. Supported: `machine` (lowercased `hostname`), `location` | log |
@@ -27,6 +27,7 @@ All keys are optional. Each command reads only the keys it needs, noted in the l
 | `vaultSync` | `git` | How the vault reaches other machines; changes only the closing reminder (`git` reminds you to commit and push) | log |
 | `hubNote` | `index.md` | The vault's hub note. `none` if there isn't one | context, populate |
 | `reposPath` | `repos/{repo}/index.md` | Where a repo's reference doc lives | context, populate, `post-merge`, `session-start-vault-context` |
+| `repoNameCase` | `lower` | `lower`: the repo name used for `{repo}` is lowercased. `keep`: used exactly as the repo's folder is named (a repo called `Widget-Service` stays `Widget-Service`). The commands and `session-start-vault-context` all read it, so notes and docs are named the same way wherever they are written or found | log, context, populate, `session-start-vault-context` |
 | `contextReadsRepoDoc` | `false` | If `true`, `/vault-context` also reads the current repo's doc at `reposPath` | context |
 
 Not configurable, on every vault: **secrets are never written into a note**, even if one appears in the conversation.
@@ -35,7 +36,7 @@ Not configurable, on every vault: **secrets are never written into a note**, eve
 
 Two of the [hook templates](../tools/hook-templates/) read this file too, in plain bash, because they run before (or outside) any MCP session:
 
-- **`session-start-vault-context`** reads `reposPath` and `dailyNotesPath`. It scans for the most recent daily note under the part of `dailyNotesPath` before its first placeholder, so `daily-notes/{author}` scans every contributor's subfolder and `Inbox/daily-notes` scans just that folder.
+- **`session-start-vault-context`** reads `reposPath`, `dailyNotesPath`, `filenamePattern` and `repoNameCase`. It names the repo after the folder it lives in (its main checkout, so a linked worktree counts as the same repo), cased per `repoNameCase`. It scans the part of `dailyNotesPath` before its first placeholder: with `{author}` each subfolder is a contributor and the latest note from each is loaded (most recent first, up to three, or `CONTEXT_MAX_CONTRIBUTORS`); without it, the folder is one group and one note is loaded. With `{repo}` in `filenamePattern`, only notes named for the current repo count, so another repo's busier day never pushes this one's last session out. "Latest" is the newest date in the filename, then the newest file modification time, because a git checkout gives every file the time it was pulled. Hidden files, non-`.md` files and Syncthing conflict copies are ignored.
 - **`post-merge`** reads `reposPath` (the doc it keeps up to date) and `backend` (which MCP tool names the headless run is allowed; with no `backend` it uses MCPVault if the hook's MCP config mentions `mcpvault`, otherwise the REST API tools). It also needs to know *where the vault is* when the vault isn't the repo the hook is installed in: set `VAULT_ROOT` in the environment, or put the vault's absolute path on one line in `~/.claude/hook-configs/vault-root`. A per-machine installer can write that file once instead of editing every repo's hook.
 
 In both, a configured path must be relative and contain no `..` (otherwise it is ignored and the default is used), and a `vault-config.md` whose frontmatter has no closing `---` is ignored entirely.
