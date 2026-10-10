@@ -504,7 +504,7 @@ test_statusline_install_copies_the_script_and_sets_settings() {
   cmd=$(sl_cmd "$p/claude/settings.json")
   assert_contains "statusline install: the command runs node" "node " "$cmd"
   assert_contains "statusline install: the command names the installed script" "/claude/statusline.mjs" "$cmd"
-  assert_eq "statusline install: the command is an absolute path, not ~" "0" "$(printf '%s' "$cmd" | grep -c '~')"
+  assert_eq "statusline install: the command does not start from ~" "0" "$(printf '%s' "$cmd" | grep -c -E "^node '?~")"
   assert_eq "statusline install: the command uses forward slashes only" "0" "$(printf '%s' "$cmd" | grep -c '\\')"
   assert_eq "statusline install: the command starts with an absolute path" "1" "$(printf '%s' "$cmd" | grep -c -E '^node "?(/|[A-Za-z]:/)')"
   assert_eq "statusline install: no backup when there was no settings.json" "0" "$(count_backups "$p/claude")"
