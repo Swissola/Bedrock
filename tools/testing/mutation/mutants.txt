@@ -1,4 +1,4 @@
-# Mutants for tools/run-mutation-tests.sh.
+# Mutants for tools/testing/run-mutation-tests.sh.
 #
 # A mutant is one small, deliberate break in a script (flip a condition, drop a line, change a
 # number). The suite for that script is then run against the broken copy, and it must FAIL:
@@ -18,7 +18,7 @@
 # regular expressions) to a COPY of the target; the repo itself is never modified. A line whose
 # expression changes nothing is reported as a broken mutant, so a refactor that moves the
 # target text cannot silently turn a mutant into a no-op. Blank lines and # lines are ignored.
-# Check them without running any suite: bash tools/run-mutation-tests.sh --check-applies
+# Check them without running any suite: bash tools/testing/run-mutation-tests.sh --check-applies
 
 # ---- pre-commit ---------------------------------------------------------------------------
 pre-commit@@pc1@@tools/hook-templates/pre-commit@@s/ || \[ "\$STRICT" = "true" \]//@@strict mode no longer accepts "true"

@@ -5,15 +5,15 @@
 ## Running them
 
 ```bash
-bash tools/run-all-tests.sh              # everything, one suite after another
-bash tools/run-all-tests.sh --parallel   # everything at once (much quicker; each suite uses its own temp folders)
-bash tools/run-all-tests.sh --only hook  # just the suites whose name contains "hook"
-bash tools/run-all-tests.sh --list       # what there is
+bash tools/testing/run-all-tests.sh              # everything, one suite after another
+bash tools/testing/run-all-tests.sh --parallel   # everything at once (much quicker; each suite uses its own temp folders)
+bash tools/testing/run-all-tests.sh --only hook  # just the suites whose name contains "hook"
+bash tools/testing/run-all-tests.sh --list       # what there is
 ```
 
 Or run any suite on its own, for example `bash tools/hook-templates/test-pre-push.sh`. Each prints one `PASS:` or `FAIL:` line per check and ends with a summary; the exit status is 0 only if nothing failed.
 
-On Windows the suites run under Git for Windows' bash, and the PowerShell suite runs with `pwsh tools/test-powershell-scripts.ps1` (and, because most Windows users start scripts with the built-in one, `powershell -File tools/test-powershell-scripts.ps1`). The `post-merge` suite is slow on Windows, about seven minutes, because every check starts several git processes. `--parallel` brings the whole set to roughly that.
+On Windows the suites run under Git for Windows' bash, and the PowerShell suite runs with `pwsh tools/testing/test-powershell-scripts.ps1` (and, because most Windows users start scripts with the built-in one, `powershell -File tools/testing/test-powershell-scripts.ps1`). The `post-merge` suite is slow on Windows, about seven minutes, because every check starts several git processes. `--parallel` brings the whole set to roughly that.
 
 Nothing here touches a real vault, a real `~/.claude`, a real `claude` or a real network. Hooks run against throwaway git repos under `mktemp`, with `HOME` pointed at a temp folder where a hook keeps state, and `claude`, `curl` and `betterleaks` are stubs on `PATH`. Every suite removes its fixtures from an exit trap, so a failing check does not leave them behind.
 
@@ -31,7 +31,7 @@ Writing the suites turned up four defects in the tools themselves. Each was foun
 | Where | What was wrong | Fix |
 |---|---|---|
 | `tools/hook-templates/pre-commit` | A file **renamed and edited in the same commit** was not scanned. The hook listed staged files with `--diff-filter=ACM`, which leaves out renames, so if that was all that was staged the hook saw nothing and exited 0, even in strict mode. Confirmed against the real `betterleaks`: it found an AWS key in such a file, the hook did not. | `--diff-filter=ACMR` |
-| `tools/prepare-wiki-docs.ps1` | The heading-stripping regex had no "first only" limit, so it also deleted **every line starting `# `** in the body, including shell comments inside fenced code blocks. | Only the first match (the title) is stripped |
+| `tools/wiki/prepare-wiki-docs.ps1` | The heading-stripping regex had no "first only" limit, so it also deleted **every line starting `# `** in the body, including shell comments inside fenced code blocks. | Only the first match (the title) is stripped |
 | `tools/setup-mcp.ps1` under **Windows PowerShell 5.1** | `Set-Content -Encoding utf8` wrote a **byte order mark**, so the plugin's `data.json` started with U+FEFF, which a strict JSON parser rejects (that Obsidian then failed to read its own settings is the likely result but was never checked). The read side was also wrong: `Get-Content` there reads BOM-less UTF-8 as ANSI. | Read with `ReadAllText`, write with `WriteAllText` and `UTF8Encoding($false)` |
 | `tools/install-claude-config.ps1` | When Git for Windows' bash was not found it set `$ErrorActionPreference = 'Stop'`, so `Write-Error` ended the script with exit 1 before the intended `exit 2`. | `Write-Error ... -ErrorAction Continue` |
 
@@ -209,7 +209,7 @@ Added:
 | `config_values_with_trailing_comments_and_empty_values` | Trailing `# comment` stripped; empty values use defaults. |
 | `a_longer_config_key_is_not_mistaken_for_a_shorter_one` | `reposPathExtra` is not read as `reposPath`. |
 
-### `tools/test-install-claude-config.sh`: the installer
+### `tools/testing/test-install-claude-config.sh`: the installer
 
 Original scenarios: dry run, fresh install, idempotence, `--check`, update of a stale copy, the vault-root file and `--force`, a missing vault, the `mcpvault` config written once, the REST API note, unknown options, nothing written to `HOME` without `--prefix`, the session-start wrapper end to end, and `--no-skills`.
 
@@ -239,7 +239,7 @@ Added:
 | `wrapper_reads_a_crlf_vault_root_file` | CRLF in the file still resolves. |
 | `wrapper_without_any_vault_root_is_silent` | No vault anywhere: silent, exit 0. |
 
-### `tools/test-setup-mcp.sh`: `setup-mcp.sh`
+### `tools/testing/test-setup-mcp.sh`: `setup-mcp.sh`
 
 The five steps of the Obsidian MCP setup, with `claude` and `curl` stubbed and a fixture `data.json`.
 
@@ -288,7 +288,7 @@ Run with `node` (18 or later). Each case feeds the script the JSON Claude Code w
 
 CI also runs this suite on Node 18, 20 and 22 (Ubuntu), since 18 is the minimum the script claims.
 
-### `tools/test-powershell-scripts.ps1`: the PowerShell scripts
+### `tools/testing/test-powershell-scripts.ps1`: the PowerShell scripts
 
 A self-contained script in the same style as the bash suites (no Pester, so nothing to install). Each scenario runs the script under test in a child PowerShell.
 
@@ -296,7 +296,7 @@ A self-contained script in the same style as the bash suites (no Pester, so noth
 - **`prepare-wiki-docs.ps1`:** front matter (space, title, parent), the configured title winning over the heading, the heading as the fallback and then the file name, the H1 stripped, the body kept, a stale output folder emptied, `-ConfigFile` and `-OutputDir`, the missing-config and missing-source errors, and that `# ` lines inside a code block are kept (a regression test for the bug above).
 - **`install-claude-config.ps1`** (Windows only): exit codes pass through from the installer (`--help` 0, a bad option 2, `--check` on an empty prefix 1), arguments arrive unchanged, nothing is created by `--check`, and the "no Git bash" branch.
 
-### `tools/test-structure.sh`: the set as a whole
+### `tools/testing/test-structure.sh`: the set as a whole
 
 Checks that no single suite can make:
 
@@ -311,7 +311,9 @@ Checks that no single suite can make:
 
 ## Adding a hook or a suite
 
-Add the hook, then add `tools/hook-templates/test-<hook>.sh`, then add it to `tools/run-all-tests.sh`, `.github/workflows/shell-tests.yml` and this page. `bash tools/test-structure.sh` tells you which of those you have not done yet. If the hook is worth mutation-checking, add a few mutants for it too (see [Mutation checks](#mutation-checks)).
+Add the hook, then add `tools/hook-templates/test-<hook>.sh`, then add it to `tools/testing/run-all-tests.sh`, `.github/workflows/shell-tests.yml` and this page. `bash tools/testing/test-structure.sh` tells you which of those you have not done yet. If the hook is worth mutation-checking, add a few mutants for it too (see [Mutation checks](#mutation-checks)).
+
+Where things live: a suite sits next to the thing it tests when that thing has its own folder (`hook-templates/`, `statusline/`, `command-templates/test/`). The runners, the structure check, the mutation list and the suites for the top-level installer and setup scripts live in `tools/testing/`. The installer and `setup-mcp` themselves stay at the top of `tools/`, because the setup guides and the README quote those paths.
 
 New suites follow the shape of the existing ones: a throwaway fixture per test, `HOME` redirected if the hook keeps state, stubs on `PATH`, specific expected values rather than "did not crash", names that say the scenario and the outcome, and cleanup from an exit trap.
 
@@ -322,17 +324,17 @@ A suite that cannot fail is worth nothing. A mutation check proves each one can:
 It is slow on purpose, a full suite run per mutant (minutes each, so hours for everything), so it is **not part of the normal build**.
 
 ```bash
-bash tools/run-mutation-tests.sh --list                 # the groups and how many mutants each has
-bash tools/run-mutation-tests.sh --hook pre-push        # one group (repeat, or comma-separate, for several)
-bash tools/run-mutation-tests.sh                        # everything
-bash tools/run-mutation-tests.sh --hook pre-push --jobs 4   # four mutants at once
-bash tools/run-mutation-tests.sh --check-applies        # fast: does every mutant still apply? runs no suite
+bash tools/testing/run-mutation-tests.sh --list                 # the groups and how many mutants each has
+bash tools/testing/run-mutation-tests.sh --hook pre-push        # one group (repeat, or comma-separate, for several)
+bash tools/testing/run-mutation-tests.sh                        # everything
+bash tools/testing/run-mutation-tests.sh --hook pre-push --jobs 4   # four mutants at once
+bash tools/testing/run-mutation-tests.sh --check-applies        # fast: does every mutant still apply? runs no suite
 ```
 
-- **The mutants** are in `tools/mutation/mutants.txt`, one per line: the group (the hook or script name), a short name, the file to change, a `sed` expression, and what it breaks. Add one by adding a line; the file explains the format.
+- **The mutants** are in `tools/testing/mutation/mutants.txt`, one per line: the group (the hook or script name), a short name, the file to change, a `sed` expression, and what it breaks. Add one by adding a line; the file explains the format.
 - **Nothing in the repo is changed.** Each mutant is applied to a copy of `tools/` in a temp folder, with a throwaway `HOME`.
 - **A broken suite baseline is reported, not hidden.** Each group's suite is run once unmodified first. If that fails, the group's mutants are not run, because "the suite failed" would prove nothing.
-- **A mutant that stops applying is reported as broken**, as is one that leaves invalid bash. A refactor that moves the target text cannot quietly turn a mutant into a no-op, and `tools/test-structure.sh` runs the same fast check on every build.
+- **A mutant that stops applying is reported as broken**, as is one that leaves invalid bash. A refactor that moves the target text cannot quietly turn a mutant into a no-op, and `tools/testing/test-structure.sh` runs the same fast check on every build.
 - **Exit status** is 0 only if every mutant applied and was killed.
 
 ### In CI: manual only
@@ -342,7 +344,7 @@ bash tools/run-mutation-tests.sh --check-applies        # fast: does every mutan
 - **hook:** one hook or script by name, or `all`. For `all`, each group becomes its own job and they run side by side, so the wall-clock time is the slowest group, not the sum.
 - **jobs_per_group:** how many mutants to run at once within a group (1, 2 or 4).
 
-`tools/test-structure.sh` checks that the dropdown lists exactly the groups in `mutants.txt`, so adding a group without adding it to the workflow fails the normal build.
+`tools/testing/test-structure.sh` checks that the dropdown lists exactly the groups in `mutants.txt`, so adding a group without adding it to the workflow fails the normal build.
 
 ### What has been checked
 

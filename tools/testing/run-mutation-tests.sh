@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Mutation checks: proves the test suites can actually fail.
 #
-#   bash tools/run-mutation-tests.sh                     every hook and script (slow)
-#   bash tools/run-mutation-tests.sh --hook pre-push     one group; repeat or comma-separate for several
-#   bash tools/run-mutation-tests.sh --list              the groups and how many mutants each has
-#   bash tools/run-mutation-tests.sh --check-applies     check every mutant still applies; runs no suite (fast)
-#   bash tools/run-mutation-tests.sh --jobs 4            run four mutants at once (default 1)
+#   bash tools/testing/run-mutation-tests.sh                     every hook and script (slow)
+#   bash tools/testing/run-mutation-tests.sh --hook pre-push     one group; repeat or comma-separate for several
+#   bash tools/testing/run-mutation-tests.sh --list              the groups and how many mutants each has
+#   bash tools/testing/run-mutation-tests.sh --check-applies     check every mutant still applies; runs no suite (fast)
+#   bash tools/testing/run-mutation-tests.sh --jobs 4            run four mutants at once (default 1)
 #
-# How it works: for each mutant in tools/mutation/mutants.txt (a deliberate one-line break, such
+# How it works: for each mutant in tools/testing/mutation/mutants.txt (a deliberate one-line break, such
 # as a flipped condition or a dropped line) this copies tools/ to a temp folder, applies the
 # change to the COPY, and runs that hook's own test suite from there. The suite is meant to
 # FAIL. A mutant it does not notice is a SURVIVOR: a behaviour nothing checks.
@@ -23,9 +23,9 @@
 # Exit status: 0 only if every mutant applied, was a valid script, and was killed.
 
 set -u
-TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
-MUTANTS="${MUTANTS_FILE:-$TOOLS_DIR/mutation/mutants.txt}"   # MUTANTS_FILE: a different list (used to test this runner)
+MUTANTS="${MUTANTS_FILE:-$TOOLS_DIR/testing/mutation/mutants.txt}"   # MUTANTS_FILE: a different list (used to test this runner)
 
 HOOKS=""
 JOBS=1
@@ -52,7 +52,7 @@ suite_for() {
   local group="$1"
   if [[ -f "$ROOT/tools/hook-templates/test-$group.sh" ]]; then echo "tools/hook-templates/test-$group.sh"
   elif [[ -f "$ROOT/tools/$group/test-$group.mjs" ]]; then echo "tools/$group/test-$group.mjs"
-  else echo "tools/test-$group.sh"; fi
+  else echo "tools/testing/test-$group.sh"; fi
   return 0
 }
 

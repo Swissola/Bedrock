@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Runs every test suite in this repo and prints one line per suite.
 #
-#   bash tools/run-all-tests.sh                 run everything, one after another
-#   bash tools/run-all-tests.sh --parallel      run the suites at the same time (much faster,
+#   bash tools/testing/run-all-tests.sh                 run everything, one after another
+#   bash tools/testing/run-all-tests.sh --parallel      run the suites at the same time (much faster,
 #                                               especially on Windows; every suite uses its own
 #                                               temp folders, so they do not interfere)
-#   bash tools/run-all-tests.sh --only hook     run only suites whose file name contains "hook"
-#   bash tools/run-all-tests.sh --list          list the suites and exit
-#   bash tools/run-all-tests.sh --verbose       show each suite's full output, not just failures
+#   bash tools/testing/run-all-tests.sh --only hook     run only suites whose file name contains "hook"
+#   bash tools/testing/run-all-tests.sh --list          list the suites and exit
+#   bash tools/testing/run-all-tests.sh --verbose       show each suite's full output, not just failures
 #
 # Exit status is 0 only if every suite that ran passed. A suite that cannot run here
 # (node or PowerShell not installed) is reported as skipped, never as a pass.
@@ -17,7 +17,7 @@
 # docs/testing.md.
 
 set -u
-TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PARALLEL=0
 ONLY=""
@@ -41,12 +41,12 @@ SUITES=(
   "bash|hook-templates/test-post-merge.sh"
   "bash|hook-templates/test-session-start-vault-check.sh"
   "bash|hook-templates/test-session-start-vault-context.sh"
-  "bash|test-install-claude-config.sh"
-  "bash|test-setup-mcp.sh"
-  "bash|test-structure.sh"
+  "bash|testing/test-install-claude-config.sh"
+  "bash|testing/test-setup-mcp.sh"
+  "bash|testing/test-structure.sh"
   "node|command-templates/test/test-stub-rest-api-mcp.mjs"
   "node|statusline/test-statusline.mjs"
-  "pwsh|test-powershell-scripts.ps1"
+  "pwsh|testing/test-powershell-scripts.ps1"
 )
 
 selected=()

@@ -2,13 +2,13 @@
 # Repo-wide checks that no single hook's suite can make: that every script is valid, that
 # every hook has a test suite, that the suites are wired into the runner, CI and the docs,
 # and that nothing in the test scripts will break on macOS's old bash.
-# Run: bash tools/test-structure.sh
+# Run: bash tools/testing/test-structure.sh
 #
 # The rule behind most of this: a hook without a test suite, or a suite nobody runs, is a
 # gap that grows quietly. These checks make adding either one a visible, failing step.
 
 set -u
-TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
 HOOKS_DIR="$TOOLS_DIR/hook-templates"
 PASS=0
@@ -41,7 +41,7 @@ suite_files() {
 
 shell_scripts() {
   local f
-  for f in "$TOOLS_DIR"/*.sh "$HOOKS_DIR"/*; do
+  for f in "$TOOLS_DIR"/*.sh "$TOOLS_DIR"/testing/*.sh "$HOOKS_DIR"/*; do
     [[ -f "$f" ]] || continue
     head -n1 "$f" 2>/dev/null | grep -q '^#!.*\(ba\)\?sh' && echo "$f"
   done
@@ -88,7 +88,7 @@ test_every_suite_is_run_by_the_runner_and_by_ci() {
   local s b
   for s in $(suite_files); do
     b=$(basename "$s")
-    assert_eq "run-all-tests.sh runs $b" "yes" "$(grep -qF "$b" "$TOOLS_DIR/run-all-tests.sh" && echo yes || echo no)"
+    assert_eq "run-all-tests.sh runs $b" "yes" "$(grep -qF "$b" "$TOOLS_DIR/testing/run-all-tests.sh" && echo yes || echo no)"
     # the PowerShell suite runs on its own Windows job, the rest on the shell matrix
     assert_eq "a CI workflow runs $b" "yes" "$(grep -rqF "$b" "$ROOT/.github/workflows" && echo yes || echo no)"
   done
@@ -168,7 +168,7 @@ $errors = $null
 [void][System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$errors)
 if ($errors.Count -eq 0) { 'ok' } else { "$($errors.Count) parse error(s): $($errors[0].Message)" }
 PSEOF
-  for f in "$TOOLS_DIR"/*.ps1; do
+  for f in "$TOOLS_DIR"/*.ps1 "$TOOLS_DIR"/testing/*.ps1 "$TOOLS_DIR"/wiki/*.ps1; do
     target="$f"; command -v cygpath >/dev/null 2>&1 && target=$(cygpath -w "$f")
     assert_eq "$(rel "$f") parses" "ok" "$("$ps" -NoProfile -NonInteractive -File "$(command -v cygpath >/dev/null 2>&1 && cygpath -w "$checker" || echo "$checker")" "$target" 2>&1 | tr -d '\r' | tail -n 1)"
   done
@@ -177,7 +177,7 @@ PSEOF
 }
 
 test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
-  local f="$TOOLS_DIR/wiki-publish.example.json"
+  local f="$TOOLS_DIR/wiki/wiki-publish.example.json"
   if ! command -v node >/dev/null 2>&1; then skip "wiki example JSON check (node not installed)"; return 0; fi
   assert_eq "wiki-publish.example.json is valid JSON with space and documents[].source" "ok" \
     "$(node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); process.exit(c.space && Array.isArray(c.documents) && c.documents.every(d=>d.source)?0:1)' "$f" 2>/dev/null && echo ok || echo bad)"
@@ -196,9 +196,9 @@ test_every_command_template_carries_a_version_stamp() {
 
 test_test_scripts_avoid_bash_4_only_features() {
   local f hits
-  for f in "$HOOKS_DIR"/test-*.sh "$TOOLS_DIR"/test-*.sh; do
+  for f in "$HOOKS_DIR"/test-*.sh "$TOOLS_DIR"/testing/test-*.sh; do
     [[ -f "$f" ]] || continue
-    [[ "$f" = "$TOOLS_DIR/test-structure.sh" ]] && continue
+    [[ "$f" = "$TOOLS_DIR/testing/test-structure.sh" ]] && continue
     hits=$(grep -nE '(^|[^a-zA-Z_])(mapfile|readarray)([^a-zA-Z_]|$)|declare -A|local -A|\$\{[A-Za-z_]+(,,|\^\^)\}|[|]&|&>>|coproc|;;&|;&' "$f" | grep -v '^[0-9]*:[[:space:]]*#' || true)
     assert_eq "$(rel "$f") uses no bash 4+ only syntax" "" "$hits"
   done
@@ -207,9 +207,9 @@ test_test_scripts_avoid_bash_4_only_features() {
 
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback() {
   local f hits
-  for f in "$HOOKS_DIR"/test-*.sh "$TOOLS_DIR"/test-*.sh; do
+  for f in "$HOOKS_DIR"/test-*.sh "$TOOLS_DIR"/testing/test-*.sh; do
     [[ -f "$f" ]] || continue
-    [[ "$f" = "$TOOLS_DIR/test-structure.sh" ]] && continue
+    [[ "$f" = "$TOOLS_DIR/testing/test-structure.sh" ]] && continue
     hits=$(grep -nE 'touch -d |readlink -f|date -d [^|]*$|sed -i [^.]' "$f" | grep -vE '\|\||^[0-9]+:[[:space:]]*#' || true)
     assert_eq "$(rel "$f") has no GNU-only touch -d / readlink -f / date -d / sed -i without a fallback" "" "$hits"
   done
@@ -218,7 +218,7 @@ test_test_scripts_avoid_gnu_only_commands_without_a_fallback() {
 
 test_every_suite_cleans_up_after_itself_with_a_trap() {
   local f
-  for f in "$HOOKS_DIR"/test-pre-push.sh "$HOOKS_DIR"/test-session-start-vault-check.sh "$HOOKS_DIR"/test-pre-commit.sh "$HOOKS_DIR"/test-post-merge.sh "$HOOKS_DIR"/test-session-start-vault-context.sh "$TOOLS_DIR"/test-setup-mcp.sh; do
+  for f in "$HOOKS_DIR"/test-pre-push.sh "$HOOKS_DIR"/test-session-start-vault-check.sh "$HOOKS_DIR"/test-pre-commit.sh "$HOOKS_DIR"/test-post-merge.sh "$HOOKS_DIR"/test-session-start-vault-context.sh "$TOOLS_DIR"/testing/test-setup-mcp.sh; do
     assert_eq "$(rel "$f") removes its fixtures from a trap, not only at the end of each test" "yes" "$(grep -qE '^trap cleanup EXIT' "$f" && echo yes || echo no)"
   done
   return 0
@@ -227,19 +227,19 @@ test_every_suite_cleans_up_after_itself_with_a_trap() {
 # --- mutation checks: configuration and workflow -------------------------------------------------
 
 test_mutation_config_is_well_formed_and_every_mutant_applies() {
-  local f="$TOOLS_DIR/mutation/mutants.txt" bad out
-  assert_eq "tools/mutation/mutants.txt exists" "yes" "$([[ -f "$f" ]] && echo yes || echo no)"
+  local f="$TOOLS_DIR/testing/mutation/mutants.txt" bad out
+  assert_eq "tools/testing/mutation/mutants.txt exists" "yes" "$([[ -f "$f" ]] && echo yes || echo no)"
   bad=$(grep -v '^[[:space:]]*\(#.*\)\?$' "$f" | awk -F'@@' '(NF != 5 && NF != 6) || $1 == "" || $2 == "" || $3 == "" || $4 == "" || $5 == "" || (NF == 6 && $6 != "not-observable-on-windows") { print NR": "$0 }')
   assert_eq "every mutant line has five @@-separated fields, plus at most one known tag" "" "$bad"
   assert_eq "mutant names are unique" "" "$(grep -v '^[[:space:]]*\(#.*\)\?$' "$f" | awk -F'@@' '{ print $2 }' | sort | uniq -d)"
-  out=$(bash "$TOOLS_DIR/run-mutation-tests.sh" --check-applies 2>&1 | grep -v '^ok ' || true)
+  out=$(bash "$TOOLS_DIR/testing/run-mutation-tests.sh" --check-applies 2>&1 | grep -v '^ok ' || true)
   assert_eq "every mutant changes its target, leaves valid bash, and has a suite" "$(echo "$out" | grep -c ' checked, 0 broken')" "1"
   return 0
 }
 
 test_the_manual_workflow_offers_exactly_the_mutation_groups() {
   local wf="$ROOT/.github/workflows/mutation-tests.yml" in_file in_wf
-  in_file=$(bash "$TOOLS_DIR/run-mutation-tests.sh" --list | awk '{ print $1 }' | sort | tr '\n' ' ')
+  in_file=$(bash "$TOOLS_DIR/testing/run-mutation-tests.sh" --list | awk '{ print $1 }' | sort | tr '\n' ' ')
   in_wf=$(awk '/^      hook:/ { on = 1 } /^      jobs_per_group:/ { on = 0 } on && /^          - / { print $2 }' "$wf" | grep -v '^all$' | sort | tr '\n' ' ')
   assert_eq "the workflow's hook dropdown lists every group in mutants.txt, and nothing else" "$in_file" "$in_wf"
   assert_eq "the mutation workflow can only be started by hand (workflow_dispatch)" "1" "$(awk '/^on:/ { on = 1; next } /^[a-z]/ { on = 0 } on && /^  [a-z_]+:/ { n++ } END { print n }' "$wf")"

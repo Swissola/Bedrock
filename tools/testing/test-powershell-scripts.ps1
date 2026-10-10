@@ -4,7 +4,7 @@
     and install-claude-config.ps1.
 
 .DESCRIPTION
-    Run:  pwsh tools/test-powershell-scripts.ps1      (or Windows PowerShell 5.1: powershell -File ...)
+    Run:  pwsh tools/testing/test-powershell-scripts.ps1      (or Windows PowerShell 5.1: powershell -File ...)
 
     No Pester: the bash suites are self-contained scripts that print PASS/FAIL lines,
     and these follow the same shape so the repo has one testing style and no module to
@@ -29,7 +29,7 @@ $script:Pass = 0
 $script:Fail = 0
 $script:KnownDefects = 0
 $script:Cleanup = New-Object System.Collections.ArrayList
-$ToolsDir = $PSScriptRoot
+$ToolsDir = Split-Path $PSScriptRoot -Parent
 $Self = (Get-Process -Id $PID).Path          # the pwsh / powershell running this file
 $IsWin = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
 
@@ -248,7 +248,7 @@ function Test-SetupMcp {
 
 # --- prepare-wiki-docs.ps1 --------------------------------------------------------
 
-$PrepareWiki = Join-Path $ToolsDir 'prepare-wiki-docs.ps1'
+$PrepareWiki = Join-Path $ToolsDir 'wiki/prepare-wiki-docs.ps1'
 
 # A working folder with docs and a wiki-publish.json built from $Docs (array of hashtables).
 function New-WikiWork($Docs, $Files, [string]$Space = 'TEAMSPACE') {
