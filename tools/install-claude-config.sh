@@ -21,6 +21,7 @@ CHECK=0
 DRY=0
 FORCE=0
 SKIP_SKILLS=0
+STATUSLINE=0
 
 usage() {
   cat <<'EOF'
@@ -36,7 +37,14 @@ Usage: install-claude-config.sh [options]
   --check              report whether installed files are current; change nothing.
                        Exit 1 if anything is missing, outdated or modified.
   --dry-run            say what would be installed; change nothing.
-  --force              allow replacing an existing vault-root file.
+  --force              allow replacing an existing vault-root file, and (with
+                       --statusline) a different statusLine in settings.json.
+  --statusline         also install the Claude Code status line: copies
+                       tools/statusline/statusline.mjs to <prefix>/statusline.mjs
+                       and sets "statusLine" in <prefix>/settings.json if none is
+                       set (an existing different one is kept and the snippet
+                       printed; --force replaces it, after a backup). Needs Node
+                       18 or later. See docs/statusline.md.
   --no-skills          do not install the two skills. They describe the TEAM vault
                        layout (daily-notes/<author>/, repos/<name>/) and trigger on
                        any obsidian MCP call, so leave them out for a vault laid
@@ -56,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY=1; shift ;;
     --force) FORCE=1; shift ;;
     --no-skills) SKIP_SKILLS=1; shift ;;
+    --statusline) STATUSLINE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -99,6 +108,57 @@ check_file() {
     echo "differs  $label (installed copy is not byte-identical to this repo's)"
   fi
   NEED_ATTENTION=1
+}
+
+# A path in the form node itself understands: Git Bash's /c/Users/... becomes C:/Users/...
+native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; return 0; }
+
+# The status line command to write into settings.json. An absolute, forward-slash path,
+# not "~": Claude Code on Windows may run it through PowerShell, which does not expand ~.
+statusline_command() {
+  local abs script
+  case "$PREFIX" in /*|[A-Za-z]:*) abs="$PREFIX" ;; *) abs="$PWD/${PREFIX#./}" ;; esac
+  script="$(native_path "$abs/statusline.mjs")"
+  case "$script" in
+    *'"'*) return 1 ;;
+    *[!A-Za-z0-9_./:~-]*) printf 'node "%s"' "$script" ;;
+    *) printf 'node %s' "$script" ;;
+  esac
+  return 0
+}
+
+# configure_statusline [--check]: sets (or checks) "statusLine" in <prefix>/settings.json
+# through the Node helper, which backs the file up, preserves every other key and refuses
+# to touch a file that is not valid JSON. Honours --dry-run and --force.
+configure_statusline() {
+  local mode="${1:-}" settings="$PREFIX/settings.json" cmd extra="" helper rc major
+  if ! cmd="$(statusline_command)"; then
+    echo "warning: not configuring settings.json: the install path contains a double quote."; NEED_ATTENTION=1; return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    if [[ "$mode" = "--check" ]]; then echo "unknown  settings.json statusLine (node is not on PATH, so it cannot be read)"
+    else
+      echo "warning: node is not on PATH, so $settings was not changed. The status line needs Node 18 or later; once it is installed, re-run this, or add this to settings.json:"
+      echo "  \"statusLine\": { \"type\": \"command\", \"command\": \"$(printf '%s' "$cmd" | sed 's/"/\\"/g')\" }"
+    fi
+    return 0
+  fi
+  if [[ "$mode" != "--check" ]]; then
+    major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
+    [[ "$major" =~ ^[0-9]+$ ]] && [[ "$major" -lt 18 ]] && echo "warning: node $major is older than 18; the status line may not run."
+  fi
+  [[ "$FORCE" = "1" ]] && extra="$extra --force"
+  [[ "$DRY" = "1" ]] && extra="$extra --dry-run"
+  [[ "$mode" = "--check" ]] && extra="$extra --check"
+  helper="$(native_path "$SRC_ROOT/tools/statusline/configure-settings.mjs")"
+  # $extra is a short list of fixed flags, deliberately split into words.
+  # shellcheck disable=SC2086
+  node "$helper" "$(native_path "$settings")" "$cmd" $extra
+  rc=$?
+  if [[ "$rc" = "3" ]]; then NEED_ATTENTION=1
+  elif [[ "$rc" = "1" ]] && [[ "$mode" = "--check" ]]; then NEED_ATTENTION=1
+  elif [[ "$rc" != "0" ]]; then echo "warning: configure-settings.mjs exited $rc" >&2; NEED_ATTENTION=1; fi
+  return 0
 }
 
 # The wrapper a project's SessionStart hook can call without knowing the vault
@@ -149,6 +209,10 @@ if [[ "$CHECK" = "1" ]]; then
   tmpw="$(mktemp)"; wrapper_content > "$tmpw"
   check_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" "hook-templates/session-start-vault-context.sh"
   rm -f "$tmpw"
+  if [[ "$STATUSLINE" = "1" ]]; then
+    check_file "$SRC_ROOT/tools/statusline/statusline.mjs" "$PREFIX/statusline.mjs" "statusline.mjs"
+    configure_statusline --check
+  fi
   echo
   [[ "$NEED_ATTENTION" = "0" ]] && echo "Everything is current." || echo "Re-run without --check to bring these up to date."
   exit "$NEED_ATTENTION"
@@ -160,6 +224,10 @@ for h in "${HOOKS[@]}"; do install_file "$SRC_ROOT/tools/hook-templates/$h" "$PR
 tmpw="$(mktemp)"; wrapper_content > "$tmpw"
 install_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" exec
 rm -f "$tmpw"
+if [[ "$STATUSLINE" = "1" ]]; then
+  install_file "$SRC_ROOT/tools/statusline/statusline.mjs" "$PREFIX/statusline.mjs"
+  configure_statusline
+fi
 
 # --- vault-root file and hook MCP config -----------------------------------
 if [[ -n "$VAULT" ]]; then
@@ -196,4 +264,5 @@ fi
 echo
 echo "Done. Commands and skills load in a NEW Claude Code session; hook templates are copied, not enabled."
 echo "Per-repo hooks (post-merge, pre-commit) still need copying into that repo's .git/hooks, see docs/automation.md."
+[[ "$STATUSLINE" = "1" ]] && [[ "$DRY" != "1" ]] && echo "The status line appears in a NEW Claude Code session (see docs/statusline.md)."
 exit "$NEED_ATTENTION"

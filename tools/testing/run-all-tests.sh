@@ -46,6 +46,7 @@ SUITES=(
   "bash|testing/test-structure.sh"
   "node|command-templates/test/test-stub-rest-api-mcp.mjs"
   "node|statusline/test-statusline.mjs"
+  "node|statusline/test-configure-settings.mjs"
   "pwsh|testing/test-powershell-scripts.ps1"
 )
 

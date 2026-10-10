@@ -49,10 +49,14 @@ mutant_lines() { grep -v '^[[:space:]]*\(#.*\)\?$' "$MUTANTS"; return 0; }
 field() { local line="$1" n="$2"; printf '%s' "$line" | awk -F'@@' -v n="$n" '{ print $n }'; return 0; }
 
 suite_for() {
-  local group="$1"
+  local group="$1" f
   if [[ -f "$ROOT/tools/hook-templates/test-$group.sh" ]]; then echo "tools/hook-templates/test-$group.sh"
-  elif [[ -f "$ROOT/tools/$group/test-$group.mjs" ]]; then echo "tools/$group/test-$group.mjs"
-  else echo "tools/testing/test-$group.sh"; fi
+  else
+    for f in "$ROOT"/tools/*/test-"$group".mjs; do
+      [[ -f "$f" ]] && { echo "${f#"$ROOT"/}"; return 0; }
+    done
+    echo "tools/testing/test-$group.sh"
+  fi
   return 0
 }
 

@@ -238,6 +238,18 @@ Added:
 | `wrapper_prefers_vault_root_from_the_environment_over_the_file` | The environment wins. |
 | `wrapper_reads_a_crlf_vault_root_file` | CRLF in the file still resolves. |
 | `wrapper_without_any_vault_root_is_silent` | No vault anywhere: silent, exit 0. |
+| `statusline_is_opt_in` | Without `--statusline` nothing is installed, `settings.json` is untouched and no backup is made. |
+| `statusline_install_copies_the_script_and_sets_settings` | The script is copied byte for byte; the command is `node` plus an absolute, forward-slash path (never `~`); no backup when there was no file. |
+| `statusline_second_run_changes_nothing` | Unchanged, no backup, no re-install. |
+| `statusline_keeps_other_settings_and_backs_up` | Every other key survives in order; the backup is the original, byte for byte. |
+| `statusline_keeps_a_different_status_line_unless_forced` | A different `statusLine` is kept, the snippet and `--force` are printed; `--force` replaces it after a backup. |
+| `statusline_hand_installed_tilde_form_is_left_alone` | An existing `node ~/.claude/statusline.mjs` is not rewritten, even with `--force`. |
+| `statusline_invalid_json_is_never_touched` | Exit 1, file untouched, no backup or temp file, the snippet is given; the script is still copied. |
+| `statusline_dry_run_writes_nothing` | "would install" and "would create"; nothing written, even with `--force`. |
+| `statusline_check_mode` / `..._check_does_not_fail_for_a_different_status_line` | Missing is exit 1, current is exit 0, a modified script is "differs"; a different line is not a failure because re-running would not change it. |
+| `statusline_relative_prefix_gives_an_absolute_command` / `..._path_with_a_space_is_quoted` | A relative `--prefix` still gives an absolute path; a path with a space is double-quoted. |
+| `statusline_without_node_copies_the_script_and_warns` | With no `node` on `PATH` the script is copied, `settings.json` is not created, the snippet is printed, exit 0. Skipped under Git Bash, where a node-free `PATH` cannot be built. |
+| `help_documents_the_statusline_flag` / `force_without_statusline_never_edits_settings` | `--help` lists the flag; `--force` alone never touches `settings.json`. |
 
 ### `tools/testing/test-setup-mcp.sh`: `setup-mcp.sh`
 
@@ -287,6 +299,17 @@ Run with `node` (18 or later). Each case feeds the script the JSON Claude Code w
 - **The exact command:** `node ~/.claude/statusline.mjs` run under bash with `HOME` pointed at a temp folder.
 
 CI also runs this suite on Node 18, 20 and 22 (Ubuntu), since 18 is the minimum the script claims.
+
+### `tools/statusline/test-configure-settings.mjs`: the settings helper
+
+The helper behind `install-claude-config.sh --statusline`: it sets `statusLine` in a `settings.json` and nothing else. Run with `node`; every case works on a file in a temp folder.
+
+- **Creating and adding:** a missing file and its folders are created; an empty file counts as `{}`; every other key survives, in order, with `statusLine` last; the file's indentation (two spaces, four, or tabs) and a leading byte order mark are handled; a command containing spaces and quotes round-trips.
+- **Backups and writes:** an existing file is copied to `settings.json.bak-<timestamp>` first, byte for byte; two changes in the same second keep two backups; the new content goes through a temp file and a rename, and nothing is left behind.
+- **Already configured:** a line that already runs a `statusline.mjs` (the `~` form, an absolute path, a quoted path) is left alone, even with `--force`. A different line, or one of the wrong type, is kept unless `--force` is given, which replaces it after a backup.
+- **Files that are never touched:** invalid JSON, a trailing comma, a comment, an array, `null`, a string and a folder in place of the file all exit 3 with the file unchanged and the snippet to add by hand.
+- **`--dry-run` and `--check`:** neither writes anything (not even folders), and `--check` never replaces, even with `--force`. Missing is exit 1.
+- **Usage:** no arguments, no command, or an unknown option is exit 2.
 
 ### `tools/testing/test-powershell-scripts.ps1`: the PowerShell scripts
 

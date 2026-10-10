@@ -23,6 +23,7 @@ on:
           - install-claude-config
           - setup-mcp
           - statusline
+          - configure-settings
       jobs_per_group:
         description: Mutants to run at the same time within a group
         type: choice

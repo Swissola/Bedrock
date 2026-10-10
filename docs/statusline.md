@@ -28,6 +28,23 @@ Usage bars are green below 60%, yellow from 60% and red from 80%, because runnin
 - A terminal font with the emoji used (📁 📦 🌿 🧠 🌳 👤).
 - The spend bar needs Claude Code 2.1.251 or later, and the `$used/$limit` amounts need 2.1.284 or later. On older versions the fields are simply absent and the script falls back to what is there.
 
+## Installing with the installer
+
+From a clone of this repo:
+
+```bash
+bash tools/install-claude-config.sh --statusline
+```
+
+Add `--dry-run` first to see what it would do, and `--check` afterwards to see whether the installed copy is current. It is opt-in: without `--statusline` the installer does not touch any of this, and it can be combined with the other options (`--vault`, `--backend`, `--no-skills`).
+
+- It copies the script to `~/.claude/statusline.mjs` (or `<prefix>/statusline.mjs` with `--prefix`).
+- It sets `statusLine` in `settings.json` only if none is set, writing `node` followed by the **absolute path** with forward slashes, so it does not depend on how the shell expands `~`. A path containing a space is double-quoted.
+- If a different `statusLine` is already set, it is kept and the snippet to switch by hand is printed. `--force` replaces it.
+- Before it changes an existing `settings.json` it copies it to `settings.json.bak-<timestamp>`, and every other key is preserved. A file that is not valid JSON is left alone and the installer exits 1, so you notice.
+- It needs Node 18 or later. If `node` is not on `PATH` the script is still copied, `settings.json` is not changed, and the snippet is printed for later.
+- If you installed it by hand earlier (`node ~/.claude/statusline.mjs`), that line is recognised and left as it is.
+
 ## Installing by hand
 
 Copy the script somewhere stable, for example `~/.claude/statusline.mjs`, and add this to `~/.claude/settings.json`:
