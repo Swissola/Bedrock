@@ -59,9 +59,24 @@ with_timeout() {
     esac
 }
 
-REPO_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"
-[ -z "$REPO_NAME" ] && REPO_NAME="unknown-repo"
-# REPO_NAME is derived from THIS repo's own git remote/root, so a plain fork+rename
+# The repo's name is the name of the folder it lives in (its main checkout, so a
+# linked worktree counts as the same repo), cased per repoNameCase below. It is
+# not taken from the git remote: a remote can be spelt differently from the
+# folder, and the vault commands and the session-start-vault-context hook, which
+# find the doc this hook writes, name the repo from the folder too.
+repo_folder() {
+    local common top
+    common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+    case "$common" in
+        */.git) printf '%s' "${common%/.git}"; return 0 ;;
+    esac
+    top="$(git rev-parse --show-toplevel 2>/dev/null)"
+    if [ -n "$top" ]; then printf '%s' "$top"; else pwd; fi
+    return 0
+}
+REPO_FOLDER_NAME="$(basename "$(repo_folder)")"
+[ -z "$REPO_FOLDER_NAME" ] && REPO_FOLDER_NAME="unknown-repo"
+# REPO_NAME is derived from THIS repo's own folder, so a plain fork+rename
 # of the vault needs zero edits here - it's correct as long as this hook is
 # documenting the repo it's actually installed in (the common case, and the
 # only one that's fully automatic). Installing this exact template into a
@@ -89,10 +104,8 @@ fi
 VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 HOOK_LOG_DIR="${HOOK_LOG_DIR:-$HOME/.claude/hook-logs}"
 MCP_CONFIG="${MCP_CONFIG:-$HOME/.claude/hook-configs/obsidian-mcp-config.json}"
-KILL_SWITCH="${KILL_SWITCH:-$HOOK_LOG_DIR/.${REPO_NAME}.disabled}"
 FAILURES_LOG="$HOOK_LOG_DIR/FAILURES.log"
 SEEN_MARKER="$HOOK_LOG_DIR/.failures-seen"
-REPO_LOG="$HOOK_LOG_DIR/${REPO_NAME}-post-merge.log"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 
 # Optional per-vault settings (docs/vault-config.md): `reposPath` and
@@ -122,6 +135,20 @@ safe_rel() {
     case "$1" in ""|/*|[A-Za-z]:*|*..*) return 1 ;; esac
     return 0
 }
+
+# Lowercased unless the vault says `repoNameCase: keep` - the same setting the
+# vault commands and session-start-vault-context read, so all of them agree on
+# the name of the doc this hook writes. Everything named after the repo
+# (kill switch, log, doc) is defined from here on.
+REPO_NAME="$REPO_FOLDER_NAME"
+case "$(config_value repoNameCase)" in
+    keep) ;;
+    *) REPO_NAME="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]')" ;;
+esac
+KILL_SWITCH="${KILL_SWITCH:-$HOOK_LOG_DIR/.${REPO_NAME}.disabled}"
+# One file that stops the hook in EVERY repo on this machine at once.
+GLOBAL_KILL_SWITCH="${VAULT_HOOK_DISABLED_FILE:-$HOME/.claude/hook-templates/DISABLED}"
+REPO_LOG="$HOOK_LOG_DIR/${REPO_NAME}-post-merge.log"
 
 REPOS_PATH="$(config_value reposPath)"
 safe_rel "$REPOS_PATH" || REPOS_PATH="repos/{repo}/index.md"
@@ -169,8 +196,10 @@ MODEL="sonnet"
 
 mkdir -p "$HOOK_LOG_DIR"
 
-# Kill switch: presence of this file disables the hook without editing it.
-if [ -f "$KILL_SWITCH" ]; then
+# Kill switch: presence of either file disables the hook without editing it - the
+# per-repo one (~/.claude/hook-logs/.<repo>.disabled) or the global one
+# (~/.claude/hook-templates/DISABLED, any content).
+if [ -f "$KILL_SWITCH" ] || [ -f "$GLOBAL_KILL_SWITCH" ]; then
     exit 0
 fi
 

@@ -50,6 +50,10 @@ post-merge@@pm2@@tools/hook-templates/post-merge@@s/^) >\/dev\/null 2>&1 &$/) >\
 post-merge@@pm3@@tools/hook-templates/post-merge@@s/ALLOWED_TOOLS="Read Grep Glob mcp__obsidian__vault_read/ALLOWED_TOOLS="Bash Read Grep Glob mcp__obsidian__vault_read/@@the model is allowed to run shell commands
 post-merge@@pm4@@tools/hook-templates/post-merge@@s/echo "\$total_lines" > "\$SEEN_MARKER"/:/@@old failures are shown again on every pull
 post-merge@@pm5@@tools/hook-templates/post-merge@@s/committed="yes"/committed="yes"; git -C "$VAULT_ROOT" push -q origin HEAD 2>\/dev\/null/@@the hook pushes the vault commit
+post-merge@@pm6@@tools/hook-templates/post-merge@@s#^    \*) REPO_NAME="$(printf '%s' "$REPO_NAME" | tr '\[:upper:\]' '\[:lower:\]')" ;;#    *) ;;#@@the repo name is not lowercased by default
+post-merge@@pm7@@tools/hook-templates/post-merge@@s#^    keep) ;;#    keepx) ;;#@@repoNameCase: keep is ignored
+post-merge@@pm8@@tools/hook-templates/post-merge@@s# || \[ -f "$GLOBAL_KILL_SWITCH" \]##@@the global DISABLED file no longer stops the hook
+post-merge@@pm9@@tools/hook-templates/post-merge@@s#^REPO_FOLDER_NAME="$(basename "$(repo_folder)")"#REPO_FOLDER_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"#@@the repo is named after its git remote again
 
 # ---- session-start-vault-context ----------------------------------------------------------------
 session-start-vault-context@@cx1@@tools/hook-templates/session-start-vault-context@@s/\[ "\$SOURCE" = "compact" \] && exit 0/:/@@a /compact reloads the context
