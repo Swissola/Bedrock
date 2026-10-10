@@ -627,15 +627,16 @@ test_a_longer_config_key_is_not_mistaken_for_a_shorter_one
 
 # A vault with a repo doc and a config: $1 = the config frontmatter lines.
 fx_configured_vault() {
-  local v; v=$(fx_vault)
-  printf -- '---\n%s\n---\n' "$1" > "$v/vault-config.md"
+  local frontmatter="$1" v; v=$(fx_vault)
+  printf -- '---\n%s\n---\n' "$frontmatter" > "$v/vault-config.md"
   echo "$v"
   return 0
 }
 
 # A note with its mtime set: path, marker, touch -t stamp.
 fx_note() {
-  write_note "$1" "$2"; touch -t "$3" "$1"
+  local path="$1" marker="$2" stamp="$3"
+  write_note "$path" "$marker"; touch -t "$stamp" "$path"
   return 0
 }
 
@@ -717,10 +718,11 @@ FLAT_CONFIG="dailyNotesPath: Inbox/daily-notes
 reposPath: \"Projects/{repo}/index.md\"
 $REPO_PATTERN"
 
-fx_flat_vault() {  # a personal-layout vault (flat daily notes, repo in the filename) with a doc for $1
-  local v; v=$(fx_dir)
+# a personal-layout vault (flat daily notes, repo in the filename) with a doc for the repo named $1
+fx_flat_vault() {
+  local name="$1" v; v=$(fx_dir)
   printf -- '---\n%s\n---\n' "$FLAT_CONFIG" > "$v/vault-config.md"
-  mkdir -p "$v/Projects/$1"; echo "$DOC_MARKER" > "$v/Projects/$1/index.md"
+  mkdir -p "$v/Projects/$name"; echo "$DOC_MARKER" > "$v/Projects/$name/index.md"
   echo "$v"
   return 0
 }
