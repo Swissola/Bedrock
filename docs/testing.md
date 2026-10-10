@@ -247,7 +247,7 @@ Added:
 | `statusline_invalid_json_is_never_touched` | Exit 1, file untouched, no backup or temp file, the snippet is given; the script is still copied. |
 | `statusline_dry_run_writes_nothing` | "would install" and "would create"; nothing written, even with `--force`. |
 | `statusline_check_mode` / `..._check_does_not_fail_for_a_different_status_line` | Missing is exit 1, current is exit 0, a modified script is "differs"; a different line is not a failure because re-running would not change it. |
-| `statusline_relative_prefix_gives_an_absolute_command` / `..._path_with_a_space_is_quoted` | A relative `--prefix` still gives an absolute path; a path with a space is double-quoted. |
+| `statusline_relative_prefix_gives_an_absolute_command` / `..._path_with_a_space_is_quoted` | A relative `--prefix` still gives an absolute path; a path with a space or a `$(...)` is single-quoted so a shell expands nothing in it, and one with a single quote is refused. |
 | `statusline_without_node_copies_the_script_and_warns` | With no `node` on `PATH` the script is copied, `settings.json` is not created, the snippet is printed, exit 0. Skipped under Git Bash, where a node-free `PATH` cannot be built. |
 | `help_documents_the_statusline_flag` / `force_without_statusline_never_edits_settings` | `--help` lists the flag; `--force` alone never touches `settings.json`. |
 

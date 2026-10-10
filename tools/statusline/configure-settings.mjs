@@ -40,6 +40,11 @@ const force = flags.has('--force'), dry = flags.has('--dry-run'), check = flags.
 const label = 'settings.json statusLine';
 const snippet = () => `  "statusLine": { "type": "command", "command": ${JSON.stringify(command)} }`;
 
+// settings.json can hold secrets (env values, tokens), so a file we create is private to its
+// owner, and an existing file keeps whatever mode it already had.
+let mode = 0o600;
+try { mode = fs.statSync(settingsPath).mode & 0o777; } catch { /* not there yet */ }
+
 let raw = null;
 try { raw = fs.readFileSync(settingsPath, 'utf8'); } catch (e) {
   if (e.code !== 'ENOENT') { console.error(`cannot read ${settingsPath}: ${e.message}`); process.exit(3); }
@@ -61,7 +66,28 @@ if (raw !== null && raw.trim() !== '') {
 }
 
 const current = settings.statusLine;
-const runsStatusline = current && typeof current === 'object' && typeof current.command === 'string' && current.command.includes('statusline.mjs');
+// True only for `node <path>/statusline.mjs`, so a command that merely mentions the file name
+// somewhere does not count as installed. The path may be bare (safe characters only), in single
+// quotes (anything but a single quote) or in double quotes (nothing a shell would expand).
+const SAFE_BARE = /^[\w./:~\\-]+$/;
+function isStatuslineCommand(command) {
+  if (typeof command !== 'string' || command.includes('\n')) return false;
+  const trimmed = command.trim();
+  if (!trimmed.startsWith('node ')) return false;
+  const target = trimmed.slice('node '.length).trim();
+  const quote = target[0];
+  let file = target;
+  if (quote === "'" || quote === '"') {
+    if (target.length < 2 || !target.endsWith(quote)) return false;
+    file = target.slice(1, -1);
+    const forbidden = quote === "'" ? "'" : '"$`';
+    if ([...file].some((c) => forbidden.includes(c))) return false;
+  } else if (!SAFE_BARE.test(target)) {
+    return false;
+  }
+  return file === 'statusline.mjs' || file.endsWith('/statusline.mjs') || file.endsWith('\\statusline.mjs');
+}
+const runsStatusline = current && typeof current === 'object' && isStatuslineCommand(current.command);
 
 if (current === undefined) {
   if (check) { console.log(`missing  ${label}`); process.exit(1); }
@@ -87,11 +113,13 @@ try {
     let backup = `${settingsPath}.bak-${stamp}`;
     for (let n = 2; fs.existsSync(backup); n++) backup = `${settingsPath}.bak-${stamp}-${n}`;
     fs.copyFileSync(settingsPath, backup);
+    fs.chmodSync(backup, mode);
     console.log(`backed up ${backup}`);
   }
   settings.statusLine = { type: 'command', command };
   const tmp = `${settingsPath}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(settings, null, indent) + '\n');
+  fs.writeFileSync(tmp, JSON.stringify(settings, null, indent) + '\n', { mode });
+  fs.chmodSync(tmp, mode);
   fs.renameSync(tmp, settingsPath);
 } catch (e) {
   console.error(`could not write ${settingsPath}: ${e.message}`);

