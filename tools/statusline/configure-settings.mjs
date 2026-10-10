@@ -85,7 +85,7 @@ function isStatuslineCommand(command) {
   } else if (!SAFE_BARE.test(target)) {
     return false;
   }
-  return file === 'statusline.mjs' || file.endsWith('/statusline.mjs') || file.endsWith('\\statusline.mjs');
+  return file === 'statusline.mjs' || file.endsWith('/statusline.mjs') || file.endsWith(String.raw`\statusline.mjs`);
 }
 const runsStatusline = current && typeof current === 'object' && isStatuslineCommand(current.command);
 
@@ -111,7 +111,8 @@ try {
   if (raw !== null) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
     let backup = `${settingsPath}.bak-${stamp}`;
-    for (let n = 2; fs.existsSync(backup); n++) backup = `${settingsPath}.bak-${stamp}-${n}`;
+    let n = 1;
+    while (fs.existsSync(backup)) backup = `${settingsPath}.bak-${stamp}-${++n}`;
     fs.copyFileSync(settingsPath, backup);
     fs.chmodSync(backup, mode);
     console.log(`backed up ${backup}`);

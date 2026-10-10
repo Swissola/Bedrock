@@ -111,7 +111,11 @@ check_file() {
 }
 
 # A path in the form node itself understands: Git Bash's /c/Users/... becomes C:/Users/...
-native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; return 0; }
+native_path() {
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$p"; else printf '%s' "$p"; fi
+  return 0
+}
 
 # The status line command to write into settings.json. An absolute, forward-slash path,
 # not "~": Claude Code on Windows may run it through PowerShell, which does not expand ~.
@@ -134,32 +138,33 @@ statusline_command() {
 # through the Node helper, which backs the file up, preserves every other key and refuses
 # to touch a file that is not valid JSON. Honours --dry-run and --force.
 configure_statusline() {
-  local mode="${1:-}" settings="$PREFIX/settings.json" cmd extra="" helper rc major
+  local mode="${1:-}" settings="$PREFIX/settings.json" cmd extra="" helper rc major check=0
+  [[ "$mode" = "--check" ]] && check=1
   if ! cmd="$(statusline_command)"; then
     echo "warning: not configuring settings.json: the install path contains a single quote or a line break, which cannot be quoted safely in a command."; NEED_ATTENTION=1; return 0
   fi
   if ! command -v node >/dev/null 2>&1; then
-    if [[ "$mode" = "--check" ]]; then echo "unknown  settings.json statusLine (node is not on PATH, so it cannot be read)"
+    if [[ "$check" = "1" ]]; then echo "unknown  settings.json statusLine (node is not on PATH, so it cannot be read)"
     else
       echo "warning: node is not on PATH, so $settings was not changed. The status line needs Node 18 or later; once it is installed, re-run this, or add this to settings.json:"
       echo "  \"statusLine\": { \"type\": \"command\", \"command\": \"$(printf '%s' "$cmd" | sed 's/"/\\"/g')\" }"
     fi
     return 0
   fi
-  if [[ "$mode" != "--check" ]]; then
+  if [[ "$check" != "1" ]]; then
     major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
     [[ "$major" =~ ^[0-9]+$ ]] && [[ "$major" -lt 18 ]] && echo "warning: node $major is older than 18; the status line may not run."
   fi
   [[ "$FORCE" = "1" ]] && extra="$extra --force"
   [[ "$DRY" = "1" ]] && extra="$extra --dry-run"
-  [[ "$mode" = "--check" ]] && extra="$extra --check"
+  [[ "$check" = "1" ]] && extra="$extra --check"
   helper="$(native_path "$SRC_ROOT/tools/statusline/configure-settings.mjs")"
   # $extra is a short list of fixed flags, deliberately split into words.
   # shellcheck disable=SC2086
   node "$helper" "$(native_path "$settings")" "$cmd" $extra
   rc=$?
   if [[ "$rc" = "3" ]]; then NEED_ATTENTION=1
-  elif [[ "$rc" = "1" ]] && [[ "$mode" = "--check" ]]; then NEED_ATTENTION=1
+  elif [[ "$rc" = "1" ]] && [[ "$check" = "1" ]]; then NEED_ATTENTION=1
   elif [[ "$rc" != "0" ]]; then echo "warning: configure-settings.mjs exited $rc" >&2; NEED_ATTENTION=1; fi
   return 0
 }
