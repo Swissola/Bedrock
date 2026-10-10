@@ -89,6 +89,8 @@ jobs:
         run: node tools/command-templates/test/test-stub-rest-api-mcp.mjs
       - name: status line
         run: node tools/statusline/test-statusline.mjs
+      - name: status line settings helper
+        run: node tools/statusline/test-configure-settings.mjs
 
   # The PowerShell scripts run on Windows users' machines, usually under Windows PowerShell
   # 5.1 (powershell.exe), so the suite runs under both that and PowerShell 7 (pwsh). The
@@ -127,6 +129,9 @@ jobs:
       - name: status line
         shell: bash
         run: node tools/statusline/test-statusline.mjs
+      - name: status line settings helper
+        shell: bash
+        run: node tools/statusline/test-configure-settings.mjs
 
   # The status line script claims Node 18 as its minimum, so the suite runs on each Node
   # line from 18 up. (The jobs above use whatever Node the runner image ships.)
@@ -148,3 +153,5 @@ jobs:
           git --version
       - name: status line
         run: node tools/statusline/test-statusline.mjs
+      - name: status line settings helper
+        run: node tools/statusline/test-configure-settings.mjs

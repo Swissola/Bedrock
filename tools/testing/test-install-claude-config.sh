@@ -455,6 +455,235 @@ test_wrapper_without_any_vault_root_is_silent() {
   return $?
 }
 
+# --- --statusline -------------------------------------------------------------------------------
+
+# A path node understands (Git Bash: /c/... becomes C:/...).
+np() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; return 0; }
+# The statusLine command in a settings.json, or nothing.
+sl_cmd() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(j.statusLine?String(j.statusLine.command):"")' "$(np "$1")"; return 0; }
+sl_keys() { node -e 'process.stdout.write(Object.keys(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))).join(","))' "$(np "$1")"; return 0; }
+count_backups() { ls "$1" 2>/dev/null | grep -c 'settings.json.bak-' ; return 0; }
+need_node() { command -v node >/dev/null 2>&1 && return 0; echo "SKIP: $1 (node is not installed)"; return 1; }
+
+test_statusline_is_opt_in() {
+  local p out; need_node "statusline opt-in" || return 0
+  p=$(mktemp -d); mkdir -p "$p/claude"
+  printf '{"model":"widget-1"}\n' > "$p/claude/settings.json"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" 2>&1)
+  assert_eq "no --statusline: the script is not installed" "no" "$(exists "$p/claude/statusline.mjs")"
+  assert_eq "no --statusline: settings.json is untouched" '{"model":"widget-1"}' "$(cat "$p/claude/settings.json")"
+  assert_eq "no --statusline: no backup is made" "0" "$(count_backups "$p/claude")"
+  assert_eq "no --statusline: the output does not mention it" "0" "$(printf '%s' "$out" | grep -c -i 'statusline')"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_install_copies_the_script_and_sets_settings() {
+  local p out cmd; need_node "statusline install" || return 0
+  p=$(mktemp -d)
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline 2>&1); local st=$?
+  assert_eq "statusline install: exit 0" "0" "$st"
+  assert_eq "statusline install: the script is copied byte for byte" "yes" "$(cmp -s "$TOOLS_DIR/statusline/statusline.mjs" "$p/claude/statusline.mjs" && echo yes || echo no)"
+  cmd=$(sl_cmd "$p/claude/settings.json")
+  assert_contains "statusline install: the command runs node" "node " "$cmd"
+  assert_contains "statusline install: the command names the installed script" "/claude/statusline.mjs" "$cmd"
+  assert_eq "statusline install: the command is an absolute path, not ~" "0" "$(printf '%s' "$cmd" | grep -c '~')"
+  assert_eq "statusline install: the command uses forward slashes only" "0" "$(printf '%s' "$cmd" | grep -c '\\')"
+  assert_eq "statusline install: the command starts with an absolute path" "1" "$(printf '%s' "$cmd" | grep -c -E '^node "?(/|[A-Za-z]:/)')"
+  assert_eq "statusline install: no backup when there was no settings.json" "0" "$(count_backups "$p/claude")"
+  assert_contains "statusline install: tells you a new session is needed" "NEW Claude Code session" "$out"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_second_run_changes_nothing() {
+  local p out before; need_node "statusline idempotence" || return 0
+  p=$(mktemp -d)
+  bash "$INSTALLER" --prefix "$p/claude" --statusline >/dev/null 2>&1
+  before=$(cat "$p/claude/settings.json")
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline 2>&1)
+  assert_eq "statusline second run: settings.json is identical" "$before" "$(cat "$p/claude/settings.json")"
+  assert_eq "statusline second run: nothing installed or updated" "0" "$(printf '%s' "$out" | grep -c -E '^(installed|updated)')"
+  assert_eq "statusline second run: no backup" "0" "$(count_backups "$p/claude")"
+  assert_contains "statusline second run: reports unchanged" "unchanged" "$out"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_keeps_other_settings_and_backs_up() {
+  local p orig; need_node "statusline preserves settings" || return 0
+  p=$(mktemp -d); mkdir -p "$p/claude"
+  orig='{"model":"widget-1","permissions":{"allow":["Bash(ls:*)"]},"env":{"A":"1"}}'
+  printf '%s\n' "$orig" > "$p/claude/settings.json"
+  bash "$INSTALLER" --prefix "$p/claude" --statusline >/dev/null 2>&1
+  assert_eq "statusline with existing settings: every key is kept and statusLine is added last" "model,permissions,env,statusLine" "$(sl_keys "$p/claude/settings.json")"
+  assert_eq "statusline with existing settings: one backup is made" "1" "$(count_backups "$p/claude")"
+  assert_eq "statusline with existing settings: the backup is the original, byte for byte" "$orig" "$(cat "$p/claude"/settings.json.bak-*)"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_keeps_a_different_status_line_unless_forced() {
+  local p out orig; need_node "statusline different line" || return 0
+  p=$(mktemp -d); mkdir -p "$p/claude"
+  orig='{"statusLine":{"type":"command","command":"bash ~/other-line.sh"}}'
+  printf '%s\n' "$orig" > "$p/claude/settings.json"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline 2>&1); local st=$?
+  assert_eq "different statusLine: exit 0 (nothing the installer was able to do is outstanding)" "0" "$st"
+  assert_eq "different statusLine: left exactly as it was" "$orig" "$(cat "$p/claude/settings.json")"
+  assert_eq "different statusLine: no backup" "0" "$(count_backups "$p/claude")"
+  assert_contains "different statusLine: says it was kept" "kept" "$out"
+  assert_contains "different statusLine: points at --force" "--force" "$out"
+  assert_contains "different statusLine: prints the snippet to switch by hand" '"statusLine"' "$out"
+  assert_eq "different statusLine: the script is still copied" "yes" "$(exists "$p/claude/statusline.mjs")"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --force 2>&1)
+  assert_contains "different statusLine with --force: the command is replaced" "statusline.mjs" "$(sl_cmd "$p/claude/settings.json")"
+  assert_eq "different statusLine with --force: the old file is backed up" "1" "$(count_backups "$p/claude")"
+  assert_eq "different statusLine with --force: the backup is the original" "$orig" "$(cat "$p/claude"/settings.json.bak-*)"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_hand_installed_tilde_form_is_left_alone() {
+  local p orig; need_node "statusline hand-installed" || return 0
+  p=$(mktemp -d); mkdir -p "$p/claude"
+  orig='{"statusLine":{"type":"command","command":"node ~/.claude/statusline.mjs"}}'
+  printf '%s\n' "$orig" > "$p/claude/settings.json"
+  bash "$INSTALLER" --prefix "$p/claude" --statusline --force >/dev/null 2>&1
+  assert_eq "hand-installed ~ form: not rewritten, even with --force" "$orig" "$(cat "$p/claude/settings.json")"
+  assert_eq "hand-installed ~ form: no backup" "0" "$(count_backups "$p/claude")"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_invalid_json_is_never_touched() {
+  local p out bad; need_node "statusline invalid JSON" || return 0
+  p=$(mktemp -d); mkdir -p "$p/claude"
+  bad='{"model": '
+  printf '%s' "$bad" > "$p/claude/settings.json"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --force 2>&1); local st=$?
+  assert_eq "invalid settings.json: exit 1 so the problem is not missed" "1" "$st"
+  assert_eq "invalid settings.json: the file is untouched" "$bad" "$(cat "$p/claude/settings.json")"
+  assert_eq "invalid settings.json: no backup and no temp file" "0" "$(ls "$p/claude" | grep -c -E 'bak-|tmp-')"
+  assert_contains "invalid settings.json: says why and gives the snippet" "not valid JSON" "$out"
+  assert_eq "invalid settings.json: the script is still copied" "yes" "$(exists "$p/claude/statusline.mjs")"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_dry_run_writes_nothing() {
+  local p out; need_node "statusline dry run" || return 0
+  p=$(mktemp -d)
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --dry-run 2>&1); local st=$?
+  assert_eq "statusline dry run: exit 0" "0" "$st"
+  assert_eq "statusline dry run: nothing is created" "no" "$(exists "$p/claude")"
+  assert_contains "statusline dry run: says it would install the script" "would install" "$out"
+  assert_contains "statusline dry run: says it would create settings.json" "would create" "$out"
+  assert_eq "statusline dry run: does not claim the status line has appeared" "0" "$(printf '%s' "$out" | grep -c 'NEW Claude Code session (see')"
+  mkdir -p "$p/claude"
+  printf '{"statusLine":{"type":"command","command":"bash a.sh"}}\n' > "$p/claude/settings.json"
+  bash "$INSTALLER" --prefix "$p/claude" --statusline --force --dry-run >/dev/null 2>&1
+  assert_contains "statusline dry run with --force: the existing line is not replaced" "bash a.sh" "$(sl_cmd "$p/claude/settings.json")"
+  assert_eq "statusline dry run with --force: no backup" "0" "$(count_backups "$p/claude")"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_check_mode() {
+  local p out st; need_node "statusline check" || return 0
+  p=$(mktemp -d)
+  bash "$INSTALLER" --prefix "$p/claude" >/dev/null 2>&1
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --check 2>&1); st=$?
+  assert_eq "statusline check before installing it: exit 1" "1" "$st"
+  assert_contains "statusline check: reports the script missing" "missing  statusline.mjs" "$out"
+  assert_contains "statusline check: reports the setting missing" "missing  settings.json statusLine" "$out"
+  assert_eq "statusline check: writes nothing" "no" "$(exists "$p/claude/settings.json")"
+  bash "$INSTALLER" --prefix "$p/claude" --statusline >/dev/null 2>&1
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --check 2>&1); st=$?
+  assert_eq "statusline check after installing it: exit 0" "0" "$st"
+  assert_contains "statusline check after installing it: both are current" "current  settings.json statusLine" "$out"
+  printf '{"model":"widget-1"}\n' > "$p/claude/settings.json"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --check 2>&1); st=$?
+  assert_eq "statusline check with the script current but no statusLine set: exit 1" "1" "$st"
+  assert_contains "statusline check with the script current but no statusLine set: reports the setting missing" "missing  settings.json statusLine" "$out"
+  assert_contains "statusline check with the script current but no statusLine set: the script itself is current" "current  statusline.mjs" "$out"
+  printf '// stale\n' >> "$p/claude/statusline.mjs"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --check 2>&1); st=$?
+  assert_eq "statusline check with a modified script: exit 1" "1" "$st"
+  assert_contains "statusline check with a modified script: says it differs" "differs  statusline.mjs" "$out"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --check 2>&1)
+  assert_eq "check without --statusline says nothing about it" "0" "$(printf '%s' "$out" | grep -c -i 'statusline')"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_check_does_not_fail_for_a_different_status_line() {
+  local p st; need_node "statusline check, different line" || return 0
+  p=$(mktemp -d)
+  bash "$INSTALLER" --prefix "$p/claude" --statusline >/dev/null 2>&1
+  printf '{"statusLine":{"type":"command","command":"bash a.sh"}}\n' > "$p/claude/settings.json"
+  bash "$INSTALLER" --prefix "$p/claude" --statusline --check >/dev/null 2>&1; st=$?
+  assert_eq "statusline check with a different line configured: exit 0 (re-running would not change it)" "0" "$st"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_relative_prefix_gives_an_absolute_command() {
+  local p cmd; need_node "statusline relative prefix" || return 0
+  p=$(mktemp -d)
+  ( cd "$p" && bash "$INSTALLER" --prefix rel-claude --statusline >/dev/null 2>&1 )
+  cmd=$(sl_cmd "$p/rel-claude/settings.json")
+  assert_eq "relative --prefix: the command still starts with an absolute path" "1" "$(printf '%s' "$cmd" | grep -c -E '^node "?(/|[A-Za-z]:/)')"
+  assert_contains "relative --prefix: and names the installed script" "/rel-claude/statusline.mjs" "$cmd"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_path_with_a_space_is_quoted() {
+  local p cmd; need_node "statusline path with a space" || return 0
+  p=$(mktemp -d)
+  bash "$INSTALLER" --prefix "$p/with space/claude" --statusline >/dev/null 2>&1
+  cmd=$(sl_cmd "$p/with space/claude/settings.json")
+  assert_eq "path with a space: the script path is double-quoted" "1" "$(printf '%s' "$cmd" | grep -c -E '^node ".* .*/statusline\.mjs"$')"
+  rm -rf "$p"
+  return 0
+}
+
+test_statusline_without_node_copies_the_script_and_warns() {
+  local p out tools t; need_node "statusline without node" || return 0
+  if command -v cygpath >/dev/null 2>&1; then echo "SKIP: statusline without node (cannot build a node-free PATH under Git Bash)"; return 0; fi
+  p=$(mktemp -d); tools="$p/tools"; mkdir -p "$tools"
+  for t in dirname mkdir cp cmp chmod grep head sed tr mktemp rm basename cat ls; do
+    ln -s "$(command -v "$t")" "$tools/$t" 2>/dev/null || cp "$(command -v "$t")" "$tools/$t"
+  done
+  out=$(PATH="$tools" "$(command -v bash)" "$INSTALLER" --prefix "$p/claude" --statusline 2>&1); local st=$?
+  assert_eq "no node: the script is still copied" "yes" "$(exists "$p/claude/statusline.mjs")"
+  assert_eq "no node: settings.json is not created" "no" "$(exists "$p/claude/settings.json")"
+  assert_contains "no node: warns that node is missing" "node is not on PATH" "$out"
+  assert_contains "no node: prints the snippet to add by hand" '"statusLine"' "$out"
+  assert_eq "no node: not a failure (exit 0)" "0" "$st"
+  rm -rf "$p"
+  return 0
+}
+
+test_help_documents_the_statusline_flag() {
+  local out; out=$(bash "$INSTALLER" --help 2>&1)
+  assert_contains "help lists --statusline" "--statusline" "$out"
+  assert_contains "help says --force also covers a different statusLine" "different statusLine" "$out"
+  return 0
+}
+
+test_force_without_statusline_never_edits_settings() {
+  local p orig; need_node "force without statusline" || return 0
+  p=$(mktemp -d); mkdir -p "$p/claude"
+  orig='{"statusLine":{"type":"command","command":"bash a.sh"}}'
+  printf '%s\n' "$orig" > "$p/claude/settings.json"
+  bash "$INSTALLER" --prefix "$p/claude" --force >/dev/null 2>&1
+  assert_eq "--force alone never edits settings.json" "$orig" "$(cat "$p/claude/settings.json")"
+  rm -rf "$p"
+  return 0
+}
+
 test_dry_run_changes_nothing
 test_no_skills_flag
 test_fresh_install_copies_commands_skills_hooks
@@ -490,6 +719,22 @@ test_vault_path_with_a_double_quote_is_not_written_into_the_json
 test_wrapper_prefers_vault_root_from_the_environment_over_the_file
 test_wrapper_reads_a_crlf_vault_root_file
 test_wrapper_without_any_vault_root_is_silent
+
+test_statusline_is_opt_in
+test_statusline_install_copies_the_script_and_sets_settings
+test_statusline_second_run_changes_nothing
+test_statusline_keeps_other_settings_and_backs_up
+test_statusline_keeps_a_different_status_line_unless_forced
+test_statusline_hand_installed_tilde_form_is_left_alone
+test_statusline_invalid_json_is_never_touched
+test_statusline_dry_run_writes_nothing
+test_statusline_check_mode
+test_statusline_check_does_not_fail_for_a_different_status_line
+test_statusline_relative_prefix_gives_an_absolute_command
+test_statusline_path_with_a_space_is_quoted
+test_statusline_without_node_copies_the_script_and_warns
+test_help_documents_the_statusline_flag
+test_force_without_statusline_never_edits_settings
 
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]
