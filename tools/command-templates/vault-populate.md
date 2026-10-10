@@ -2,7 +2,7 @@
 description: Summarise the current repo and write a reference doc for it into the vault
 argument-hint: [optional repo name override, otherwise inferred from this folder]
 ---
-<!-- bedrock-template: vault-populate, version 2 -->
+<!-- bedrock-template: vault-populate, version 3 -->
 
 See `runbooks/using-the-vault.md` in the vault, section 3, for the full manual version of this workflow and its rationale — this command just automates it. Per-vault differences are optional and live in a `vault-config.md` note at the vault root; see `docs/vault-config.md`. With no `vault-config.md`, every setting below takes its default and this behaves exactly as it always has (writing `repos/<name>/index.md`).
 
@@ -25,12 +25,13 @@ Always read the full current content, then write the full updated content back, 
 | Setting | Default | Meaning |
 |---|---|---|
 | `reposPath` | `repos/{repo}/index.md` | Where this repo's doc is written. `{repo}` is the name from step 2 |
+| `repoNameCase` | `lower` | `lower`: the repo name used for `{repo}` is lowercased. `keep`: used exactly as the repo's folder is named. |
 | `hubNote` | `index.md` | The vault's hub note. `none` means there isn't one, skip step 6 |
 
 ## Steps
 
 1. Confirm the current working directory is a real git repo and is **not** the vault itself (check whether `vault-config.md`, or the `hubNote` together with the daily notes folder from `dailyNotesPath`, exist right here in this same working directory — with the defaults that is `index.md` and a `daily-notes/` folder — as the tell). If it is the vault, stop and say this command is for documenting *other* repos from inside their own folder, not the vault itself.
-2. Determine the repo name: "$ARGUMENTS" if given, otherwise the repo's folder name (or its `git remote` name if that's clearer).
+2. Determine the repo name: "$ARGUMENTS" if given, otherwise the basename of `git rev-parse --show-toplevel` (the repo's folder name, not its `git remote` name, so it always matches what the `session-start-vault-context` hook looks for), lowercased unless `repoNameCase` is `keep`.
 3. Read the doc at `reposPath` in the vault first, if it already exists. This run should refresh or extend an existing doc, not blindly overwrite tribal knowledge someone already recorded there.
 4. Summarise this repo for a new-starter reference doc: what it does, how it's structured, how it's run/deployed, and anything that would trip up someone new to it. Base this on the actual code in front of you, not assumptions — and if an existing doc already covers tribal knowledge a code-only read can't reconstruct, preserve it rather than dropping it. If another repo's doc already exists at a sibling `reposPath` in the vault, follow its structure as a model for consistency; otherwise use your own best judgement for a clear reference doc.
 5. Write (or update) the doc at `reposPath` in the vault. Never write secrets — passwords, tokens, API keys, passphrases, private keys, connection strings with embedded credentials — into it, even if one is present in the repo; say where the secret lives instead.

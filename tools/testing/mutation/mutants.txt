@@ -54,7 +54,22 @@ post-merge@@pm5@@tools/hook-templates/post-merge@@s/committed="yes"/committed="y
 # ---- session-start-vault-context ----------------------------------------------------------------
 session-start-vault-context@@cx1@@tools/hook-templates/session-start-vault-context@@s/\[ "\$SOURCE" = "compact" \] && exit 0/:/@@a /compact reloads the context
 session-start-vault-context@@cx2@@tools/hook-templates/session-start-vault-context@@s/UPDATE_MAX_LINES="\${UPDATE_MAX_LINES:-40}"/UPDATE_MAX_LINES=40/@@UPDATE_MAX_LINES is ignored
-session-start-vault-context@@cx3@@tools/hook-templates/session-start-vault-context@@s/-name '\*\.md' //@@non-markdown files can be picked as the latest note
+session-start-vault-context@@cx3@@tools/hook-templates/session-start-vault-context@@s#^NOTE_GLOB="$NOTE_GLOB.md"#NOTE_GLOB="$NOTE_GLOB"#@@non-markdown files can be picked as the latest note
+session-start-vault-context@@cx4@@tools/hook-templates/session-start-vault-context@@s#NOTE_GLOB="${NAME_PATTERN//\\{repo\\}/$REPO_GLOB}"#NOTE_GLOB="${NAME_PATTERN//\\{repo\\}/*}"#@@notes about any repo match, so another repo's newer note is loaded
+session-start-vault-context@@cx5@@tools/hook-templates/session-start-vault-context@@s#^    REPO_GLOB=.*#    REPO_GLOB="$REPO_NAME"#@@glob characters in a repo name are not escaped
+session-start-vault-context@@cx6@@tools/hook-templates/session-start-vault-context@@s#\[\[ "$d" > "$best" \]\]#false#@@the newest date in the filename no longer decides which note is latest
+session-start-vault-context@@cx7@@tools/hook-templates/session-start-vault-context@@s#head -n "$MAX_CONTRIBUTORS"#head -n 99#@@every contributor is loaded, whatever the limit
+session-start-vault-context@@cx8@@tools/hook-templates/session-start-vault-context@@s#MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-3}"#MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-4}"#@@the default contributor limit is four
+session-start-vault-context@@cx9@@tools/hook-templates/session-start-vault-context@@s#  \*) REPO_NAME="$(printf '%s' "$REPO_NAME" | tr '\[:upper:\]' '\[:lower:\]')" ;;#  *) ;;#@@the repo name is not lowercased by default
+session-start-vault-context@@cx10@@tools/hook-templates/session-start-vault-context@@s#\*/.git) printf '%s' "${common%/.git}"; return 0 ;;#*/.git) ;;#@@a linked worktree is named after its own folder, not the main checkout's
+session-start-vault-context@@cx11@@tools/hook-templates/session-start-vault-context@@s#if \[ "$m" -gt "$best_m" \]#if [ "$m" -lt "$best_m" ]#@@on the same date the OLDER file wins
+session-start-vault-context@@cx12@@tools/hook-templates/session-start-vault-context@@s# ! -name '\*.sync-conflict-\*'##@@Syncthing conflict copies can be picked as the latest note
+session-start-vault-context@@cx13@@tools/hook-templates/session-start-vault-context@@s# ! -path '\*/\.\*'##@@files inside hidden folders can be picked as the latest note
+session-start-vault-context@@cx14@@tools/hook-templates/session-start-vault-context@@s#case "$DAILY_PATH" in \*"{author}"\*) HAS_AUTHOR=1 ;; esac#:#@@contributor subfolders are not treated as contributors
+session-start-vault-context@@cx15@@tools/hook-templates/session-start-vault-context@@s#label="Latest note from $who"#label="Most recent daily note"#@@a contributor's note is not labelled with who wrote it
+session-start-vault-context@@cx16@@tools/hook-templates/session-start-vault-context@@s#elif \[ "$REPO_FILTERED" = 1 \]; then#elif false; then#@@a repo with no notes gets the generic empty message
+session-start-vault-context@@cx17@@tools/hook-templates/session-start-vault-context@@s#if \[ "$TOTAL" -gt "$MAX_CONTRIBUTORS" \]; then#if false; then#@@contributors left out are not mentioned
+session-start-vault-context@@cx18@@tools/hook-templates/session-start-vault-context@@s#^  keep) ;;#  keepx) ;;#@@repoNameCase: keep is ignored
 
 # ---- install-claude-config ---------------------------------------------------------------------
 install-claude-config@@in1@@tools/install-claude-config.sh@@s/\[\[ "\$iv" -lt "\$sv" \]\]/[[ "$iv" -gt "$sv" ]]/@@--check calls an older install newer and a newer one outdated

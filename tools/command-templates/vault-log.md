@@ -2,7 +2,7 @@
 description: Write this session as a daily note in the vault
 argument-hint: [optional short topic, otherwise inferred from the conversation]
 ---
-<!-- bedrock-template: vault-log, version 2 -->
+<!-- bedrock-template: vault-log, version 3 -->
 
 See `runbooks/using-the-vault.md` in the vault, section 2, for full details of the folder/filename convention and template this follows — this command just automates it. Per-vault differences (a different folder layout, extra frontmatter, a change-log byproduct) are optional and live in a `vault-config.md` note at the vault root; see `docs/vault-config.md`. With no `vault-config.md`, every setting below takes its default and this behaves exactly as it always has.
 
@@ -27,6 +27,7 @@ If you have neither set of tools, stop and say so.
 |---|---|---|
 | `dailyNotesPath` | `daily-notes/{author}` | Folder for daily notes. `{author}` and `{repo}` are filled in from steps 1 and 3 |
 | `filenamePattern` | `{date}-{topic}` | Note filename without `.md` |
+| `repoNameCase` | `lower` | `lower`: the repo name used for `{repo}` is lowercased. `keep`: used exactly as the repo's folder is named. The `session-start-vault-context` hook reads the same setting, so they always agree on the name |
 | `appendRule` | `same-day-any-topic` | `same-day-any-topic`: if any note from today exists in the folder, append to it. `exact-path`: only append if the exact path exists, otherwise create a new note |
 | `tags` | *(you pick relevant tags)* | A fixed list, e.g. `[daily-note, {repo}]` |
 | `frontmatterExtras` | *(none)* | Extra frontmatter fields to write. Supported: `machine`, `location` |
@@ -40,7 +41,7 @@ If you have neither set of tools, stop and say so.
 
 1. **Author** (only if `{author}` appears in `dailyNotesPath` or `filenamePattern`): run `git config user.name`, lowercase it, replace spaces with hyphens (e.g. "Jane Doe" → `jane-doe`). This is a git identity lookup, not tied to the vault repo — it works the same regardless of which repo this session is running in.
 2. **Date:** today as `YYYY-MM-DD`.
-3. **Repo** (only if `{repo}` is used, or `changeLog` is `compact`): the basename of `git rev-parse --show-toplevel`, lowercased; the working directory's name if this isn't a git repo.
+3. **Repo** (only if `{repo}` is used, or `changeLog` is `compact`): the basename of `git rev-parse --show-toplevel`, lowercased unless `repoNameCase` is `keep`; the working directory's name if this isn't a git repo.
 4. **Machine and location** (only if listed in `frontmatterExtras`): `machine` is the lowercased output of `hostname`. `location` per `locationHomePrefix` above.
 5. **Topic:** use "$ARGUMENTS" if given, otherwise infer 2-4 hyphenated words from what this session actually did.
 6. **Find or create the note.** List the resolved `dailyNotesPath` folder, then apply `appendRule`:
