@@ -271,6 +271,23 @@ The stand-in for the Obsidian plugin that the command harness uses. Run with `no
 - **Tools:** every tool declares an object schema; list is sorted, marks folders with `/`, hides dot entries and treats an empty path as the root; missing files and folders and reading a folder are errors that name the path; write replaces and reports bytes, not characters; append adds to an existing file and refuses a missing one; patch is always refused and changes nothing; a dot-file is readable by exact path.
 - **Logging:** `STUB_LOG` gets one JSON line per call with tool, path and error flag; without it nothing extra is written.
 
+### `tools/statusline/test-statusline.mjs`: the Claude Code status line
+
+Run with `node` (18 or later). Each case feeds the script the JSON Claude Code would send and checks what it prints, with colour codes stripped except where the colour is the point. It builds throwaway repositories in temp folders and never touches the real `~/.claude`. `git` and `bash` are needed for the repository and command cases, and each of those skips with a message when missing. See [`statusline.md`](statusline.md).
+
+- **Bad input:** empty, whitespace, invalid JSON, `null`, an array and a bare number all exit 0 and print two lines with the defaults.
+- **Line 1:** model, effort and thinking marker together and individually.
+- **Context bar:** empty, half, full and clamped above 100%; fractions floored; a non-number treated as 0; green below 70%, yellow from 70%, red from 90%.
+- **Subscription:** a reading of 0% on either window still shows the bar and does not fall through to the cost (a regression test); percentages rounded; the five hour reset in hours and minutes; the seven day reset in days and hours, shown only from 50%; a reset in the past shown as `0h 0m`; usage colours at 60% and 80%.
+- **Gateway spend limit:** the bar, amounts and reset; a 0% spend shown; amounts shown only when both are supplied; the cost display replaced.
+- **Pay-as-you-go:** the cost to two places; an empty `rate_limits` and a non-numeric value both give the cost.
+- **Tags:** worktree name and branch, agent name, and nothing added when absent.
+- **Repository and branch:** owner and name; the folder marker hidden when it matches the repo name and shown when it does not; a subdirectory; a branch containing a slash; the `cwd` fallback; the branch read from the session directory and not the process directory (a regression test); a real linked worktree; a detached HEAD; no repository; an unusable or dangling `.git` file; a real reftable repository (when git is 2.45 or later) and the `.invalid` placeholder never printed as a branch.
+- **Slow stdin:** JSON arriving in chunks with pauses, one cut inside a multi-byte character.
+- **The exact command:** `node ~/.claude/statusline.mjs` run under bash with `HOME` pointed at a temp folder.
+
+CI also runs this suite on Node 18, 20 and 22 (Ubuntu), since 18 is the minimum the script claims.
+
 ### `tools/test-powershell-scripts.ps1`: the PowerShell scripts
 
 A self-contained script in the same style as the bash suites (no Pester, so nothing to install). Each scenario runs the script under test in a child PowerShell.
@@ -286,7 +303,7 @@ Checks that no single suite can make:
 - every hook in `hook-templates/` has a `test-<hook>.sh`, and every such suite tests a hook that exists;
 - the installer's hook list matches the hooks that exist;
 - every suite is in `run-all-tests.sh`, in a CI workflow and in this page;
-- every shell script parses, has LF endings, is tracked as executable and has `eol=lf` in `.gitattributes`; JavaScript and PowerShell files parse; the example wiki config is valid;
+- every shell script parses, has LF endings, is tracked as executable and has `eol=lf` in `.gitattributes`; JavaScript (including the status line files) and PowerShell files parse; the example wiki config is valid;
 - every command template carries a version stamp;
 - the test scripts use nothing that the macOS system bash (3.2) lacks, and none of the GNU-only commands (`touch -d`, `readlink -f`, `date -d` without a fallback, `sed -i` without a suffix) that would fail there;
 - every suite cleans up from an exit trap;

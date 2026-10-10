@@ -136,7 +136,7 @@ test_scripts_are_executable_in_git() {
 test_gitattributes_forces_lf_for_every_script() {
   local f attr
   if ! git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then skip ".gitattributes eol (not a git checkout)"; return 0; fi
-  for f in $(shell_scripts) "$TOOLS_DIR"/command-templates/test/*.mjs; do
+  for f in $(shell_scripts) "$TOOLS_DIR"/command-templates/test/*.mjs "$TOOLS_DIR"/statusline/*.mjs; do
     attr=$(git -C "$ROOT" check-attr eol -- "$f" | sed 's/.*: //')
     assert_eq "$(rel "$f") has eol=lf in .gitattributes" "lf" "$attr"
   done
@@ -146,7 +146,7 @@ test_gitattributes_forces_lf_for_every_script() {
 test_javascript_files_parse() {
   local f
   if ! command -v node >/dev/null 2>&1; then skip "node --check (node not installed)"; return 0; fi
-  for f in "$TOOLS_DIR"/command-templates/test/*.mjs; do
+  for f in "$TOOLS_DIR"/command-templates/test/*.mjs "$TOOLS_DIR"/statusline/*.mjs; do
     assert_eq "node --check $(rel "$f")" "ok" "$(node --check "$f" 2>/dev/null && echo ok || echo "does not parse")"
   done
   return 0

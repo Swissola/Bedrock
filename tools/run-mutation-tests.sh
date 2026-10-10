@@ -51,6 +51,7 @@ field() { local line="$1" n="$2"; printf '%s' "$line" | awk -F'@@' -v n="$n" '{ 
 suite_for() {
   local group="$1"
   if [[ -f "$ROOT/tools/hook-templates/test-$group.sh" ]]; then echo "tools/hook-templates/test-$group.sh"
+  elif [[ -f "$ROOT/tools/$group/test-$group.mjs" ]]; then echo "tools/$group/test-$group.mjs"
   else echo "tools/test-$group.sh"; fi
   return 0
 }
@@ -83,7 +84,13 @@ check_one() {
   local out; out=$(mktemp)
   sed "$expr" "$f" > "$out" 2>/dev/null
   if cmp -s "$f" "$out"; then rm -f "$out"; echo "BROKEN   $(field "$line" 2): the expression changes nothing in $target"; return 1; fi
-  if ! bash -n "$out" 2>/dev/null; then rm -f "$out"; echo "BROKEN   $(field "$line" 2): the mutated $target is not valid bash"; return 1; fi
+  case "$target" in
+    *.mjs)
+      mv "$out" "$out.mjs"; out="$out.mjs"
+      if ! node --check "$out" 2>/dev/null; then rm -f "$out"; echo "BROKEN   $(field "$line" 2): the mutated $target is not valid JavaScript"; return 1; fi ;;
+    *)
+      if ! bash -n "$out" 2>/dev/null; then rm -f "$out"; echo "BROKEN   $(field "$line" 2): the mutated $target is not valid bash"; return 1; fi ;;
+  esac
   rm -f "$out"
   return 0
 }
@@ -118,7 +125,9 @@ fresh_copy() {
 # run_suite <copy> <suite>: 0 if the suite passed.
 run_suite() {
   local copy="$1" suite="$2"
-  ( cd "$copy" && env HOME="$copy/home" bash "$copy/$suite" ) > "$copy/suite.out" 2>&1
+  local runner=bash
+  case "$suite" in *.mjs) runner=node ;; esac
+  ( cd "$copy" && env HOME="$copy/home" "$runner" "$copy/$suite" ) > "$copy/suite.out" 2>&1
   return $?
 }
 

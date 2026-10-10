@@ -5,3 +5,4 @@
 tools/hook-templates/* text eol=lf
 tools/*.sh text eol=lf
 tools/command-templates/test/*.mjs text eol=lf
+tools/statusline/* text eol=lf
