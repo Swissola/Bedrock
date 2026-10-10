@@ -194,6 +194,21 @@ test_silent_and_exit_0_when_vault_root_cannot_be_derived() {
   return $?
 }
 
+# A vault that is just a folder (for example one kept in sync by Syncthing) has no commits
+# to be unpushed, so the hook has nothing to say, at either event, and must not fail.
+test_silent_and_exit_0_when_the_vault_is_not_a_git_repo() {
+  new_workdir
+  mkdir -p "$VAULT"; echo "a note" > "$VAULT/note.md"; rm -rf "$VAULT/.git"
+  run_hook "$VAULT" "$START"
+  assert_eq "plain-folder vault, SessionStart: exit 0" "0" "$STATUS"
+  assert_silent "plain-folder vault, SessionStart: nothing on stdout" "$OUT"
+  run_hook "$VAULT" "$POST"
+  assert_eq "plain-folder vault, PostToolUse: exit 0" "0" "$STATUS"
+  assert_silent "plain-folder vault, PostToolUse: nothing on stdout" "$OUT"
+  drop_workdir
+  return $?
+}
+
 test_silent_when_vault_has_no_main_branch() {
   new_workdir
   init_repo "$VAULT" trunk
@@ -472,6 +487,7 @@ test_json_without_an_event_name_is_treated_as_unthrottled() {
 }
 
 test_silent_and_exit_0_when_vault_root_cannot_be_derived
+test_silent_and_exit_0_when_the_vault_is_not_a_git_repo
 test_silent_when_vault_has_no_main_branch
 test_silent_when_vault_has_no_origin
 test_in_sync_is_silent_but_records_that_a_check_ran

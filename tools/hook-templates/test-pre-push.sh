@@ -178,6 +178,19 @@ test_silent_when_vault_has_no_main_branch() {
   return $?
 }
 
+# A vault that is just a folder (for example one kept in sync by Syncthing) has no commits
+# to be unpushed, so a push from some other repo gets no warning and must not fail.
+test_silent_and_exit_0_when_the_vault_is_not_a_git_repo() {
+  new_workdir
+  other_repo
+  mkdir -p "$VAULT"; echo "a note" > "$VAULT/note.md"; rm -rf "$VAULT/.git"
+  run_hook "$OTHER" "$VAULT"
+  assert_eq "plain-folder vault: exit 0" "0" "$STATUS"
+  assert_silent "plain-folder vault: no warning" "$ERR"
+  drop_workdir
+  return $?
+}
+
 test_silent_when_vault_has_no_origin() {
   new_workdir
   other_repo
@@ -430,6 +443,7 @@ test_installed_as_a_real_hook_warns_but_the_push_succeeds() {
 test_silent_and_exit_0_when_vault_root_cannot_be_derived
 test_silent_when_the_repo_being_pushed_is_the_vault_itself
 test_silent_when_vault_has_no_main_branch
+test_silent_and_exit_0_when_the_vault_is_not_a_git_repo
 test_silent_when_vault_has_no_origin
 test_silent_when_vault_is_in_sync_with_origin
 test_silent_when_vault_is_only_behind_origin
