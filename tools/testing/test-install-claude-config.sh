@@ -11,6 +11,7 @@ INSTALLER="$TOOLS_DIR/install-claude-config.sh"
 PASS=0
 FAIL=0
 STARTUP_JSON='{"source":"startup"}'
+UNCHANGED="unchanged"
 
 assert_eq() {
   local desc="$1" expected="$2" actual="$3"
@@ -57,7 +58,7 @@ test_second_run_is_idempotent() {
   local p out; p=$(mktemp -d)
   bash "$INSTALLER" --prefix "$p/claude" >/dev/null 2>&1
   out=$(bash "$INSTALLER" --prefix "$p/claude" 2>&1)
-  assert_contains "second run: reports unchanged" "unchanged" "$out"
+  assert_contains "second run: reports unchanged" "$UNCHANGED" "$out"
   assert_eq "second run: nothing re-installed" "0" "$(printf '%s' "$out" | grep -c -E '^(installed|updated)')"
   rm -rf "$p"
   return $?
@@ -281,7 +282,7 @@ test_crlf_in_an_existing_vault_root_file_still_counts_as_the_same_vault() {
   mkdir -p "$p/claude/hook-configs"
   printf '%s\r\n' "$v" > "$p/claude/hook-configs/vault-root"
   out=$(bash "$INSTALLER" --prefix "$p/claude" --vault "$v" 2>&1)
-  assert_contains "CRLF vault-root: recognised as unchanged, not 'kept'" "unchanged" "$out"
+  assert_contains "CRLF vault-root: recognised as unchanged, not 'kept'" "$UNCHANGED" "$out"
   assert_eq "CRLF vault-root: no 'kept ... --force' complaint" "0" "$(printf '%s' "$out" | grep -c 'kept .*vault-root')"
   rm -rf "$p" "$v"
   return $?
@@ -458,11 +459,27 @@ test_wrapper_without_any_vault_root_is_silent() {
 # --- --statusline -------------------------------------------------------------------------------
 
 # A path node understands (Git Bash: /c/... becomes C:/...).
-np() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; return 0; }
+np() {
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$p"; else printf '%s' "$p"; fi
+  return 0
+}
 # The statusLine command in a settings.json, or nothing.
-sl_cmd() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(j.statusLine?String(j.statusLine.command):"")' "$(np "$1")"; return 0; }
-sl_keys() { node -e 'process.stdout.write(Object.keys(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))).join(","))' "$(np "$1")"; return 0; }
-count_backups() { ls "$1" 2>/dev/null | grep -c 'settings.json.bak-' ; return 0; }
+sl_cmd() {
+  local file; file="$(np "$1")"
+  node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(j.statusLine?String(j.statusLine.command):"")' "$file"
+  return 0
+}
+sl_keys() {
+  local file; file="$(np "$1")"
+  node -e 'process.stdout.write(Object.keys(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))).join(","))' "$file"
+  return 0
+}
+count_backups() {
+  local dir="$1"
+  ls "$dir" 2>/dev/null | grep -c 'settings.json.bak-'
+  return 0
+}
 need_node() { command -v node >/dev/null 2>&1 && return 0; echo "SKIP: $1 (node is not installed)"; return 1; }
 
 test_statusline_is_opt_in() {
@@ -505,7 +522,7 @@ test_statusline_second_run_changes_nothing() {
   assert_eq "statusline second run: settings.json is identical" "$before" "$(cat "$p/claude/settings.json")"
   assert_eq "statusline second run: nothing installed or updated" "0" "$(printf '%s' "$out" | grep -c -E '^(installed|updated)')"
   assert_eq "statusline second run: no backup" "0" "$(count_backups "$p/claude")"
-  assert_contains "statusline second run: reports unchanged" "unchanged" "$out"
+  assert_contains "statusline second run: reports unchanged" "$UNCHANGED" "$out"
   rm -rf "$p"
   return 0
 }
@@ -684,7 +701,7 @@ test_statusline_reinstall_recognises_its_own_quoted_command() {
   p=$(mktemp -d)
   bash "$INSTALLER" --prefix "$p/Jane (work)/claude" --statusline >/dev/null 2>&1
   out=$(bash "$INSTALLER" --prefix "$p/Jane (work)/claude" --statusline --force 2>&1)
-  assert_contains "a quoted path with parentheses: the second run recognises the command as its own" "unchanged" "$out"
+  assert_contains "a quoted path with parentheses: the second run recognises the command as its own" "$UNCHANGED" "$out"
   assert_eq "a quoted path with parentheses: no backup on the second run" "0" "$(count_backups "$p/Jane (work)/claude")"
   rm -rf "$p"
   return 0

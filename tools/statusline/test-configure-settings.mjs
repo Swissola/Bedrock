@@ -141,7 +141,7 @@ for (const command of [
   "node '/home/jane-doe/Jane (work)/.claude/statusline.mjs'",
   "node '/home/jane-doe/a$(b)/statusline.mjs'",
   'node "C:/Users/Jane Doe/.claude/statusline.mjs"',
-  'node C:\\Users\\jane-doe\\.claude\\statusline.mjs',
+  String.raw`node C:\Users\jane-doe\.claude\statusline.mjs`,
 ]) {
   const d = fresh(), f = path.join(d, 'settings.json');
   const text = JSON.stringify({ statusLine: { type: 'command', command } }) + '\n';
@@ -256,11 +256,9 @@ for (const [desc, text] of [
 
 // --- usage ---------------------------------------------------------------------------------------
 
-{
-  check('no arguments: usage error, exit 2', run([]).status === 2 && run([]).err.includes('Usage'));
-  check('a settings path but no command: usage error, exit 2', run([path.join(fresh(), 'settings.json')]).status === 2);
-  check('an unknown option: exit 2 and names it', run([path.join(fresh(), 'settings.json'), CMD, '--frobnicate']).status === 2 && run([path.join(fresh(), 'settings.json'), CMD, '--frobnicate']).err.includes('--frobnicate'));
-}
+check('no arguments: usage error, exit 2', run([]).status === 2 && run([]).err.includes('Usage'));
+check('a settings path but no command: usage error, exit 2', run([path.join(fresh(), 'settings.json')]).status === 2);
+check('an unknown option: exit 2 and names it', run([path.join(fresh(), 'settings.json'), CMD, '--frobnicate']).status === 2 && run([path.join(fresh(), 'settings.json'), CMD, '--frobnicate']).err.includes('--frobnicate'));
 
 console.log(`--- ${pass} passed, ${fail} failed ---`);
 process.exit(fail ? 1 : 0);

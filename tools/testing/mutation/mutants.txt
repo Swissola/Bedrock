@@ -92,9 +92,9 @@ install-claude-config@@is2@@tools/install-claude-config.sh@@s|\*) abs="\$PWD/\${
 install-claude-config@@is3@@tools/install-claude-config.sh@@s|printf "node '%s'" "\$script"|printf 'node "%s"' "$script"|@@a path with unusual characters is double-quoted, so a shell still expands $(...) and backticks in it
 install-claude-config@@is4@@tools/install-claude-config.sh@@s|\[\[ "\$FORCE" = "1" \]\] \&\& extra="\$extra --force"|:|@@--force no longer reaches the settings helper
 install-claude-config@@is5@@tools/install-claude-config.sh@@s|\[\[ "\$DRY" = "1" \]\] \&\& extra="\$extra --dry-run"|:|@@a dry run edits settings.json
-install-claude-config@@is6@@tools/install-claude-config.sh@@s|\[\[ "\$mode" = "--check" \]\] \&\& extra="\$extra --check"|:|@@--check edits settings.json
+install-claude-config@@is6@@tools/install-claude-config.sh@@s|\[\[ "\$check" = "1" \]\] \&\& extra="\$extra --check"|:|@@--check edits settings.json
 install-claude-config@@is7@@tools/install-claude-config.sh@@s|if \[\[ "\$rc" = "3" \]\]; then NEED_ATTENTION=1|if [[ "$rc" = "3" ]]; then :|@@an unreadable settings.json no longer makes the installer exit 1
-install-claude-config@@is8@@tools/install-claude-config.sh@@s|elif \[\[ "\$rc" = "1" \]\] \&\& \[\[ "\$mode" = "--check" \]\]; then NEED_ATTENTION=1|elif false; then NEED_ATTENTION=1|@@--check no longer fails when the statusLine is missing
+install-claude-config@@is8@@tools/install-claude-config.sh@@s|elif \[\[ "\$rc" = "1" \]\] \&\& \[\[ "\$check" = "1" \]\]; then NEED_ATTENTION=1|elif false; then NEED_ATTENTION=1|@@--check no longer fails when the statusLine is missing
 install-claude-config@@is9@@tools/install-claude-config.sh@@s|^    configure_statusline --check$|    :|@@--check --statusline ignores settings.json
 install-claude-config@@is10@@tools/install-claude-config.sh@@s|printf 'node %s' "\$script" ;;|printf 'node ~/.claude/statusline.mjs' ;;|@@the command written is the ~ form, not the installed path
 install-claude-config@@is11@@tools/install-claude-config.sh@@s|^  configure_statusline$|  :|@@--statusline copies the script but never sets settings.json
@@ -109,7 +109,7 @@ configure-settings@@cs5@@tools/statusline/configure-settings.mjs@@s|\.replace(/\
 configure-settings@@cs6@@tools/statusline/configure-settings.mjs@@s|if (m) indent = |if (false) indent = |@@the file's indentation is not preserved
 configure-settings@@cs7@@tools/statusline/configure-settings.mjs@@s#|| Array.isArray(settings)##@@a JSON array is accepted as a settings file
 configure-settings@@cs8@@tools/statusline/configure-settings.mjs@@s|if (dry) {|if (false) {|@@--dry-run writes the file
-configure-settings@@cs9@@tools/statusline/configure-settings.mjs@@s|for (let n = 2; fs.existsSync(backup); n++)|for (let n = 2; false; n++)|@@two backups in the same second overwrite each other
+configure-settings@@cs9@@tools/statusline/configure-settings.mjs@@s|while (fs.existsSync(backup))|while (false)|@@two backups in the same second overwrite each other
 configure-settings@@cs10@@tools/statusline/configure-settings.mjs@@s|settings.statusLine = { type: 'command', command };|settings.statusLine = { command };|@@the statusLine is written without its type
 configure-settings@@cs11@@tools/statusline/configure-settings.mjs@@s|if (\[...file\].some((c) => forbidden.includes(c))) return false;|;|@@a quoted command containing $(...) or a stray quote still counts as the installed status line
 configure-settings@@cs12@@tools/statusline/configure-settings.mjs@@s|!trimmed.startsWith('node ')|false|@@any command ending in statusline.mjs counts as installed, whatever program it runs
