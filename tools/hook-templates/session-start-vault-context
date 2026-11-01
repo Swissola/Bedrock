@@ -205,13 +205,10 @@ known_repos() {
         *) [[ -n "$after" && "$entry" == *"$after" ]] || continue; name="${entry%"$after"}" ;;
       esac
       [[ -n "$name" ]] || continue
-      if [[ "$keep" = 1 ]]; then printf '%s
-' "$name"; else printf '%s
-' "$name" | tr '[:upper:]' '[:lower:]'; fi
+      if [[ "$keep" = 1 ]]; then printf '%s\n' "$name"; else printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]'; fi
     done
   fi
-  printf '%s
-' "$REPO_NAME"
+  printf '%s\n' "$REPO_NAME"
   return 0
 }
 
@@ -317,17 +314,11 @@ if [[ -n "$CANDIDATES" ]]; then
   MINE=""
   OTHERS="$ALL_SORTED"
   if [[ -n "$AUTHOR_SLUG" ]]; then
-    MINE="$(printf '%s
-' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 == me')"
-    OTHERS="$(printf '%s
-' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 != me')"
+    MINE="$(printf '%s\n' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 == me')"
+    OTHERS="$(printf '%s\n' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 != me')"
   fi
-  TOTAL="$(printf '%s
-' "$OTHERS" | grep -c . || true)"
-  SELECTED="$(printf '%s
-%s
-' "$MINE" "$(printf '%s
-' "$OTHERS" | head -n "$MAX_CONTRIBUTORS")" | grep . || true)"
+  TOTAL="$(printf '%s\n' "$OTHERS" | grep -c . || true)"
+  SELECTED="$(printf '%s\n%s\n' "$MINE" "$(printf '%s\n' "$OTHERS" | head -n "$MAX_CONTRIBUTORS")" | grep . || true)"
 fi
 
 # --- output ------------------------------------------------------------------
@@ -360,46 +351,86 @@ extract_last_update() {
 # Cap on how much of that update is loaded (UPDATE_MAX_LINES to override).
 UPDATE_MAX_LINES="${UPDATE_MAX_LINES:-40}"
 
+# Lines that are open-item checkboxes (open, done, dropped or carried) are left
+# out of every loaded note: the open-item list is the one place open items appear.
+strip_checkboxes() {
+  sed -E '/^- \[[ xX>-]\]/d'
+  return 0
+}
+
+# The tags of a note from its first frontmatter block, whether written inline
+# (tags: [a, b]) or as a list, printed as "[a, b]".
+note_tags() {
+  tr -d '\r' < "$1" | awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    intags && /^[ \t]*-[ \t]/ { v = $0; sub(/^[ \t]*-[ \t]*/, "", v); list = (list == "" ? v : list ", " v); next }
+    { intags = 0 }
+    /^tags:/ { v = $0; sub(/^tags:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); if (v == "") { intags = 1; next } print v; done = 1; exit }
+    END { if (!done && list != "") print "[" list "]" }
+  '
+  return 0
+}
+
+# True if a section (its heading line, then text) has any text under the heading.
+has_body() {
+  printf '%s\n' "$1" | sed '1d' | grep -q '[^[:space:]]'
+  return $?
+}
+
 # render_note <path> <contributor, or empty> <1 if it is your own note, else 0>
+# Yours: both forward-looking sections plus the latest appended update. Another
+# contributor's: the context section only. Checkbox lines are left out of both.
 render_note() {
-  local note="$1" who="$2" mine="$3" rel label context next update total earlier update_note lines
+  local note="$1" who="$2" mine="$3" rel label ctx_raw next_raw context next update total earlier update_note lines tags
   rel="${note#"$VAULT_ROOT/"}"
   if [[ "$mine" = 1 ]]; then label="Your latest note"
   elif [ -n "$who" ]; then label="Latest note from $who"
   else label="Most recent daily note"; fi
-  context=$(extract_section "$note" "## Context for Future Sessions")
-  next=$(extract_section "$note" "## Open Questions / Next Steps")
+  ctx_raw=$(extract_section "$note" "## Context for Future Sessions")
+  next_raw=$(extract_section "$note" "## Open Questions / Next Steps")
+  tags=$(note_tags "$note")
 
-  if [ -n "$context" ] || [ -n "$next" ]; then
+  if [ -n "$ctx_raw" ] || [ -n "$next_raw" ]; then
     echo
-    echo "## $label: $rel (forward-looking sections only; read the note itself, or ask, for full history)"
-    [ -n "$context" ] && { echo; echo "$context"; }
-    [ -n "$next" ] && { echo; echo "$next"; }
+    if [[ "$mine" = 1 ]]; then
+      echo "## $label: $rel (forward-looking sections only; read the note itself, or ask, for full history)"
+    else
+      echo "## $label: $rel (context section only; read the note itself, or ask, for full history)"
+    fi
+    [ -n "$tags" ] && echo "Tags: $tags"
+    context=$(printf '%s\n' "$ctx_raw" | strip_checkboxes)
+    [ -n "$ctx_raw" ] && has_body "$context" && { echo; echo "$context"; }
+    if [[ "$mine" = 1 ]]; then
+      next=$(printf '%s\n' "$next_raw" | strip_checkboxes)
+      [ -n "$next_raw" ] && has_body "$next" && { echo; echo "$next"; }
 
-    # An appended "## Update ..." section (what /vault-log adds when a note for
-    # the same session already exists) can't rewrite the two sections above, so
-    # without this the latest state never reached the next session and the
-    # forward-looking sections could be out of date. Load the MOST RECENT update
-    # only, capped, and say how many earlier ones were left out: the older ones
-    # are history, which this hook deliberately doesn't load.
-    update=$(extract_last_update "$note")
-    if [ -n "$update" ]; then
-      total=$(grep -c '^## Update' "$note" 2>/dev/null || true)
-      earlier=$(( ${total:-1} - 1 ))
-      update_note=""
-      [ "$earlier" -gt 0 ] && update_note=" - $earlier earlier update(s) in the note not loaded"
-      echo
-      echo "## Appended to that note, most recent update (a later same-session addition; it supersedes the sections above where they differ)$update_note"
-      lines=$(printf '%s\n' "$update" | wc -l | tr -d ' ')
-      printf '%s\n' "$update" | head -n "$UPDATE_MAX_LINES"
-      if [ "$lines" -gt "$UPDATE_MAX_LINES" ]; then
-        echo "(update truncated: $((lines - UPDATE_MAX_LINES)) more lines in the note)"
+      # An appended "## Update ..." section (what /vault-log adds when a note for
+      # the same session already exists) can't rewrite the two sections above, so
+      # without this the latest state never reached the next session and the
+      # forward-looking sections could be out of date. Load the MOST RECENT update
+      # only, capped, and say how many earlier ones were left out: the older ones
+      # are history, which this hook deliberately doesn't load.
+      update=$(extract_last_update "$note" | strip_checkboxes)
+      if [ -n "$update" ]; then
+        total=$(grep -c '^## Update' "$note" 2>/dev/null || true)
+        earlier=$(( ${total:-1} - 1 ))
+        update_note=""
+        [ "$earlier" -gt 0 ] && update_note=" - $earlier earlier update(s) in the note not loaded"
+        echo
+        echo "## Appended to that note, most recent update (a later same-session addition; it supersedes the sections above where they differ)$update_note"
+        lines=$(printf '%s\n' "$update" | wc -l | tr -d ' ')
+        printf '%s\n' "$update" | head -n "$UPDATE_MAX_LINES"
+        if [ "$lines" -gt "$UPDATE_MAX_LINES" ]; then
+          echo "(update truncated: $((lines - UPDATE_MAX_LINES)) more lines in the note)"
+        fi
       fi
     fi
   else
     echo
     echo "## $label: $rel (no forward-looking sections, loading in full)"
-    cat "$note"
+    [ -n "$tags" ] && echo "Tags: $tags"
+    strip_checkboxes < "$note"
   fi
   return 0
 }

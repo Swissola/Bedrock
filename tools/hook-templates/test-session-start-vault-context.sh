@@ -11,6 +11,8 @@
 # `reposPath` and `dailyNotesPath` (see docs/vault-config.md).
 
 set -u
+# Tests must not depend on the machine's git identity: every hook run sees an empty global config.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 HOOK_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-start-vault-context"
 PASS=0
 FAIL=0
@@ -45,6 +47,7 @@ make_code_repo() {
   dir=$(mktemp -d)/"$name"
   mkdir -p "$dir"
   git -C "$dir" init -q -b main
+  git -C "$dir" config user.name alice
   git -C "$dir" remote add origin "https://example.com/org/${name}.git"
   echo "$dir"
   return 0
@@ -57,6 +60,7 @@ write_note() {  # args: path, marker
   cat > "$path" <<EOF
 ---
 title: $marker
+tags: [daily-note, widget, hooks]
 ---
 ## What Was Done
 HISTORY-$marker
@@ -65,7 +69,9 @@ HISTORY-$marker
 CONTEXT-$marker
 
 ## Open Questions / Next Steps
+PROSE-$marker
 - [ ] NEXT-$marker
+- [x] DONE-$marker
 EOF
   return $?
 }
@@ -103,7 +109,7 @@ test_default_layout_loads_doc_and_forward_looking_sections() {
   assert_contains "default layout: repo doc loaded" "$DOC_MARKER" "$out"
   assert_contains "default layout: header names repos/widget/index.md" "## repos/widget/index.md" "$out"
   assert_contains "default layout: context section loaded" "CONTEXT-A" "$out"
-  assert_contains "default layout: next-steps section loaded" "NEXT-A" "$out"
+  assert_contains "default layout: next-steps section loaded" "PROSE-A" "$out"
   assert_not_contains "default layout: history section NOT loaded" "HISTORY-A" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
   return $?
@@ -111,6 +117,7 @@ test_default_layout_loads_doc_and_forward_looking_sections() {
 
 test_each_contributors_latest_note_is_loaded_newest_by_mtime_first() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
+  git -C "$repo" config user.name nobody-here  # none of these contributors is you
   mkdir -p "$vault/repos/widget"; echo "doc" > "$vault/repos/widget/index.md"
   write_note "$vault/daily-notes/alice/2026-10-05-widget-zzz.md" OLD
   write_note "$vault/daily-notes/bob/2026-10-05-widget-aaa.md" NEW
@@ -155,10 +162,7 @@ test_no_daily_notes_says_so() {
   mkdir -p "$vault/repos/widget"; echo "doc" > "$vault/repos/widget/index.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "no daily notes: says so (the default pattern names the repo)" "(No daily notes yet for this repo.)" "$out"
-  printf -- '---
-filenamePattern: "{date}-{topic}"
----
-' > "$vault/vault-config.md"
+  printf -- '---\nfilenamePattern: "{date}-{topic}"\n---\n' > "$vault/vault-config.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "no daily notes, pattern without a repo: the vault-wide message" "(No daily notes in the vault yet.)" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
@@ -452,9 +456,9 @@ test_a_note_with_only_one_forward_section_loads_just_that_one() {
   assert_contains "context only: says forward-looking sections only" "forward-looking sections only" "$out"
   assert_not_contains "context only: history is not loaded" "HIST-ONE" "$out"
   rm -f "$vault/daily-notes/alice/2026-10-05-widget-a.md"
-  printf '## What Was Done\nHIST-TWO\n\n## Open Questions / Next Steps\n- [ ] NEXT-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-widget-b.md"
+  printf '## What Was Done\nHIST-TWO\n\n## Open Questions / Next Steps\nPROSE-ONLY\n- [ ] NEXT-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-widget-b.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
-  assert_contains "next steps only: that section is loaded" "NEXT-ONLY" "$out"
+  assert_contains "next steps only: that section is loaded" "PROSE-ONLY" "$out"
   assert_not_contains "next steps only: history is not loaded" "HIST-TWO" "$out"
   return 0
 }
@@ -475,6 +479,7 @@ CTX-SUB-LINE
 PROBLEMS-AFTER-CONTEXT
 
 ## Open Questions / Next Steps
+PROSE-LINE
 - [ ] NEXT-LINE
 
 ## Commands Used
@@ -484,7 +489,7 @@ EOF
   assert_contains "context: first line kept" "CTX-LINE-1" "$out"
   assert_contains "context: a ### sub-heading and its text are part of the section" "CTX-SUB-LINE" "$out"
   assert_not_contains "context ends at the next ## heading" "PROBLEMS-AFTER-CONTEXT" "$out"
-  assert_contains "next steps loaded" "NEXT-LINE" "$out"
+  assert_contains "next steps loaded" "PROSE-LINE" "$out"
   assert_not_contains "next steps end at the next ## heading" "COMMANDS-AFTER-NEXT" "$out"
   return 0
 }
@@ -524,10 +529,10 @@ test_an_empty_daily_notes_folder_says_there_are_no_notes() {
 test_a_note_with_windows_line_endings_is_still_loaded() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
-  printf '## What Was Done\r\nHIST-CRLF\r\n\r\n## Context for Future Sessions\r\nCTX-CRLF\r\n\r\n## Open Questions / Next Steps\r\n- [ ] NEXT-CRLF\r\n' > "$vault/daily-notes/alice/2026-10-05-widget-a.md"
+  printf '## What Was Done\r\nHIST-CRLF\r\n\r\n## Context for Future Sessions\r\nCTX-CRLF\r\n\r\n## Open Questions / Next Steps\r\nPROSE-CRLF\r\n- [ ] NEXT-CRLF\r\n' > "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "CRLF note: the context text reaches the session (section match or full fallback)" "CTX-CRLF" "$out"
-  assert_contains "CRLF note: the next-steps text reaches the session" "NEXT-CRLF" "$out"
+  assert_contains "CRLF note: the next-steps text reaches the session" "PROSE-CRLF" "$out"
   return 0
 }
 
@@ -654,6 +659,7 @@ heading_order() {  # prints the contributor markers in the order they appear in 
 test_every_contributors_latest_note_is_loaded_most_recent_first() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
+  git -C "$repo" config user.name nobody-here  # none of these contributors is you
   fx_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" ALICE 202610050900
   fx_note "$vault/daily-notes/bob/2026-10-07-widget-b.md" BOB 202610070900
   fx_note "$vault/daily-notes/carol/2026-10-06-widget-c.md" CAROL 202610060900
@@ -698,6 +704,7 @@ test_the_contributor_limit_defaults_to_three_and_can_be_changed() {
 test_the_filename_date_beats_the_modification_time() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
+  git -C "$repo" config user.name nobody-here  # none of these contributors is you
   # a git checkout stamps every file with the time it was pulled: alice's older note looks newer
   fx_note "$vault/daily-notes/alice/2026-10-01-widget-a.md" ALICEPULLED 202610100900
   fx_note "$vault/daily-notes/bob/2026-10-09-widget-b.md" BOBWROTE 202610020900
@@ -782,6 +789,7 @@ test_glob_characters_in_a_repo_name_match_literally() {
 test_the_repo_filter_works_together_with_contributor_folders() {
   local repo vault out
   repo=$(fx_repo widget)
+  git -C "$repo" config user.name nobody-here  # none of these contributors is you
   vault=$(fx_configured_vault 'dailyNotesPath: daily-notes/{author}
 filenamePattern: "{date}-{repo}-{topic}"')
   fx_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" ALICEW 202610050900
@@ -1062,7 +1070,8 @@ test_no_user_name_means_nothing_is_yours() {
   repo=$(fx_repo widget); vault=$(fx_vault)
   fx_named_note "$vault" alice 2026-10-05 widget a A 202610050900
   fx_named_note "$vault" bob 2026-10-06 widget b B 202610060900
-  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null)
+  git -C "$repo" config --unset user.name
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT")
   assert_eq "no user.name: both notes load, newest first" "CONTEXT-B CONTEXT-A" "$(printf '%s' "$out" | heading_order)"
   assert_not_contains "...and none is labelled as yours" "Your latest note" "$out"
   assert_contains "...and the hook still exits zero" "$EXIT_ZERO" "$out"
@@ -1090,6 +1099,81 @@ test_the_limit_counts_others_not_you
 test_busier_contributors_never_displace_your_note
 test_no_user_name_means_nothing_is_yours
 test_a_solo_install_loads_one_note
+
+# ----------------------------------- trim levels, no checkbox lines, tag line
+
+test_others_notes_get_context_only() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a ALICE 202610050900
+  fx_named_note "$vault" bob 2026-10-06 widget b BOB 202610060900
+  cat >> "$vault/daily-notes/alice/2026-10-05-widget-a.md" <<'EOF'
+
+## Update (later same session) - more
+UPD-ALICE
+EOF
+  cat >> "$vault/daily-notes/bob/2026-10-06-widget-b.md" <<'EOF'
+
+## Update (later same session) - more
+UPD-BOB
+EOF
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "yours: the context section" "CONTEXT-ALICE" "$out"
+  assert_contains "yours: the open questions section" "PROSE-ALICE" "$out"
+  assert_contains "yours: the latest update" "UPD-ALICE" "$out"
+  assert_contains "another contributor's: the context section" "CONTEXT-BOB" "$out"
+  assert_not_contains "another contributor's: not the open questions text" "PROSE-BOB" "$out"
+  assert_not_contains "another contributor's: not the update" "UPD-BOB" "$out"
+  return 0
+}
+
+test_no_checkbox_lines_appear_in_loaded_notes() {
+  local repo vault out boxes
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a ALICE 202610050900
+  printf '%s\n%s\n' '- [-] DROPPED-ALICE' '- [>] CARRIED-ALICE' >> "$vault/daily-notes/alice/2026-10-05-widget-a.md"
+  fx_named_note "$vault" bob 2026-10-06 widget b BOB 202610060900
+  mkdir -p "$vault/daily-notes/carol"
+  cat > "$vault/daily-notes/carol/2026-10-04-widget-c.md" <<'EOF'
+## What Was Done
+- [ ] FULLBOX
+- [x] FULLDONE
+- [X] FULLUPPER
+FULLPROSE
+EOF
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "the full-load note is loaded (its prose is kept)" "FULLPROSE" "$out"
+  boxes=$(printf '%s\n' "$out" | grep -cE '^- \[[ xX>-]\]')
+  assert_eq "no output line is a checkbox, in yours, another's or a full-load note" "0" "$boxes"
+  assert_contains "the prose next to the checkboxes is kept" "PROSE-ALICE" "$out"
+  return 0
+}
+
+test_the_tag_line_is_shown_for_each_loaded_note() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a ALICE 202610050900
+  fx_named_note "$vault" bob 2026-10-06 widget b BOB 202610060900
+  mkdir -p "$vault/daily-notes/carol"
+  cat > "$vault/daily-notes/carol/2026-10-04-widget-c.md" <<'EOF'
+---
+title: C
+tags:
+  - alpha
+  - beta
+---
+## Context for Future Sessions
+CONTEXT-CAROL
+EOF
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "inline tags are shown once for each of the two notes that have them" "2" "$(printf '%s\n' "$out" | grep -c '^Tags: \[daily-note, widget, hooks\]$')"
+  assert_contains "a tags list is shown the same way" "Tags: [alpha, beta]" "$out"
+  return 0
+}
+
+test_others_notes_get_context_only
+test_no_checkbox_lines_appear_in_loaded_notes
+test_the_tag_line_is_shown_for_each_loaded_note
 
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]
