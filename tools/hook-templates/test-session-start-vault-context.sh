@@ -1175,5 +1175,138 @@ test_others_notes_get_context_only
 test_no_checkbox_lines_appear_in_loaded_notes
 test_the_tag_line_is_shown_for_each_loaded_note
 
+# ------------------------------------------------------------- open-item list
+
+# A note holding a context section and an Open Questions section whose lines come
+# from stdin: args vault author date repo topic mtime.
+fx_open_note() {
+  local f="$1/daily-notes/$2/$3-$4-$5.md"
+  mkdir -p "$(dirname "$f")"
+  { printf '## Context for Future Sessions\nctx-%s\n\n## Open Questions / Next Steps\n' "$2"; cat; } > "$f"
+  touch -t "$6" "$f"
+  return 0
+}
+
+test_open_items_are_listed_once_with_owner_and_age() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" alice 2026-10-05 widget a 202610050900 <<'EOF'
+- [ ] ALICE-ITEM
+EOF
+  fx_open_note "$vault" bob 2026-10-08 widget b 202610080900 <<'EOF'
+- [ ] BOB-ITEM
+EOF
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-10-10)
+  assert_eq "your item appears exactly once" "1" "$(printf '%s\n' "$out" | grep -c 'ALICE-ITEM')"
+  assert_contains "...with its owner and age" "- alice (5d): ALICE-ITEM" "$out"
+  assert_contains "another contributor's item, with owner and age" "- bob (2d): BOB-ITEM" "$out"
+  return 0
+}
+
+test_items_from_contributors_beyond_the_limit_are_still_listed() {
+  local repo vault out i
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  for i in 1 2 3 4 5 6; do
+    fx_open_note "$vault" "c$i" "2026-10-0$i" widget n 20261001090$i <<EOF
+- [ ] ITEM-OF-C$i
+EOF
+  done
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-10-10 CONTEXT_MAX_CONTRIBUTORS=1)
+  for i in 1 2 3 4 5 6; do assert_contains "c$i's item is listed although their note is not loaded" "ITEM-OF-C$i" "$out"; done
+  return 0
+}
+
+test_an_item_older_than_the_threshold_is_flagged_stale_and_listed_first() {
+  local repo vault out stale_line fresh_line
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" bob 2026-09-01 widget b 202609010900 <<'EOF'
+- [ ] OLDITEM
+EOF
+  fx_open_note "$vault" alice 2026-10-25 widget a 202610250900 <<'EOF'
+- [ ] FRESHITEM
+EOF
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-11-01)
+  assert_contains "61 days old: flagged stale" "- bob (61d, stale): OLDITEM" "$out"
+  assert_contains "7 days old: not stale" "- alice (7d): FRESHITEM" "$out"
+  stale_line=$(printf '%s\n' "$out" | grep -n 'OLDITEM' | cut -d: -f1); fresh_line=$(printf '%s\n' "$out" | grep -n 'FRESHITEM' | cut -d: -f1)
+  assert_eq "stale items are listed first" "yes" "$([[ "$stale_line" -lt "$fresh_line" ]] && echo yes || echo no)"
+  printf -- '---\nstaleOpenItemDays: 5\n---\n' > "$vault/vault-config.md"
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-11-01)
+  assert_contains "staleOpenItemDays: 5 makes the 7-day item stale" "- alice (7d, stale): FRESHITEM" "$out"
+  return 0
+}
+
+test_opened_date_beats_the_note_date() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" bob 2026-10-30 widget b 202610300900 <<'EOF'
+- [ ] CARRIED (from [[old note]], opened 2026-08-01)
+EOF
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-11-01)
+  assert_contains "age counts from the opened date on the line" "- bob (92d, stale): CARRIED" "$out"
+  return 0
+}
+
+test_the_list_is_capped_with_an_and_n_more_line() {
+  local repo vault out i
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  for i in 01 02 03 04 05 06 07 08 09 10 11 12; do printf -- '- [ ] ITEM-%s\n' "$i"; done | fx_open_note "$vault" bob 2026-10-05 widget b 202610050900
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-10-10)
+  assert_eq "ten items are shown by default" "10" "$(printf '%s\n' "$out" | grep -c 'ITEM-')"
+  assert_contains "...and the rest are counted" "(and 2 more)" "$out"
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-10-10 CONTEXT_MAX_OPEN_ITEMS=3)
+  assert_eq "CONTEXT_MAX_OPEN_ITEMS=3 shows three" "3" "$(printf '%s\n' "$out" | grep -c 'ITEM-')"
+  assert_contains "...and counts nine more" "(and 9 more)" "$out"
+  return 0
+}
+
+test_odd_item_lines_never_crash_or_read_stale_by_accident() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  mkdir -p "$vault/daily-notes/bob"
+  printf '## Context for Future Sessions\r\nctx\r\n\r\n## Open Questions / Next Steps\r\n- [ ] CRLFITEM   \r\n- [X] UPPERCLOSED\r\n' > "$vault/daily-notes/bob/2026-10-30-widget-b.md"
+  fx_open_note "$vault" carol 2026-10-30 widget c 202610300900 <<'EOF'
+- [ ] BADDATE (opened 2026-13-45)
+- [ ] NODATE-ITEM
+EOF
+  fx_open_note "$vault" dave 2027-01-01 widget d 202701010900 <<'EOF'
+- [ ] FUTUREITEM
+EOF
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-11-01)
+  assert_contains "the hook exits zero" "$EXIT_ZERO" "$out"
+  assert_contains "a CRLF note's item is listed" "CRLFITEM" "$out"
+  assert_not_contains "an upper-case closed box is not listed" "UPPERCLOSED" "$out"
+  assert_contains "a malformed opened date does not crash" "BADDATE" "$out"
+  assert_not_contains "...and does not read as stale" "stale): BADDATE" "$out"
+  assert_not_contains "a note dated in the future is not stale" "stale): FUTUREITEM" "$out"
+  assert_not_contains "no stale flag appears at all" "stale" "$(printf '%s\n' "$out" | grep -v 'Open items for')"
+  return 0
+}
+
+test_closed_items_are_not_listed() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" bob 2026-10-05 widget b 202610050900 <<'EOF'
+- [x] DONEITEM
+- [-] DROPPEDITEM
+- [>] CARRIEDITEM
+- [ ] OPENITEM
+EOF
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-10-10)
+  assert_contains "the open item is listed" "OPENITEM" "$out"
+  assert_not_contains "done is not" "DONEITEM" "$out"
+  assert_not_contains "dropped is not" "DROPPEDITEM" "$out"
+  assert_not_contains "carried is not" "CARRIEDITEM" "$out"
+  return 0
+}
+
+test_open_items_are_listed_once_with_owner_and_age
+test_items_from_contributors_beyond_the_limit_are_still_listed
+test_an_item_older_than_the_threshold_is_flagged_stale_and_listed_first
+test_opened_date_beats_the_note_date
+test_the_list_is_capped_with_an_and_n_more_line
+test_odd_item_lines_never_crash_or_read_stale_by_accident
+test_closed_items_are_not_listed
+
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]
