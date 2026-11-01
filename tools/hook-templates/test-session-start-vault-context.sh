@@ -1471,5 +1471,21 @@ test_a_very_long_open_item_is_cut() {
 }
 test_a_very_long_open_item_is_cut
 
+test_an_item_exactly_at_the_threshold_is_not_stale_and_one_day_over_is() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" bob 2026-10-02 widget b 202610020900 <<'EOF'
+- [ ] EDGE30
+EOF
+  fx_open_note "$vault" carol 2026-10-01 widget c 202610010900 <<'EOF'
+- [ ] EDGE31
+EOF
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-11-01)
+  assert_contains "30 days: not stale" "- bob (30d): EDGE30" "$out"
+  assert_contains "31 days: stale" "- carol (31d, stale): EDGE31" "$out"
+  return 0
+}
+test_an_item_exactly_at_the_threshold_is_not_stale_and_one_day_over_is
+
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]
