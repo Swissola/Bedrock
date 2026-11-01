@@ -1459,5 +1459,17 @@ test_an_older_note_naming_another_repo_is_skipped_and_never_loaded
 test_at_most_five_older_notes_are_opened
 test_a_note_whose_frontmatter_names_this_repo_counts_as_its_own
 
+test_a_very_long_open_item_is_cut() {
+  local repo vault out longest
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  printf -- '- [ ] %s\n' "$(head -c 500 /dev/zero | tr '\0' x)" | fx_open_note "$vault" bob 2026-10-05 widget b 202610050900
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-10-10)
+  longest=$(printf '%s\n' "$out" | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+  assert_eq "no output line is longer than the cap plus its label" "yes" "$([[ "$longest" -le 330 ]] && echo yes || echo no)"
+  assert_contains "a cut item says so" "(cut)" "$out"
+  return 0
+}
+test_a_very_long_open_item_is_cut
+
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]

@@ -565,6 +565,8 @@ open_items_of() {
     text="${text%"${text##*[![:space:]]}"}"
     ref="$fdate"
     if [[ "$text" =~ $OPENED_RE ]]; then ref="${BASH_REMATCH[1]}"; fi
+    # One item cannot flood the context: the text is cut at 300 characters.
+    if [[ ${#text} -gt 300 ]]; then text="${text:0:300} (cut)"; fi
     age=0; stale=0
     n="$(day_number "$ref")"
     if [[ -n "$n" && -n "$TODAY_N" && "$TODAY_N" -gt "$n" ]]; then
