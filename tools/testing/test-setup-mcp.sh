@@ -86,7 +86,7 @@ write_data() {
     echo "  \"bindingHost\": \"127.0.0.1\""
     echo "}"
   } > "$DATA"
-  return $?
+  return 0
 }
 
 # Stub `claude`: logs "<args>" per call, answers --version, and exits $CLAUDE_REMOVE_EXIT

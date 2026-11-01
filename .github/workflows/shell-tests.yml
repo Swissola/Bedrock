@@ -80,7 +80,7 @@ jobs:
       - name: setup-mcp.sh
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/testing/test-setup-mcp.sh
       # shellcheck is preinstalled on the Ubuntu runner only; elsewhere that one check skips.
-      # Error level is clean across every script, so any finding fails the build.
+      # Warning level is clean across every script, so any finding fails the build.
       - name: repo structure and portability
         env:
           STRUCTURE_SHELLCHECK_STRICT: "1"

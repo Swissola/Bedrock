@@ -477,7 +477,7 @@ sl_keys() {
 }
 count_backups() {
   local dir="$1"
-  ls "$dir" 2>/dev/null | grep -c 'settings.json.bak-'
+  find "$dir" -mindepth 1 -maxdepth 1 -name 'settings.json.bak-*' 2>/dev/null | grep -c .
   return 0
 }
 need_node() { command -v node >/dev/null 2>&1 && return 0; echo "SKIP: $1 (node is not installed)"; return 1; }
@@ -581,7 +581,7 @@ test_statusline_invalid_json_is_never_touched() {
   out=$(bash "$INSTALLER" --prefix "$p/claude" --statusline --force 2>&1); local st=$?
   assert_eq "invalid settings.json: exit 1 so the problem is not missed" "1" "$st"
   assert_eq "invalid settings.json: the file is untouched" "$bad" "$(cat "$p/claude/settings.json")"
-  assert_eq "invalid settings.json: no backup and no temp file" "0" "$(ls "$p/claude" | grep -c -E 'bak-|tmp-')"
+  assert_eq "invalid settings.json: no backup and no temp file" "0" "$(find "$p/claude" -mindepth 1 -maxdepth 1 \( -name '*bak-*' -o -name '*tmp-*' \) | grep -c .)"
   assert_contains "invalid settings.json: says why and gives the snippet" "not valid JSON" "$out"
   assert_eq "invalid settings.json: the script is still copied" "yes" "$(exists "$p/claude/statusline.mjs")"
   rm -rf "$p"
