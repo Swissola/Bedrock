@@ -1308,5 +1308,78 @@ test_the_list_is_capped_with_an_and_n_more_line
 test_odd_item_lines_never_crash_or_read_stale_by_accident
 test_closed_items_are_not_listed
 
+# ------------------------------------------------------------- output budget
+
+# A note whose context section holds a marker plus 600 filler characters.
+fx_padded_note() {  # args: vault author date repo marker mtime
+  local f="$1/daily-notes/$2/$3-$4-$5.md" pad
+  pad=$(head -c 600 /dev/zero | tr '\0' x)
+  mkdir -p "$(dirname "$f")"
+  printf '## Context for Future Sessions\nCONTEXT-%s %s\n' "$5" "$pad" > "$f"
+  touch -t "$6" "$f"
+  return 0
+}
+
+test_over_budget_drops_the_furthest_back_other_note_first() {
+  local repo vault out full
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_padded_note "$vault" alice 2026-10-01 widget MINE 202610010900
+  fx_padded_note "$vault" bob 2026-10-05 widget BOB 202610050900
+  fx_padded_note "$vault" carol 2026-10-06 widget CAROL 202610060900
+  fx_padded_note "$vault" dave 2026-10-07 widget DAVE 202610070900
+  full=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "with room for everything all four load, yours first" "CONTEXT-MINE CONTEXT-DAVE CONTEXT-CAROL CONTEXT-BOB" "$(printf '%s' "$full" | heading_order)"
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_MAX_CHARS=$(( ${#full} - 100 )))
+  assert_eq "a little too big: the furthest back other note is dropped" "CONTEXT-MINE CONTEXT-DAVE CONTEXT-CAROL" "$(printf '%s' "$out" | heading_order)"
+  assert_contains "...and the output says what was left out" "(1 other note(s) left out to stay within CONTEXT_MAX_CHARS=" "$out"
+  return 0
+}
+
+test_your_note_and_the_open_items_are_never_cut() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" alice 2026-10-05 widget a 202610050900 <<'EOF'
+- [ ] MY-OPEN-ITEM
+EOF
+  fx_padded_note "$vault" bob 2026-10-06 widget BOB 202610060900
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_MAX_CHARS=50 CONTEXT_TODAY=2026-10-10)
+  assert_contains "the repo doc is still there" "$DOC_MARKER" "$out"
+  assert_contains "your note is still there" "ctx-alice" "$out"
+  assert_contains "the open-item list is still there" "MY-OPEN-ITEM" "$out"
+  assert_not_contains "the other note is gone" "CONTEXT-BOB" "$out"
+  assert_contains "the output says the fixed parts alone are over budget" "exceeds CONTEXT_MAX_CHARS=50 on its own" "$out"
+  assert_contains "the hook exits zero" "$EXIT_ZERO" "$out"
+  return 0
+}
+
+test_within_budget_prints_everything_and_no_left_out_line() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a A 202610050900
+  fx_named_note "$vault" bob 2026-10-06 widget b B 202610060900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "both notes are loaded" "CONTEXT-A CONTEXT-B" "$(printf '%s' "$out" | heading_order)"
+  assert_not_contains "nothing is reported as left out" "left out to stay within" "$out"
+  assert_not_contains "no over-budget line" "exceeds CONTEXT_MAX_CHARS" "$out"
+  return 0
+}
+
+test_a_bad_budget_value_falls_back_to_the_default() {
+  local repo vault out v
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a A 202610050900
+  fx_named_note "$vault" bob 2026-10-06 widget b B 202610060900
+  for v in abc 0 ""; do
+    out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" "CONTEXT_MAX_CHARS=$v")
+    assert_contains "CONTEXT_MAX_CHARS='$v': the other note still loads" "CONTEXT-B" "$out"
+  done
+  return 0
+}
+
+test_over_budget_drops_the_furthest_back_other_note_first
+test_your_note_and_the_open_items_are_never_cut
+test_within_budget_prints_everything_and_no_left_out_line
+test_a_bad_budget_value_falls_back_to_the_default
+
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]

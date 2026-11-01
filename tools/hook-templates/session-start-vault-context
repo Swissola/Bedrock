@@ -246,6 +246,8 @@ belongs_to_repo() {
 # note counts as yours.
 AUTHOR_SLUG="$(cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null && git config user.name 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
 
+MAX_CHARS="${CONTEXT_MAX_CHARS:-12000}"
+case "$MAX_CHARS" in ""|*[!0-9]*|0) MAX_CHARS=12000 ;; esac
 MAX_ITEMS="${CONTEXT_MAX_OPEN_ITEMS:-10}"
 case "$MAX_ITEMS" in ""|*[!0-9]*|0) MAX_ITEMS=10 ;; esac
 STALE_DAYS="$(config_value staleOpenItemDays)"
@@ -328,10 +330,14 @@ fi
 
 # --- output ------------------------------------------------------------------
 
-echo "--- Vault context for $REPO_NAME (auto-loaded) ---"
-echo
-echo "## $INDEX_REL"
-cat "$INDEX_FILE"
+# The output is assembled in parts first, so a size budget can be applied before
+# anything is printed.
+HEAD_OUT="$(
+  echo "--- Vault context for $REPO_NAME (auto-loaded) ---"
+  echo
+  echo "## $INDEX_REL"
+  cat "$INDEX_FILE"
+)"
 
 extract_section() {
   awk -v h="$2" '
@@ -513,15 +519,60 @@ EOF
   return 0
 }
 
+# Render every selected note (yours first), then the open-item list, then apply
+# the budget: while the whole output is over CONTEXT_MAX_CHARS, other
+# contributors' notes are dropped, furthest back first. The repo doc, your own
+# note and the open-item list are never cut.
+NOTE_TEXT=()
+NOTE_MINE=()
+NOTE_KEPT=()
+N_NOTES=0
+ITEMS_OUT=""
 if [ -n "$SELECTED" ]; then
   while IFS="$TAB" read -r _date _mtime path who; do
+    [ -n "$path" ] || continue
     mine=0
     [[ -n "$AUTHOR_SLUG" && "$who" = "$AUTHOR_SLUG" ]] && mine=1
-    [ -n "$path" ] && render_note "$path" "$who" "$mine"
+    NOTE_TEXT[N_NOTES]="$(render_note "$path" "$who" "$mine")"
+    NOTE_MINE[N_NOTES]=$mine
+    NOTE_KEPT[N_NOTES]=1
+    N_NOTES=$((N_NOTES + 1))
   done <<EOF
 $SELECTED
 EOF
-  print_open_items
+  ITEMS_OUT="$(print_open_items)"
+fi
+
+SIZE=$(( ${#HEAD_OUT} + ${#ITEMS_OUT} ))
+i=0
+while [ "$i" -lt "$N_NOTES" ]; do SIZE=$(( SIZE + ${#NOTE_TEXT[$i]} + 1 )); i=$((i + 1)); done
+DROPPED=0
+i=$((N_NOTES - 1))
+while [ "$SIZE" -gt "$MAX_CHARS" ] && [ "$i" -ge 0 ]; do
+  if [ "${NOTE_MINE[$i]}" = 0 ]; then
+    NOTE_KEPT[i]=0
+    SIZE=$(( SIZE - ${#NOTE_TEXT[$i]} - 1 ))
+    DROPPED=$((DROPPED + 1))
+  fi
+  i=$((i - 1))
+done
+
+printf '%s\n' "$HEAD_OUT"
+i=0
+while [ "$i" -lt "$N_NOTES" ]; do
+  [ "${NOTE_KEPT[$i]}" = 1 ] && printf '%s\n' "${NOTE_TEXT[$i]}"
+  i=$((i + 1))
+done
+[ -n "$ITEMS_OUT" ] && printf '%s\n' "$ITEMS_OUT"
+if [ "$DROPPED" -gt 0 ]; then
+  echo
+  echo "($DROPPED other note(s) left out to stay within CONTEXT_MAX_CHARS=$MAX_CHARS)"
+fi
+if [ "$SIZE" -gt "$MAX_CHARS" ]; then
+  echo
+  echo "(context exceeds CONTEXT_MAX_CHARS=$MAX_CHARS on its own; nothing more was dropped)"
+fi
+if [ -n "$SELECTED" ]; then
   if [ "$TOTAL" -gt "$MAX_CONTRIBUTORS" ]; then
     echo
     echo "($((TOTAL - MAX_CONTRIBUTORS)) more contributor(s) have notes too; CONTEXT_MAX_CONTRIBUTORS=$TOTAL would load them all)"
