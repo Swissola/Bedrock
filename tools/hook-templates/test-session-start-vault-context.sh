@@ -743,6 +743,7 @@ fx_flat_vault() {
 test_another_repos_newer_note_is_never_loaded() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_flat_vault widget)
+  mkdir -p "$vault/Projects/gadget"; echo "GADGET-DOC" > "$vault/Projects/gadget/index.md"  # gadget is a known repo, so its notes are not older notes
   fx_note "$vault/Inbox/daily-notes/2026-10-05-widget-fix.md" WIDGET 202610050900
   fx_note "$vault/Inbox/daily-notes/2026-10-10-gadget-other.md" GADGET 202610101500
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
@@ -755,6 +756,7 @@ test_another_repos_newer_note_is_never_loaded() {
 test_a_repo_with_no_notes_says_so_even_when_others_have_some() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_flat_vault widget)
+  mkdir -p "$vault/Projects/gadget"; echo "GADGET-DOC" > "$vault/Projects/gadget/index.md"  # gadget is a known repo, so its notes are not older notes
   fx_note "$vault/Inbox/daily-notes/2026-10-10-gadget-other.md" GADGET 202610101500
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "no note for this repo: says so" "(No daily notes yet for this repo.)" "$out"
@@ -1380,6 +1382,82 @@ test_over_budget_drops_the_furthest_back_other_note_first
 test_your_note_and_the_open_items_are_never_cut
 test_within_budget_prints_everything_and_no_left_out_line
 test_a_bad_budget_value_falls_back_to_the_default
+
+# ------------------------------------------------------ older-note fallback
+
+# A note with an optional frontmatter repo: args vault author date topic repo marker mtime
+# (the filename is <date>-<topic>.md, so a topic that holds no repo name makes an older note).
+fx_fm_note() {
+  local f="$1/daily-notes/$2/$3-$4.md"
+  mkdir -p "$(dirname "$f")"
+  { printf -- '---\ntitle: x\n'; [[ -n "$5" ]] && printf 'repo: %s\n' "$5"; printf -- '---\n## Context for Future Sessions\nCONTEXT-%s\n' "$6"; } > "$f"
+  touch -t "$7" "$f"
+  return 0
+}
+
+test_a_repo_with_no_notes_loads_the_newest_older_note() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_fm_note "$vault" alice 2026-10-05 a "" OLD1 202610050900
+  fx_fm_note "$vault" alice 2026-10-06 b "" OLD2 202610060900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "only the newest older note is loaded" "CONTEXT-OLD2" "$(printf '%s' "$out" | heading_order)"
+  assert_contains "it is labelled as an older note of unknown repo" "Older note (repo unknown, written before per-repo notes)" "$out"
+  assert_contains "the output says how many older notes there are, at least" "(at least 2 older note(s) have no repo in the filename)" "$out"
+  return 0
+}
+
+test_the_fallback_stops_once_the_repo_has_a_note() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_fm_note "$vault" alice 2026-10-06 b "" OLD2 202610060900
+  fx_named_note "$vault" alice 2026-10-07 widget x OWN 202610070900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "the repo's own note loads and the older one does not" "CONTEXT-OWN" "$(printf '%s' "$out" | heading_order)"
+  assert_not_contains "no older-note label" "Older note (repo unknown" "$out"
+  assert_not_contains "no older-note count" "older note(s) have no repo" "$out"
+  return 0
+}
+
+test_an_older_note_naming_another_repo_is_skipped_and_never_loaded() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_fm_note "$vault" alice 2026-10-05 a "" PLAIN 202610050900
+  fx_fm_note "$vault" alice 2026-10-06 b gadget GADGETOLD 202610060900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "the newest older note belongs to gadget, so the next one is used" "CONTEXT-PLAIN" "$(printf '%s' "$out" | heading_order)"
+  assert_not_contains "gadget's note is never loaded" "CONTEXT-GADGETOLD" "$out"
+  return 0
+}
+
+test_at_most_five_older_notes_are_opened() {
+  local repo vault out i
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  for i in 1 2 3; do fx_fm_note "$vault" alice "2026-09-0$i" "t$i" widget "DEEP$i" "20260901090$i"; done
+  for i in 4 5 6 7 8; do fx_fm_note "$vault" alice "2026-10-0$i" "t$i" gadget "OTHER$i" "20261001090$i"; done
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_not_contains "a note beyond the five newest is never opened, even one naming this repo" "CONTEXT-DEEP" "$out"
+  assert_not_contains "...and none of gadget's is loaded" "CONTEXT-OTHER" "$out"
+  assert_contains "...so the repo is reported as having no notes" "(No daily notes yet for this repo.)" "$out"
+  return 0
+}
+
+test_a_note_whose_frontmatter_names_this_repo_counts_as_its_own() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_fm_note "$vault" alice 2026-10-06 b widget MINEBYFM 202610060900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "it loads" "CONTEXT-MINEBYFM" "$out"
+  assert_contains "...under the normal label for who wrote it" "## Your latest note: daily-notes/alice/2026-10-06-b.md" "$out"
+  assert_not_contains "...not as an older note" "Older note (repo unknown" "$out"
+  return 0
+}
+
+test_a_repo_with_no_notes_loads_the_newest_older_note
+test_the_fallback_stops_once_the_repo_has_a_note
+test_an_older_note_naming_another_repo_is_skipped_and_never_loaded
+test_at_most_five_older_notes_are_opened
+test_a_note_whose_frontmatter_names_this_repo_counts_as_its_own
 
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]

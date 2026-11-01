@@ -217,10 +217,13 @@ known_repos() {
 # matches one of those belongs to the longer repo.
 CURRENT_GLOB="*.md"
 LONGER_GLOBS=()
+ALL_GLOBS=()
 if [[ "$REPO_FILTERED" = 1 ]]; then
   CURRENT_GLOB="$(glob_for "$REPO_NAME")"
   while IFS= read -r known; do
-    if [[ -n "$known" && "$known" != "$REPO_NAME" && "$known" == "$REPO_NAME-"* ]]; then
+    [[ -n "$known" ]] || continue
+    ALL_GLOBS+=("$(glob_for "$known")")
+    if [[ "$known" != "$REPO_NAME" && "$known" == "$REPO_NAME-"* ]]; then
       LONGER_GLOBS+=("$(glob_for "$known")")
     fi
   done < <(known_repos)
@@ -328,6 +331,83 @@ if [[ -n "$CANDIDATES" ]]; then
   SELECTED="$(printf '%s\n%s\n' "$MINE" "$(printf '%s\n' "$OTHERS" | head -n "$MAX_CONTRIBUTORS")" | grep . || true)"
 fi
 
+# --- older notes -------------------------------------------------------------
+
+# An "older" note is one whose name matches no known repo's glob: written before
+# repo names went into filenames. When this repo has no notes of its own, the
+# newest older note is loaded in its place, labelled as such.
+is_older_note() {
+  local name="$1" g
+  for g in "${ALL_GLOBS[@]}"; do
+    # The unquoted expansion is deliberate: the glob is the pattern.
+    # shellcheck disable=SC2254
+    case "$name" in $g) return 1 ;; esac
+  done
+  return 0
+}
+
+# The repo named in a note's frontmatter, cased per repoNameCase, or nothing.
+fm_repo() {
+  local v
+  v="$(tr -d '\r' < "$1" | awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    /^repo:/ { v = $0; sub(/^repo:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); gsub(/^["\047]|["\047]$/, "", v); print v; exit }
+  ')"
+  if [[ "$(config_value repoNameCase)" == keep ]]; then printf '%s' "$v"; else printf '%s' "$v" | tr '[:upper:]' '[:lower:]'; fi
+  return 0
+}
+
+OLDER_PATH=""
+OLDER_NOTE_LINE=""
+OLDER_LABEL="Older note (repo unknown, written before per-repo notes)"
+
+# Sets SELECTED and ALL_SORTED to the note to load, if there is one. The newest
+# five older notes (by filename date, then modification time) are the only ones
+# whose frontmatter is read: one naming another repo is skipped, one naming this
+# repo is this repo's own note, one naming nothing is loaded as an older note.
+older_fallback() {
+  local f name d who cands="" n=0 d5 tied="" m line r path
+  [[ -d "$DAILY_DIR" ]] || return 0
+  while IFS= read -r f; do
+    name="${f##*/}"
+    is_older_note "$name" || continue
+    d="0000-00-00"
+    if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
+    who=""
+    if [[ "$HAS_AUTHOR" = 1 && "${f#./}" == */* ]]; then who="${f#./}"; who="${who%%/*}"; fi
+    cands="$cands$d$TAB$f$TAB$who
+"
+    n=$((n + 1))
+  done < <(cd "$DAILY_DIR" 2>/dev/null && find . -type f -name '*.md' ! -name '*.sync-conflict-*' ! -path '*/.*' 2>/dev/null)
+  [[ "$n" -gt 0 ]] || return 0
+  d5="$(printf '%s' "$cands" | sort -t "$TAB" -k1,1r | head -n 5 | tail -n 1 | cut -f1)"
+  while IFS="$TAB" read -r d f who; do
+    [[ -n "$f" ]] || continue
+    m="$(mtime_of "$DAILY_DIR/${f#./}")"
+    tied="$tied$d$TAB${m:-0}$TAB$DAILY_DIR/${f#./}$TAB$who
+"
+  done < <(printf '%s' "$cands" | awk -F"$TAB" -v d="$d5" '$1 >= d')
+  OLDER_NOTE_LINE="(at least $n older note(s) have no repo in the filename)"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    path="$(printf '%s' "$line" | cut -f3)"
+    r="$(fm_repo "$path")"
+    if [[ -z "$r" ]]; then
+      OLDER_PATH="$path"
+    elif [[ "$r" = "$REPO_NAME" ]]; then
+      OLDER_NOTE_LINE=""
+    else
+      continue
+    fi
+    SELECTED="$line"
+    ALL_SORTED="$line"
+    break
+  done < <(printf '%s' "$tied" | sort -t "$TAB" -k1,1r -k2,2nr | head -n 5)
+  return 0
+}
+if [[ "$REPO_FILTERED" = 1 && -z "$SELECTED" ]]; then older_fallback; fi
+
 # --- output ------------------------------------------------------------------
 
 # The output is assembled in parts first, so a size budget can be applied before
@@ -394,9 +474,10 @@ has_body() {
 # Yours: both forward-looking sections plus the latest appended update. Another
 # contributor's: the context section only. Checkbox lines are left out of both.
 render_note() {
-  local note="$1" who="$2" mine="$3" rel label ctx_raw next_raw context next update total earlier update_note lines tags
+  local note="$1" who="$2" mine="$3" override="${4:-}" rel label ctx_raw next_raw context next update total earlier update_note lines tags
   rel="${note#"$VAULT_ROOT/"}"
-  if [[ "$mine" = 1 ]]; then label="Your latest note"
+  if [[ -n "$override" ]]; then label="$override"
+  elif [[ "$mine" = 1 ]]; then label="Your latest note"
   elif [ -n "$who" ]; then label="Latest note from $who"
   else label="Most recent daily note"; fi
   ctx_raw=$(extract_section "$note" "## Context for Future Sessions")
@@ -533,7 +614,9 @@ if [ -n "$SELECTED" ]; then
     [ -n "$path" ] || continue
     mine=0
     [[ -n "$AUTHOR_SLUG" && "$who" = "$AUTHOR_SLUG" ]] && mine=1
-    NOTE_TEXT[N_NOTES]="$(render_note "$path" "$who" "$mine")"
+    override=""
+    [[ -n "$OLDER_PATH" && "$path" = "$OLDER_PATH" ]] && override="$OLDER_LABEL"
+    NOTE_TEXT[N_NOTES]="$(render_note "$path" "$who" "$mine" "$override")"
     NOTE_MINE[N_NOTES]=$mine
     NOTE_KEPT[N_NOTES]=1
     N_NOTES=$((N_NOTES + 1))
@@ -583,6 +666,10 @@ elif [ "$REPO_FILTERED" = 1 ]; then
 else
   echo
   echo "(No daily notes in the vault yet.)"
+fi
+if [ -n "$OLDER_NOTE_LINE" ]; then
+  echo
+  echo "$OLDER_NOTE_LINE"
 fi
 
 exit 0
