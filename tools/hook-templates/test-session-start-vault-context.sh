@@ -88,7 +88,7 @@ test_no_vault_root_is_silent() {
 
 test_missing_repo_doc_is_silent() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_eq "default layout, no repos/<name>/index.md: silent no-op" "" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
@@ -98,7 +98,7 @@ test_missing_repo_doc_is_silent() {
 test_default_layout_loads_doc_and_forward_looking_sections() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   mkdir -p "$vault/repos/widget"; echo "$DOC_MARKER" > "$vault/repos/widget/index.md"
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "default layout: repo doc loaded" "$DOC_MARKER" "$out"
   assert_contains "default layout: header names repos/widget/index.md" "## repos/widget/index.md" "$out"
@@ -112,10 +112,10 @@ test_default_layout_loads_doc_and_forward_looking_sections() {
 test_each_contributors_latest_note_is_loaded_newest_by_mtime_first() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   mkdir -p "$vault/repos/widget"; echo "doc" > "$vault/repos/widget/index.md"
-  write_note "$vault/daily-notes/alice/2026-10-05-zzz.md" OLD
-  write_note "$vault/daily-notes/bob/2026-10-05-aaa.md" NEW
-  touch -t 202610050800 "$vault/daily-notes/alice/2026-10-05-zzz.md"
-  touch -t 202610051200 "$vault/daily-notes/bob/2026-10-05-aaa.md"
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-zzz.md" OLD
+  write_note "$vault/daily-notes/bob/2026-10-05-widget-aaa.md" NEW
+  touch -t 202610050800 "$vault/daily-notes/alice/2026-10-05-widget-zzz.md"
+  touch -t 202610051200 "$vault/daily-notes/bob/2026-10-05-widget-aaa.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "the newest note is loaded" "CONTEXT-NEW" "$out"
   assert_contains "...and so is the other contributor's latest (one note each)" "CONTEXT-OLD" "$out"
@@ -127,7 +127,7 @@ test_each_contributors_latest_note_is_loaded_newest_by_mtime_first() {
 test_compact_skips_and_malformed_stdin_fails_open() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   mkdir -p "$vault/repos/widget"; echo "$DOC_MARKER" > "$vault/repos/widget/index.md"
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook "$repo" "$vault" '{"source":"compact"}')
   assert_eq "source=compact: skipped entirely" "" "$out"
   out=$(run_hook "$repo" "$vault" 'not json at all')
@@ -142,7 +142,7 @@ test_note_without_forward_sections_loads_in_full() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   mkdir -p "$vault/repos/widget" "$vault/daily-notes/alice"
   echo "doc" > "$vault/repos/widget/index.md"
-  printf '## What Was Done\nONLY-HISTORY\n' > "$vault/daily-notes/alice/2026-10-05-a.md"
+  printf '## What Was Done\nONLY-HISTORY\n' > "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "note with no forward-looking sections: loaded in full" "ONLY-HISTORY" "$out"
   assert_contains "…and says so" "loading in full" "$out"
@@ -154,7 +154,13 @@ test_no_daily_notes_says_so() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   mkdir -p "$vault/repos/widget"; echo "doc" > "$vault/repos/widget/index.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
-  assert_contains "no daily notes: says so" "(No daily notes in the vault yet.)" "$out"
+  assert_contains "no daily notes: says so (the default pattern names the repo)" "(No daily notes yet for this repo.)" "$out"
+  printf -- '---
+filenamePattern: "{date}-{topic}"
+---
+' > "$vault/vault-config.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "no daily notes, pattern without a repo: the vault-wide message" "(No daily notes in the vault yet.)" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
   return $?
 }
@@ -168,9 +174,9 @@ personal_vault() {  # builds a vault using the personal layout plus decoys in th
   write_note "$vault/Inbox/daily-notes/2026-10-05-widget-x.md" PERSONAL
   # decoys in the DEFAULT locations, newer, which a config-ignoring hook would pick
   mkdir -p "$vault/repos/widget"; echo "DECOY-REPODOC" > "$vault/repos/widget/index.md"
-  write_note "$vault/daily-notes/alice/2026-10-05-decoy.md" DECOY
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-decoy.md" DECOY
   touch -t 202610050800 "$vault/Inbox/daily-notes/2026-10-05-widget-x.md"
-  touch -t 202610051200 "$vault/daily-notes/alice/2026-10-05-decoy.md"
+  touch -t 202610051200 "$vault/daily-notes/alice/2026-10-05-widget-decoy.md"
   echo "$vault"
   return 0
 }
@@ -200,7 +206,7 @@ test_config_without_keys_uses_defaults() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   printf -- '---\nchangeLog: compact\n---\n' > "$vault/vault-config.md"
   mkdir -p "$vault/repos/widget"; echo "$DOC_MARKER" > "$vault/repos/widget/index.md"
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "config present but no relevant keys: defaults" "$DOC_MARKER" "$out"
   assert_contains "…daily notes from the default folder" "CONTEXT-A" "$out"
@@ -212,7 +218,7 @@ test_unclosed_frontmatter_is_ignored() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   printf -- '---\nreposPath: Projects/{repo}/index.md\nno closing delimiter here\n' > "$vault/vault-config.md"
   mkdir -p "$vault/repos/widget"; echo "$DOC_MARKER" > "$vault/repos/widget/index.md"
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "unclosed frontmatter: config ignored, defaults used" "$DOC_MARKER" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
@@ -234,7 +240,7 @@ test_author_placeholder_resolves_to_base_folder() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   printf -- '---\ndailyNotesPath: team-notes/{author}\n---\n' > "$vault/vault-config.md"
   mkdir -p "$vault/repos/widget"; echo "doc" > "$vault/repos/widget/index.md"
-  write_note "$vault/team-notes/carol/2026-10-05-c.md" CAROL
+  write_note "$vault/team-notes/carol/2026-10-05-widget-c.md" CAROL
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "{author} in dailyNotesPath: scans every subfolder of the base" "CONTEXT-CAROL" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
@@ -256,8 +262,8 @@ make_vault_with_doc() {
 
 test_latest_update_section_is_loaded() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(make_vault_with_doc)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
-  printf '\n## Update (later same session) - later work\nUPDATE-ONE-MARKER\n' >> "$vault/daily-notes/alice/2026-10-05-a.md"
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
+  printf '\n## Update (later same session) - later work\nUPDATE-ONE-MARKER\n' >> "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "update section: its content is loaded" "UPDATE-ONE-MARKER" "$out"
   assert_contains "update section: loaded under a label saying what it is" "most recent update" "$out"
@@ -269,9 +275,9 @@ test_latest_update_section_is_loaded() {
 
 test_only_the_most_recent_update_is_loaded() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(make_vault_with_doc)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
-  printf '\n## Update (later same session) - first\nUPDATE-OLD-MARKER\n' >> "$vault/daily-notes/alice/2026-10-05-a.md"
-  printf '\n## Update (later same session) - second\nUPDATE-NEW-MARKER\n' >> "$vault/daily-notes/alice/2026-10-05-a.md"
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
+  printf '\n## Update (later same session) - first\nUPDATE-OLD-MARKER\n' >> "$vault/daily-notes/alice/2026-10-05-widget-a.md"
+  printf '\n## Update (later same session) - second\nUPDATE-NEW-MARKER\n' >> "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "several updates: the newest is loaded" "UPDATE-NEW-MARKER" "$out"
   assert_not_contains "several updates: an older one is NOT loaded" "UPDATE-OLD-MARKER" "$out"
@@ -282,8 +288,8 @@ test_only_the_most_recent_update_is_loaded() {
 
 test_long_update_is_truncated_with_a_marker() {
   local repo vault out i; repo=$(make_code_repo widget); vault=$(make_vault_with_doc)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
-  { printf '\n## Update (later same session) - long\n'; for i in $(seq 1 100); do echo "UPD-LINE-$i"; done; } >> "$vault/daily-notes/alice/2026-10-05-a.md"
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
+  { printf '\n## Update (later same session) - long\n'; for i in $(seq 1 100); do echo "UPD-LINE-$i"; done; } >> "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "long update: the start is loaded" "UPD-LINE-1" "$out"
   assert_not_contains "long update: the tail is cut" "UPD-LINE-100" "$out"
@@ -296,7 +302,7 @@ test_update_section_before_the_forward_sections() {
   # position in the note must not matter
   local repo vault out; repo=$(make_code_repo widget); vault=$(make_vault_with_doc)
   mkdir -p "$vault/daily-notes/alice"
-  printf '## What Was Done\nHISTORY-B\n\n## Update (later same session) - early\nUPDATE-EARLY-MARKER\n\n## Context for Future Sessions\nCONTEXT-B\n' > "$vault/daily-notes/alice/2026-10-05-b.md"
+  printf '## What Was Done\nHISTORY-B\n\n## Update (later same session) - early\nUPDATE-EARLY-MARKER\n\n## Context for Future Sessions\nCONTEXT-B\n' > "$vault/daily-notes/alice/2026-10-05-widget-b.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "update before the forward sections: still loaded" "UPDATE-EARLY-MARKER" "$out"
   assert_contains "…and the forward section after it is still loaded" "CONTEXT-B" "$out"
@@ -307,7 +313,7 @@ test_update_section_before_the_forward_sections() {
 
 test_note_without_updates_is_unchanged() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(make_vault_with_doc)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_not_contains "no update section: no update label in the output" "most recent update" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
@@ -318,7 +324,7 @@ test_update_only_note_still_loads_in_full() {
   # no forward-looking sections: the existing fallback (load the whole note) stands
   local repo vault out; repo=$(make_code_repo widget); vault=$(make_vault_with_doc)
   mkdir -p "$vault/daily-notes/alice"
-  printf '## What Was Done\nONLY-HISTORY-C\n\n## Update (later same session) - u\nUPDATE-C-MARKER\n' > "$vault/daily-notes/alice/2026-10-05-c.md"
+  printf '## What Was Done\nONLY-HISTORY-C\n\n## Update (later same session) - u\nUPDATE-C-MARKER\n' > "$vault/daily-notes/alice/2026-10-05-widget-c.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "no forward sections: loads in full (history)" "ONLY-HISTORY-C" "$out"
   assert_contains "no forward sections: loads in full (update)" "UPDATE-C-MARKER" "$out"
@@ -386,7 +392,7 @@ run_hook_status() {
 test_the_hook_always_exits_zero() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook_status "$repo" "" "$STARTUP_EVENT");        assert_contains "exit 0 with no VAULT_ROOT" "$EXIT_ZERO" "$out"
   out=$(run_hook_status "$repo" "$vault" '{"source":"compact"}'); assert_contains "exit 0 on compact" "$EXIT_ZERO" "$out"
   out=$(run_hook_status "$repo" "$vault" "$STARTUP_EVENT");  assert_contains "exit 0 on a normal load" "$EXIT_ZERO" "$out"
@@ -395,11 +401,11 @@ test_the_hook_always_exits_zero() {
   return 0
 }
 
-test_every_source_except_compact_injects_context() {
+test_every_source_except_compact_and_resume_injects_context() {
   local repo vault s out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
-  for s in startup resume clear fork somethingnew; do
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
+  for s in startup clear fork somethingnew; do
     out=$(run_hook "$repo" "$vault" "{\"source\":\"$s\"}")
     assert_contains "source=$s: injects the repo doc" "$DOC_MARKER" "$out"
   done
@@ -440,13 +446,13 @@ test_a_note_with_only_one_forward_section_loads_just_that_one() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
   mkdir -p "$vault/daily-notes/alice"
-  printf '## What Was Done\nHIST-ONE\n\n## Context for Future Sessions\nCTX-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-a.md"
+  printf '## What Was Done\nHIST-ONE\n\n## Context for Future Sessions\nCTX-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "context only: the context section is loaded" "CTX-ONLY" "$out"
   assert_contains "context only: says forward-looking sections only" "forward-looking sections only" "$out"
   assert_not_contains "context only: history is not loaded" "HIST-ONE" "$out"
-  rm -f "$vault/daily-notes/alice/2026-10-05-a.md"
-  printf '## What Was Done\nHIST-TWO\n\n## Open Questions / Next Steps\n- [ ] NEXT-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-b.md"
+  rm -f "$vault/daily-notes/alice/2026-10-05-widget-a.md"
+  printf '## What Was Done\nHIST-TWO\n\n## Open Questions / Next Steps\n- [ ] NEXT-ONLY\n' > "$vault/daily-notes/alice/2026-10-05-widget-b.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "next steps only: that section is loaded" "NEXT-ONLY" "$out"
   assert_not_contains "next steps only: history is not loaded" "HIST-TWO" "$out"
@@ -456,7 +462,7 @@ test_a_note_with_only_one_forward_section_loads_just_that_one() {
 test_sections_end_at_the_next_heading_and_keep_their_subheadings() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
-  cat > "$vault/daily-notes/alice/2026-10-05-a.md" <<'EOF'
+  cat > "$vault/daily-notes/alice/2026-10-05-widget-a.md" <<'EOF'
 ## What Was Done
 HIST
 
@@ -486,9 +492,9 @@ EOF
 test_non_markdown_files_are_never_picked_as_the_latest_note() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" REALNOTE
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" REALNOTE
   echo "NOT-A-NOTE" > "$vault/daily-notes/alice/scratch.txt"
-  touch -t 202610051200 "$vault/daily-notes/alice/2026-10-05-a.md"
+  touch -t 202610051200 "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   touch -t 202610052300 "$vault/daily-notes/alice/scratch.txt"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "a newer .txt file is ignored, the .md note wins" "CONTEXT-REALNOTE" "$out"
@@ -499,10 +505,10 @@ test_non_markdown_files_are_never_picked_as_the_latest_note() {
 test_notes_in_nested_folders_and_with_spaces_in_the_name_are_found() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  write_note "$vault/daily-notes/alice/archive 2026/2026-10-05 my note.md" SPACED
+  write_note "$vault/daily-notes/alice/archive 2026/2026-10-05-widget-my note.md" SPACED
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "nested folder with spaces, file name with spaces: found" "CONTEXT-SPACED" "$out"
-  assert_contains "the header shows the vault-relative path" "daily-notes/alice/archive 2026/2026-10-05 my note.md" "$out"
+  assert_contains "the header shows the vault-relative path" "daily-notes/alice/archive 2026/2026-10-05-widget-my note.md" "$out"
   return 0
 }
 
@@ -510,7 +516,7 @@ test_an_empty_daily_notes_folder_says_there_are_no_notes() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
-  assert_contains "daily-notes exists but holds no notes: says so" "(No daily notes in the vault yet.)" "$out"
+  assert_contains "daily-notes exists but holds no notes: says so" "(No daily notes yet for this repo.)" "$out"
   assert_contains "…and still loads the repo doc" "$DOC_MARKER" "$out"
   return 0
 }
@@ -518,7 +524,7 @@ test_an_empty_daily_notes_folder_says_there_are_no_notes() {
 test_a_note_with_windows_line_endings_is_still_loaded() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
-  printf '## What Was Done\r\nHIST-CRLF\r\n\r\n## Context for Future Sessions\r\nCTX-CRLF\r\n\r\n## Open Questions / Next Steps\r\n- [ ] NEXT-CRLF\r\n' > "$vault/daily-notes/alice/2026-10-05-a.md"
+  printf '## What Was Done\r\nHIST-CRLF\r\n\r\n## Context for Future Sessions\r\nCTX-CRLF\r\n\r\n## Open Questions / Next Steps\r\n- [ ] NEXT-CRLF\r\n' > "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "CRLF note: the context text reaches the session (section match or full fallback)" "CTX-CRLF" "$out"
   assert_contains "CRLF note: the next-steps text reaches the session" "NEXT-CRLF" "$out"
@@ -528,7 +534,7 @@ test_a_note_with_windows_line_endings_is_still_loaded() {
 test_the_hook_never_writes_to_the_vault() {
   local repo vault before after
   repo=$(fx_repo widget); vault=$(fx_vault)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   printf -- '---\nreposPath: repos/{repo}/index.md\n---\n' > "$vault/vault-config.md"
   before=$(cd "$vault" && find . -type f -exec cksum {} + | sort; cd "$vault" && find . | sort)
   run_hook "$repo" "$vault" "$STARTUP_EVENT" >/dev/null
@@ -540,8 +546,8 @@ test_the_hook_never_writes_to_the_vault() {
 test_update_cap_can_be_changed_with_update_max_lines() {
   local repo vault out i
   repo=$(fx_repo widget); vault=$(fx_vault)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
-  { printf '\n## Update (later same session) - long\n'; for i in $(seq 1 30); do echo "CAP-LINE-$i"; done; } >> "$vault/daily-notes/alice/2026-10-05-a.md"
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
+  { printf '\n## Update (later same session) - long\n'; for i in $(seq 1 30); do echo "CAP-LINE-$i"; done; } >> "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$( cd "$repo" && printf '%s' "$STARTUP_EVENT" | VAULT_ROOT="$vault" UPDATE_MAX_LINES=5 bash "$HOOK_SCRIPT" 2>&1 )
   assert_contains "cap of 5: the first lines are loaded" "CAP-LINE-3" "$out"
   assert_not_contains "cap of 5: later lines are cut" "CAP-LINE-10" "$out"
@@ -555,8 +561,8 @@ test_update_cap_can_be_changed_with_update_max_lines() {
 test_update_stops_at_the_next_heading_and_counts_earlier_updates() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  write_note "$vault/daily-notes/alice/2026-10-05-a.md" A
-  printf '\n## Update - one\nU1\n\n## Update - two\nU2\n\n## Update - three\nU3-IN\n\n## Appendix\nAPPENDIX-AFTER-UPDATE\n' >> "$vault/daily-notes/alice/2026-10-05-a.md"
+  write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
+  printf '\n## Update - one\nU1\n\n## Update - two\nU2\n\n## Update - three\nU3-IN\n\n## Appendix\nAPPENDIX-AFTER-UPDATE\n' >> "$vault/daily-notes/alice/2026-10-05-widget-a.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "three updates: the last is loaded" "U3-IN" "$out"
   assert_not_contains "three updates: content after it under another heading is not" "APPENDIX-AFTER-UPDATE" "$out"
@@ -599,7 +605,7 @@ test_a_longer_config_key_is_not_mistaken_for_a_shorter_one() {
 }
 
 test_the_hook_always_exits_zero
-test_every_source_except_compact_injects_context
+test_every_source_except_compact_and_resume_injects_context
 test_compact_is_recognised_whatever_the_json_layout
 test_repo_name_falls_back_to_the_folder_name_without_an_origin
 test_output_starts_with_the_context_header
@@ -648,21 +654,21 @@ heading_order() {  # prints the contributor markers in the order they appear in 
 test_every_contributors_latest_note_is_loaded_most_recent_first() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  fx_note "$vault/daily-notes/alice/2026-10-05-a.md" ALICE 202610050900
-  fx_note "$vault/daily-notes/bob/2026-10-07-b.md" BOB 202610070900
-  fx_note "$vault/daily-notes/carol/2026-10-06-c.md" CAROL 202610060900
+  fx_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" ALICE 202610050900
+  fx_note "$vault/daily-notes/bob/2026-10-07-widget-b.md" BOB 202610070900
+  fx_note "$vault/daily-notes/carol/2026-10-06-widget-c.md" CAROL 202610060900
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_eq "three contributors: all three loaded, newest date first" "CONTEXT-BOB CONTEXT-CAROL CONTEXT-ALICE" "$(printf '%s' "$out" | heading_order)"
-  assert_contains "each note is labelled with who wrote it" "## Latest note from bob: daily-notes/bob/2026-10-07-b.md" "$out"
-  assert_contains "...for every contributor" "## Latest note from alice: daily-notes/alice/2026-10-05-a.md" "$out"
+  assert_contains "each note is labelled with who wrote it" "## Latest note from bob: daily-notes/bob/2026-10-07-widget-b.md" "$out"
+  assert_contains "...for every contributor" "## Latest note from alice: daily-notes/alice/2026-10-05-widget-a.md" "$out"
   return 0
 }
 
 test_only_each_contributors_newest_note_is_loaded() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  fx_note "$vault/daily-notes/alice/2026-10-01-old.md" ALICEOLD 202610010900
-  fx_note "$vault/daily-notes/alice/2026-10-05-new.md" ALICENEW 202610050900
+  fx_note "$vault/daily-notes/alice/2026-10-01-widget-old.md" ALICEOLD 202610010900
+  fx_note "$vault/daily-notes/alice/2026-10-05-widget-new.md" ALICENEW 202610050900
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "a contributor's newest note is loaded" "CONTEXT-ALICENEW" "$out"
   assert_not_contains "...and their older one is not" "CONTEXT-ALICEOLD" "$out"
@@ -672,10 +678,10 @@ test_only_each_contributors_newest_note_is_loaded() {
 test_the_contributor_limit_defaults_to_three_and_can_be_changed() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  fx_note "$vault/daily-notes/a/2026-10-01-a.md" A1 202610010900
-  fx_note "$vault/daily-notes/b/2026-10-02-b.md" B2 202610020900
-  fx_note "$vault/daily-notes/c/2026-10-03-c.md" C3 202610030900
-  fx_note "$vault/daily-notes/d/2026-10-04-d.md" D4 202610040900
+  fx_note "$vault/daily-notes/a/2026-10-01-widget-a.md" A1 202610010900
+  fx_note "$vault/daily-notes/b/2026-10-02-widget-b.md" B2 202610020900
+  fx_note "$vault/daily-notes/c/2026-10-03-widget-c.md" C3 202610030900
+  fx_note "$vault/daily-notes/d/2026-10-04-widget-d.md" D4 202610040900
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_eq "four contributors: the three most recent are loaded" "CONTEXT-D4 CONTEXT-C3 CONTEXT-B2" "$(printf '%s' "$out" | heading_order)"
   assert_contains "...and the output says one more has notes" "1 more contributor(s) have notes too" "$out"
@@ -693,8 +699,8 @@ test_the_filename_date_beats_the_modification_time() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
   # a git checkout stamps every file with the time it was pulled: alice's older note looks newer
-  fx_note "$vault/daily-notes/alice/2026-10-01-a.md" ALICEPULLED 202610100900
-  fx_note "$vault/daily-notes/bob/2026-10-09-b.md" BOBWROTE 202610020900
+  fx_note "$vault/daily-notes/alice/2026-10-01-widget-a.md" ALICEPULLED 202610100900
+  fx_note "$vault/daily-notes/bob/2026-10-09-widget-b.md" BOBWROTE 202610020900
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_eq "the later written note comes first although its file is older" "CONTEXT-BOBWROTE CONTEXT-ALICEPULLED" "$(printf '%s' "$out" | heading_order)"
   return 0
@@ -703,8 +709,8 @@ test_the_filename_date_beats_the_modification_time() {
 test_the_modification_time_breaks_a_tie_on_the_same_date() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  fx_note "$vault/daily-notes/alice/2026-10-05-zzz.md" LATER 202610051500
-  fx_note "$vault/daily-notes/alice/2026-10-05-aaa.md" EARLIER 202610050800
+  fx_note "$vault/daily-notes/alice/2026-10-05-widget-zzz.md" LATER 202610051500
+  fx_note "$vault/daily-notes/alice/2026-10-05-widget-aaa.md" EARLIER 202610050800
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "same date, same person: the newer file wins" "CONTEXT-LATER" "$out"
   assert_not_contains "...not the one that sorts first by name" "CONTEXT-EARLIER" "$out"
@@ -932,6 +938,67 @@ test_a_subfolder_of_the_repo_is_still_the_repo
 test_claude_project_dir_wins_over_the_working_directory
 test_outside_a_git_repo_the_folder_name_is_used
 test_the_personal_vault_layout_end_to_end
+
+# --------------------------------------------------- per-repo notes: foundations
+
+# A note named <date>-<repo>-<topic> in an author's folder, with its mtime set.
+fx_named_note() {  # args: vault author date repo topic marker mtime
+  fx_note "$1/daily-notes/$2/$3-$4-$5.md" "$6" "$7"
+  return 0
+}
+
+test_the_default_pattern_names_the_repo() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a WIDGETNOTE 202610050900
+  fx_named_note "$vault" alice 2026-10-06 gadget b GADGETNOTE 202610060900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "with no config the repo is in the filename pattern: its own note loads" "CONTEXT-WIDGETNOTE" "$out"
+  assert_not_contains "...and a newer note named for another repo does not" "CONTEXT-GADGETNOTE" "$out"
+  return 0
+}
+
+test_a_longer_repo_name_does_not_claim_a_shorter_ones_notes() {
+  local short long vault out
+  short=$(fx_repo widget); long=$(fx_repo widget-ui); vault=$(fx_vault)
+  mkdir -p "$vault/repos/widget-ui"; echo "UI-DOC" > "$vault/repos/widget-ui/index.md"
+  fx_named_note "$vault" alice 2026-10-06 widget-ui tweak ALICEUI 202610060900
+  fx_named_note "$vault" bob 2026-10-05 widget fix BOBWIDGET 202610050900
+  out=$(run_hook "$short" "$vault" "$STARTUP_EVENT")
+  assert_eq "in widget: only the widget note, not widget-ui's" "CONTEXT-BOBWIDGET" "$(printf '%s' "$out" | heading_order)"
+  out=$(run_hook "$long" "$vault" "$STARTUP_EVENT")
+  assert_eq "in widget-ui: only the widget-ui note" "CONTEXT-ALICEUI" "$(printf '%s' "$out" | heading_order)"
+  return 0
+}
+
+test_known_repos_come_from_the_repos_path_listing() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_flat_vault widget)
+  mkdir -p "$vault/Projects/widget-ui"; echo "UI-DOC" > "$vault/Projects/widget-ui/index.md"
+  fx_note "$vault/Inbox/daily-notes/2026-10-06-widget-ui-tweak.md" UINOTE 202610060900
+  fx_note "$vault/Inbox/daily-notes/2026-10-05-widget-fix.md" WIDGETNOTE 202610050900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "repos are listed from the configured reposPath, so widget-ui is known" "CONTEXT-WIDGETNOTE" "$(printf '%s' "$out" | heading_order)"
+  return 0
+}
+
+test_resume_loads_nothing_but_startup_and_clear_do() {
+  local repo vault out s
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a A 202610050900
+  out=$(run_hook "$repo" "$vault" '{"source":"resume"}')
+  assert_eq "resume: the transcript already holds it, so nothing is loaded" "" "$out"
+  for s in startup clear; do
+    out=$(run_hook "$repo" "$vault" "{\"source\":\"$s\"}")
+    assert_contains "$s: still loads" "CONTEXT-A" "$out"
+  done
+  return 0
+}
+
+test_the_default_pattern_names_the_repo
+test_a_longer_repo_name_does_not_claim_a_shorter_ones_notes
+test_known_repos_come_from_the_repos_path_listing
+test_resume_loads_nothing_but_startup_and_clear_do
 
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]

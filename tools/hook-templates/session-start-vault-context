@@ -42,10 +42,14 @@
 # It is not taken from the git remote: a remote can be spelt differently from
 # the folder, and the commands never look at it.
 #
-# WHICH NOTES. When filenamePattern contains {repo}, only notes whose filename
-# matches the pattern for THIS repo are considered, so a busy day in another
-# repo cannot push this repo's last session out. Without {repo} in the pattern
-# there is nothing to tell repos apart by and every note is a candidate.
+# WHICH NOTES. The default filenamePattern is {date}-{repo}-{topic}. When it
+# contains {repo}, only notes whose filename matches the pattern for THIS repo
+# are considered, so a busy day in another repo cannot push this repo's last
+# session out. Where one repo's name is the start of another's (widget and
+# widget-ui) a note belongs to the longest known name, so widget does not claim
+# widget-ui's notes. The known names are the entries found under the part of
+# reposPath before {repo}. Without {repo} in the pattern there is nothing to
+# tell repos apart by and every note is a candidate.
 #
 # WHOSE NOTES. When dailyNotesPath contains {author}, each subfolder of its base
 # is one contributor and the latest note from each is loaded, most recent first,
@@ -57,11 +61,11 @@
 # files, anything that is not .md and Syncthing conflict copies are never
 # candidates.
 #
-# Skips entirely on a mid-session /compact. Claude Code passes
+# Skips entirely on a mid-session /compact and on a /resume. Claude Code passes
 # {"source": "startup"|"resume"|"clear"|"compact"|"fork", ...} on stdin; a
-# /compact's own summary already carries whatever this hook injected earlier
-# in the same session, so re-injecting here is pure duplication with no
-# fidelity gained. Fails open (still injects) on malformed or missing stdin
+# /compact's own summary, and a resumed session's transcript, already carry
+# whatever this hook injected earlier in the same session, so re-injecting
+# here is pure duplication with no fidelity gained. startup and clear still load. Fails open (still injects) on malformed or missing stdin
 # rather than risk silently skipping a genuine session start - the safer
 # failure mode for a hook whose entire job is not letting context go missing.
 #
@@ -83,7 +87,7 @@ set -u
 
 STDIN_JSON=$(cat 2>/dev/null)
 SOURCE=$(printf '%s' "$STDIN_JSON" | grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)"$/\1/')
-[ "$SOURCE" = "compact" ] && exit 0
+case "$SOURCE" in compact|resume) exit 0 ;; esac
 
 # Must be passed in, not derived - unlike post-merge, this script's cwd is
 # always some OTHER repo, never the vault itself, so `git rev-parse
@@ -164,22 +168,78 @@ DAILY_DIR="$VAULT_ROOT/$DAILY_BASE"
 HAS_AUTHOR=0
 case "$DAILY_PATH" in *"{author}"*) HAS_AUTHOR=1 ;; esac
 
-# The filename pattern as a glob. With {repo} in it, only this repo's notes
-# match; every other {placeholder} becomes a wildcard. Glob characters in the
-# repo name itself are escaped so they match literally.
 NAME_PATTERN="$(config_value filenamePattern)"
-[ -n "$NAME_PATTERN" ] || NAME_PATTERN="{date}-{topic}"
+[ -n "$NAME_PATTERN" ] || NAME_PATTERN="{date}-{repo}-{topic}"
 REPO_FILTERED=0
-NOTE_GLOB="*"
-case "$NAME_PATTERN" in
-  *"{repo}"*)
-    REPO_FILTERED=1
-    REPO_GLOB="$(printf '%s' "$REPO_NAME" | sed 's/[][*?\\]/\\&/g')"
-    NOTE_GLOB="${NAME_PATTERN//\{repo\}/$REPO_GLOB}"
-    NOTE_GLOB="$(printf '%s' "$NOTE_GLOB" | sed -E 's/\{[A-Za-z]+\}/*/g')"
-    ;;
-esac
-NOTE_GLOB="$NOTE_GLOB.md"
+case "$NAME_PATTERN" in *"{repo}"*) REPO_FILTERED=1 ;; esac
+
+# The filename glob for notes about repo $1: the pattern with {repo} replaced by
+# that name and every other {placeholder} a wildcard. Glob characters in the
+# repo name itself are escaped so they match literally.
+glob_for() {
+  local repo_glob g
+  repo_glob="$(printf '%s' "$1" | sed 's/[][*?\\]/\\&/g')"
+  g="${NAME_PATTERN//\{repo\}/$repo_glob}"
+  g="$(printf '%s' "$g" | sed -E 's/\{[A-Za-z]+\}/*/g')"
+  printf '%s.md' "$g"
+  return 0
+}
+
+# The names of the repos the vault documents, one per line, cased per
+# repoNameCase, plus this repo. Found by listing the entries under the part of
+# reposPath before {repo} and stripping the part after it. A reposPath with no
+# {repo} names one fixed doc, so there is nothing to list.
+known_repos() {
+  local base after entry name keep=0
+  [[ "$(config_value repoNameCase)" == keep ]] && keep=1
+  if [[ "$REPOS_PATH" == *"{repo}"* ]]; then
+    base="${REPOS_PATH%%\{repo\}*}"
+    after="${REPOS_PATH#*\{repo\}}"
+    for entry in "$VAULT_ROOT/$base"*; do
+      entry="${entry##*/}"
+      case "$after" in
+        /*) [[ -e "$VAULT_ROOT/$base$entry$after" ]] || continue; name="$entry" ;;
+        *) [[ -n "$after" && "$entry" == *"$after" ]] || continue; name="${entry%"$after"}" ;;
+      esac
+      [[ -n "$name" ]] || continue
+      if [[ "$keep" = 1 ]]; then printf '%s
+' "$name"; else printf '%s
+' "$name" | tr '[:upper:]' '[:lower:]'; fi
+    done
+  fi
+  printf '%s
+' "$REPO_NAME"
+  return 0
+}
+
+# With {repo} in the pattern: the glob for this repo, and the globs of every
+# longer known repo whose name starts with this one's plus a hyphen. A note that
+# matches one of those belongs to the longer repo.
+CURRENT_GLOB="*.md"
+LONGER_GLOBS=()
+if [[ "$REPO_FILTERED" = 1 ]]; then
+  CURRENT_GLOB="$(glob_for "$REPO_NAME")"
+  while IFS= read -r known; do
+    if [[ -n "$known" && "$known" != "$REPO_NAME" && "$known" == "$REPO_NAME-"* ]]; then
+      LONGER_GLOBS+=("$(glob_for "$known")")
+    fi
+  done < <(known_repos)
+fi
+
+# belongs_to_repo <filename>: exit 0 if the note is about this repo.
+belongs_to_repo() {
+  local name="$1" g
+  # The unquoted expansions below are deliberate: the globs are the patterns.
+  # shellcheck disable=SC2254
+  case "$name" in $CURRENT_GLOB) ;; *) return 1 ;; esac
+  if [[ ${#LONGER_GLOBS[@]} -gt 0 ]]; then
+    for g in "${LONGER_GLOBS[@]}"; do
+      # shellcheck disable=SC2254
+      case "$name" in $g) return 1 ;; esac
+    done
+  fi
+  return 0
+}
 
 MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-3}"
 case "$MAX_CONTRIBUTORS" in ""|*[!0-9]*|0) MAX_CONTRIBUTORS=3 ;; esac
@@ -202,13 +262,14 @@ latest_in() {
   local dir="$1" f name d best="" tied="" m best_m=-1 best_f=""
   while IFS= read -r f; do
     name="${f##*/}"
+    belongs_to_repo "$name" || continue
     d="0000-00-00"
     if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
     if [ -z "$best" ] || [[ "$d" > "$best" ]]; then best="$d"; tied="$f"
     elif [ "$d" = "$best" ]; then tied="$tied
 $f"
     fi
-  done < <(cd "$dir" 2>/dev/null && find . -type f -name "$NOTE_GLOB" ! -name '*.sync-conflict-*' ! -path '*/.*' 2>/dev/null)
+  done < <(cd "$dir" 2>/dev/null && find . -type f -name '*.md' ! -name '*.sync-conflict-*' ! -path '*/.*' 2>/dev/null)
   [ -n "$best" ] || return 0
   while IFS= read -r f; do
     m="$(mtime_of "$dir/${f#./}")"
