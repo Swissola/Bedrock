@@ -52,9 +52,12 @@
 # tell repos apart by and every note is a candidate.
 #
 # WHOSE NOTES. When dailyNotesPath contains {author}, each subfolder of its base
-# is one contributor and the latest note from each is loaded, most recent first,
-# up to CONTEXT_MAX_CONTRIBUTORS (default 3) of them. Otherwise everything is
-# one group and just the latest note is loaded. "Latest" is the newest date in
+# is one contributor. YOUR latest note (the folder named after git config
+# user.name, slugged as /vault-log does) is always loaded, first, then the latest
+# note from each other contributor, most recent first, up to
+# CONTEXT_MAX_CONTRIBUTORS (default 3) of them. So a solo install loads one note
+# and a team of four up to four. Otherwise everything is one group and just the
+# latest note is loaded. "Latest" is the newest date in
 # the filename, then the newest file modification time among notes sharing that
 # date: a git checkout stamps every file with the time it was pulled, so the
 # modification time alone would mean "last pulled", not "last written". Hidden
@@ -241,6 +244,11 @@ belongs_to_repo() {
   return 0
 }
 
+# Who you are: the author folder name /vault-log uses, from git config user.name
+# (lowercased, spaces to hyphens). Empty when no name is set, in which case no
+# note counts as yours.
+AUTHOR_SLUG="$(cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null && git config user.name 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
+
 MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-3}"
 case "$MAX_CONTRIBUTORS" in ""|*[!0-9]*|0) MAX_CONTRIBUTORS=3 ;; esac
 
@@ -298,13 +306,28 @@ if [ -d "$DAILY_DIR" ]; then
   fi
 fi
 
-# Most recent first: newest date, then newest modification time.
+# Most recent first: newest date, then newest modification time. Your own latest
+# note is always loaded, first; CONTEXT_MAX_CONTRIBUTORS then limits how many
+# OTHER contributors are loaded after it. TOTAL counts the others.
 SELECTED=""
 TOTAL=0
-if [ -n "$CANDIDATES" ]; then
-  SORTED="$(printf '%s' "$CANDIDATES" | sort -t "$TAB" -k1,1r -k2,2nr)"
-  TOTAL="$(printf '%s\n' "$SORTED" | grep -c .)"
-  SELECTED="$(printf '%s\n' "$SORTED" | head -n "$MAX_CONTRIBUTORS")"
+ALL_SORTED=""
+if [[ -n "$CANDIDATES" ]]; then
+  ALL_SORTED="$(printf '%s' "$CANDIDATES" | sort -t "$TAB" -k1,1r -k2,2nr)"
+  MINE=""
+  OTHERS="$ALL_SORTED"
+  if [[ -n "$AUTHOR_SLUG" ]]; then
+    MINE="$(printf '%s
+' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 == me')"
+    OTHERS="$(printf '%s
+' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 != me')"
+  fi
+  TOTAL="$(printf '%s
+' "$OTHERS" | grep -c . || true)"
+  SELECTED="$(printf '%s
+%s
+' "$MINE" "$(printf '%s
+' "$OTHERS" | head -n "$MAX_CONTRIBUTORS")" | grep . || true)"
 fi
 
 # --- output ------------------------------------------------------------------
@@ -337,11 +360,13 @@ extract_last_update() {
 # Cap on how much of that update is loaded (UPDATE_MAX_LINES to override).
 UPDATE_MAX_LINES="${UPDATE_MAX_LINES:-40}"
 
-# render_note <path> <contributor, or empty>
+# render_note <path> <contributor, or empty> <1 if it is your own note, else 0>
 render_note() {
-  local note="$1" who="$2" rel label context next update total earlier update_note lines
+  local note="$1" who="$2" mine="$3" rel label context next update total earlier update_note lines
   rel="${note#"$VAULT_ROOT/"}"
-  if [ -n "$who" ]; then label="Latest note from $who"; else label="Most recent daily note"; fi
+  if [[ "$mine" = 1 ]]; then label="Your latest note"
+  elif [ -n "$who" ]; then label="Latest note from $who"
+  else label="Most recent daily note"; fi
   context=$(extract_section "$note" "## Context for Future Sessions")
   next=$(extract_section "$note" "## Open Questions / Next Steps")
 
@@ -381,7 +406,9 @@ render_note() {
 
 if [ -n "$SELECTED" ]; then
   while IFS="$TAB" read -r _date _mtime path who; do
-    [ -n "$path" ] && render_note "$path" "$who"
+    mine=0
+    [[ -n "$AUTHOR_SLUG" && "$who" = "$AUTHOR_SLUG" ]] && mine=1
+    [ -n "$path" ] && render_note "$path" "$who" "$mine"
   done <<EOF
 $SELECTED
 EOF

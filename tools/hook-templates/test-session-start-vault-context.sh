@@ -1000,5 +1000,96 @@ test_a_longer_repo_name_does_not_claim_a_shorter_ones_notes
 test_known_repos_come_from_the_repos_path_listing
 test_resume_loads_nothing_but_startup_and_clear_do
 
+# ------------------------------------------- your note always, plus up to N others
+
+# The hook with extra environment variables; the last line is "EXIT=<n>".
+run_hook_env() {  # args: code repo, vault root, stdin, then VAR=value ...
+  local repo="$1" vault="$2" stdin="$3"
+  shift 3
+  ( cd "$repo" && printf '%s' "$stdin" | env VAULT_ROOT="$vault" "$@" bash "$HOOK_SCRIPT" 2>&1; echo "EXIT=$?" )
+  return 0
+}
+
+test_your_note_loads_first_even_when_others_are_newer() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  git -C "$repo" config user.name "Alice Smith"
+  fx_named_note "$vault" alice-smith 2026-10-05 widget a ALICE 202610050900
+  fx_named_note "$vault" bob 2026-10-06 widget b BOB 202610060900
+  fx_named_note "$vault" carol 2026-10-07 widget c CAROL 202610070900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "yours first, then the others newest first" "CONTEXT-ALICE CONTEXT-CAROL CONTEXT-BOB" "$(printf '%s' "$out" | heading_order)"
+  assert_contains "yours is labelled as yours" "## Your latest note: daily-notes/alice-smith/2026-10-05-widget-a.md" "$out"
+  assert_contains "the others keep their author label" "## Latest note from carol: daily-notes/carol/2026-10-07-widget-c.md" "$out"
+  return 0
+}
+
+test_the_limit_counts_others_not_you() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  git -C "$repo" config user.name "Alice Smith"
+  fx_named_note "$vault" alice-smith 2026-10-01 widget a ME 202610010900
+  fx_named_note "$vault" b 2026-10-02 widget b B2 202610020900
+  fx_named_note "$vault" c 2026-10-03 widget c C3 202610030900
+  fx_named_note "$vault" d 2026-10-04 widget d D4 202610040900
+  fx_named_note "$vault" e 2026-10-05 widget e E5 202610050900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "you plus the three most recent others" "CONTEXT-ME CONTEXT-E5 CONTEXT-D4 CONTEXT-C3" "$(printf '%s' "$out" | heading_order)"
+  assert_contains "...and one other contributor is reported as left out" "1 more contributor(s) have notes too" "$out"
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_MAX_CONTRIBUTORS=1)
+  assert_eq "a limit of one: you plus one other" "CONTEXT-ME CONTEXT-E5" "$(printf '%s' "$out" | heading_order)"
+  return 0
+}
+
+test_busier_contributors_never_displace_your_note() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  git -C "$repo" config user.name "Alice Smith"
+  fx_named_note "$vault" alice-smith 2026-09-01 widget old OLDMINE 202609010900
+  fx_named_note "$vault" b 2026-10-02 widget b B2 202610020900
+  fx_named_note "$vault" c 2026-10-03 widget c C3 202610030900
+  fx_named_note "$vault" d 2026-10-04 widget d D4 202610040900
+  fx_named_note "$vault" e 2026-10-05 widget e E5 202610050900
+  fx_named_note "$vault" f 2026-10-06 widget f F6 202610060900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "your note is loaded although five others are newer" "CONTEXT-OLDMINE" "$out"
+  assert_not_contains "...and the oldest of the others is the one left out" "CONTEXT-B2" "$out"
+  return 0
+}
+
+test_no_user_name_means_nothing_is_yours() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-05 widget a A 202610050900
+  fx_named_note "$vault" bob 2026-10-06 widget b B 202610060900
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null)
+  assert_eq "no user.name: both notes load, newest first" "CONTEXT-B CONTEXT-A" "$(printf '%s' "$out" | heading_order)"
+  assert_not_contains "...and none is labelled as yours" "Your latest note" "$out"
+  assert_contains "...and the hook still exits zero" "$EXIT_ZERO" "$out"
+  git -C "$repo" config user.name "Zed Nobody"
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "a name that matches no folder: the same" "CONTEXT-B CONTEXT-A" "$(printf '%s' "$out" | heading_order)"
+  assert_not_contains "...none labelled as yours" "Your latest note" "$out"
+  return 0
+}
+
+test_a_solo_install_loads_one_note() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  git -C "$repo" config user.name "Alice Smith"
+  fx_named_note "$vault" alice-smith 2026-10-04 widget old OLD 202610040900
+  fx_named_note "$vault" alice-smith 2026-10-05 widget new NEW 202610050900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "one contributor: exactly one note, the latest" "CONTEXT-NEW" "$(printf '%s' "$out" | heading_order)"
+  assert_not_contains "...and no 'more contributors' line" "more contributor(s)" "$out"
+  return 0
+}
+
+test_your_note_loads_first_even_when_others_are_newer
+test_the_limit_counts_others_not_you
+test_busier_contributors_never_displace_your_note
+test_no_user_name_means_nothing_is_yours
+test_a_solo_install_loads_one_note
+
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]
