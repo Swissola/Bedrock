@@ -511,7 +511,7 @@ gcount() {
   local n
   n=$(grep -c -F -- "$1" "$2" 2>/dev/null) || true
   echo "${n:-0}"
-  return $?
+  return 0
 }
 
 make_plain_vault() {
@@ -523,7 +523,7 @@ make_plain_vault() {
   mkdir -p "$dir/$(dirname "$doc")"
   echo "original index" > "$dir/$doc"
   echo "$dir"
-  return $?
+  return 0
 }
 
 # Runs the hook against a repo with one relevant change and waits for the
@@ -1067,17 +1067,17 @@ test_the_repo_name_is_lowercased_by_default_and_kept_with_repo_name_case_keep() 
   vault=$(fx_dir); git -C "$vault" init -q -b main
   repo=$(fx_named_repo MixedCase ""); logdir=$(fx_dir)
   ( cd "$repo" && env VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
-  assert_eq "no setting: the log name is lowercased" "mixedcase-post-merge.log" "$(ls "$logdir" | grep -i -- '-post-merge.log')"
+  assert_eq "no setting: the log name is lowercased" "mixedcase-post-merge.log" "$(find "$logdir" -mindepth 1 -maxdepth 1 -iname '*-post-merge.log' -exec basename {} \;)"
   assert_eq "...and so is the doc it asks for" "yes" "$(has_text "repos/mixedcase/index.md not found" "$logdir/mixedcase-post-merge.log")"
   printf -- '---\nrepoNameCase: keep\n---\n' > "$vault/vault-config.md"
   logdir=$(fx_dir)
   ( cd "$repo" && env VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
-  assert_eq "repoNameCase: keep: the log name keeps the folder's case" "MixedCase-post-merge.log" "$(ls "$logdir" | grep -i -- '-post-merge.log')"
+  assert_eq "repoNameCase: keep: the log name keeps the folder's case" "MixedCase-post-merge.log" "$(find "$logdir" -mindepth 1 -maxdepth 1 -iname '*-post-merge.log' -exec basename {} \;)"
   assert_eq "...and so does the doc it asks for" "yes" "$(has_text "repos/MixedCase/index.md not found" "$logdir/MixedCase-post-merge.log")"
   printf -- '---\nrepoNameCase: lower\n---\n' > "$vault/vault-config.md"
   logdir=$(fx_dir)
   ( cd "$repo" && env VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" )
-  assert_eq "repoNameCase: lower: lowercased" "mixedcase-post-merge.log" "$(ls "$logdir" | grep -i -- '-post-merge.log')"
+  assert_eq "repoNameCase: lower: lowercased" "mixedcase-post-merge.log" "$(find "$logdir" -mindepth 1 -maxdepth 1 -iname '*-post-merge.log' -exec basename {} \;)"
   return $?
 }
 

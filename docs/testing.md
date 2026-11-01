@@ -343,7 +343,7 @@ Checks that no single suite can make:
 - every command template carries a version stamp;
 - the test scripts use nothing that the macOS system bash (3.2) lacks, and none of the GNU-only commands (`touch -d`, `readlink -f`, `date -d` without a fallback, `sed -i` without a suffix) that would fail there;
 - every suite cleans up from an exit trap;
-- `shellcheck`, if installed, reports no error-level findings. Locally it is advisory; set `STRUCTURE_SHELLCHECK_STRICT=1` to make it a gate, which CI does on the Ubuntu job (shellcheck comes preinstalled there). Error level is clean across every script (checked with shellcheck 0.11.0). You can run it without installing anything: `docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:stable -S error -x tools/hook-templates/pre-push` (and so on for each script). Warning level has ten findings left, listed in the pull request notes, none of which is an error.
+- `shellcheck`, if installed, reports no findings at warning level or above. Locally it is advisory; set `STRUCTURE_SHELLCHECK_STRICT=1` to make it a gate, which CI does on the Ubuntu job (shellcheck comes preinstalled there). Warning level is clean across every script (checked with shellcheck 0.11.0). You can run it without installing anything: `docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:stable -S warning -x tools/hook-templates/pre-push` (and so on for each script).
 
 ## Adding a hook or a suite
 

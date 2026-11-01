@@ -246,7 +246,7 @@ fi
 # Terraform backup file like foo.tfstate.backup, and it misses anything
 # living inside a .cache/ directory entirely (.cache/some-file.json doesn't
 # end in ".cache"). Found and fixed against exactly this gap.
-changed=$(git diff HEAD@{1} HEAD --name-only 2>/dev/null \
+changed=$(git diff "HEAD@{1}" HEAD --name-only 2>/dev/null \
     | grep -Ev '\.(lock|log|tmp)$' \
     | grep -Ev '\.tfstate($|\.)' \
     | grep -Ev '(^|/)\.cache(/|$)' \
@@ -262,7 +262,7 @@ if [ -z "$changed" ]; then
     exit 0
 fi
 
-old_sha=$(git rev-parse --short HEAD@{1} 2>/dev/null)
+old_sha=$(git rev-parse --short "HEAD@{1}" 2>/dev/null)
 new_sha=$(git rev-parse --short HEAD 2>/dev/null)
 
 # Step 4: background immediately so `git pull` returns right away.

@@ -253,17 +253,17 @@ test_the_manual_workflow_offers_exactly_the_mutation_groups() {
 
 # --- shellcheck, advisory ---------------------------------------------------------------
 
-# Reports error-level findings. Advisory unless STRUCTURE_SHELLCHECK_STRICT=1, in which case
+# Reports warning-level (and above) findings. Advisory unless STRUCTURE_SHELLCHECK_STRICT=1, in which case
 # any finding fails the run (CI sets it). Run it locally without installing anything:
-#   docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:stable -S error -x <scripts>
-test_shellcheck_reports_no_errors() {
+#   docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:stable -S warning -x <scripts>
+test_shellcheck_reports_no_warnings() {
   local f out
   if ! command -v shellcheck >/dev/null 2>&1; then skip "shellcheck (not installed here)"; return 0; fi
   for f in $(shell_scripts); do
-    out=$(shellcheck -S error -x "$f" 2>&1 || true)
-    if [[ -z "$out" ]]; then assert_eq "shellcheck (errors only) $(rel "$f")" "" "$out"
-    elif [[ "${STRUCTURE_SHELLCHECK_STRICT:-0}" = "1" ]]; then assert_eq "shellcheck (errors only) $(rel "$f")" "" "$out"
-    else echo "NOTE: shellcheck reports error-level findings in $(rel "$f") (advisory, set STRUCTURE_SHELLCHECK_STRICT=1 to enforce)" >&2; fi
+    out=$(shellcheck -S warning -x "$f" 2>&1 || true)
+    if [[ -z "$out" ]]; then assert_eq "shellcheck (warning level) $(rel "$f")" "" "$out"
+    elif [[ "${STRUCTURE_SHELLCHECK_STRICT:-0}" = "1" ]]; then assert_eq "shellcheck (warning level) $(rel "$f")" "" "$out"
+    else echo "NOTE: shellcheck reports warning-level findings in $(rel "$f") (advisory, set STRUCTURE_SHELLCHECK_STRICT=1 to enforce)" >&2; fi
   done
   return 0
 }
@@ -286,7 +286,7 @@ test_test_scripts_avoid_gnu_only_commands_without_a_fallback
 test_every_suite_cleans_up_after_itself_with_a_trap
 test_mutation_config_is_well_formed_and_every_mutant_applies
 test_the_manual_workflow_offers_exactly_the_mutation_groups
-test_shellcheck_reports_no_errors
+test_shellcheck_reports_no_warnings
 
 echo "--- $PASS passed, $FAIL failed, $SKIPS skipped ---"
 [[ "$FAIL" -eq 0 ]]

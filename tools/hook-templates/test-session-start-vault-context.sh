@@ -47,7 +47,7 @@ make_code_repo() {
   git -C "$dir" init -q -b main
   git -C "$dir" remote add origin "https://example.com/org/${name}.git"
   echo "$dir"
-  return $?
+  return 0
 }
 
 # A daily note with both forward-looking sections plus a history section.
@@ -172,7 +172,7 @@ personal_vault() {  # builds a vault using the personal layout plus decoys in th
   touch -t 202610050800 "$vault/Inbox/daily-notes/2026-10-05-widget-x.md"
   touch -t 202610051200 "$vault/daily-notes/alice/2026-10-05-decoy.md"
   echo "$vault"
-  return $?
+  return 0
 }
 
 test_config_repos_path_and_daily_notes_path() {
@@ -251,7 +251,7 @@ make_vault_with_doc() {
   local v; v=$(mktemp -d)
   mkdir -p "$v/repos/widget"; echo "$DOC_MARKER" > "$v/repos/widget/index.md"
   echo "$v"
-  return $?
+  return 0
 }
 
 test_latest_update_section_is_loaded() {
