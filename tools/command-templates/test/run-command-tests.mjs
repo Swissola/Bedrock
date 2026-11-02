@@ -77,6 +77,20 @@ const GIT_READS = ['git config user.name', 'git config --get:*', 'git rev-parse:
 const ALLOWED_SHELL = [...GIT_READS, 'hostname'].flatMap((p) => [`Bash(${p})`, `PowerShell(${p})`]);
 // The spawned claude gets a throwaway home so it cannot touch real config or hooks. That
 // also hides a stored login, so it needs ANTHROPIC_API_KEY; without one it keeps the real home.
+// The claude CLI is found once, by an absolute path, from absolute PATH entries only. A
+// relative or empty entry (".", "") would make a file in the current directory win.
+// CLAUDE_BIN overrides the search.
+let claudePath = null;
+function claudeBin() {
+  if (claudePath) return claudePath;
+  if (process.env.CLAUDE_BIN) return (claudePath = path.resolve(process.env.CLAUDE_BIN));
+  const names = process.platform === 'win32' ? ['claude.exe', 'claude.cmd', 'claude'] : ['claude'];
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!path.isAbsolute(dir)) continue;
+    for (const n of names) { const f = path.join(dir, n); if (fs.existsSync(f)) return (claudePath = f); }
+  }
+  console.error('could not find the claude CLI on PATH (set CLAUDE_BIN to its full path)'); process.exit(2);
+}
 let tmpHome = null;
 function claudeEnv() {
   if (!process.env.ANTHROPIC_API_KEY) return process.env;
@@ -117,7 +131,7 @@ function runCommand({ vault, repo, template, args = '', system = '', stubEnv = n
     '--allowedTools', 'mcp__obsidian__*', 'Edit', 'Read', ...ALLOWED_SHELL,
     '--disallowedTools', 'Bash(git * -c *)', 'PowerShell(git * -c *)'];
   if (system) a.push('--append-system-prompt', system);
-  const r = spawnSync('claude', a, { cwd: repo, encoding: 'utf8', env: claudeEnv() });
+  const r = spawnSync(claudeBin(), a, { cwd: repo, encoding: 'utf8', env: claudeEnv() });
   const { calls, final } = parseEvents(r.stdout || '');
   if (r.error) console.log(`  (could not run claude: ${r.error.message})`);
   // A run that made no vault call at all usually died early (not logged in, bad token,
