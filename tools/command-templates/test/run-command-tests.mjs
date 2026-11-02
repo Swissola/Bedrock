@@ -81,15 +81,19 @@ const ALLOWED_SHELL = [...GIT_READS, 'hostname'].flatMap((p) => [`Bash(${p})`, `
 // relative or empty entry (".", "") would make a file in the current directory win.
 // CLAUDE_BIN overrides the search.
 let claudePath = null;
-function claudeBin() {
-  if (claudePath) return claudePath;
-  if (process.env.CLAUDE_BIN) return (claudePath = path.resolve(process.env.CLAUDE_BIN));
+function findClaude() {
+  if (process.env.CLAUDE_BIN) return path.resolve(process.env.CLAUDE_BIN);
   const names = process.platform === 'win32' ? ['claude.exe', 'claude.cmd', 'claude'] : ['claude'];
   for (const dir of (process.env.PATH || '').split(path.delimiter)) {
     if (!path.isAbsolute(dir)) continue;
-    for (const n of names) { const f = path.join(dir, n); if (fs.existsSync(f)) return (claudePath = f); }
+    for (const n of names) { const f = path.join(dir, n); if (fs.existsSync(f)) return f; }
   }
-  console.error('could not find the claude CLI on PATH (set CLAUDE_BIN to its full path)'); process.exit(2);
+  return null;
+}
+function claudeBin() {
+  claudePath ??= findClaude();
+  if (!claudePath) { console.error('could not find the claude CLI on PATH (set CLAUDE_BIN to its full path)'); process.exit(2); }
+  return claudePath;
 }
 let tmpHome = null;
 function claudeEnv() {
