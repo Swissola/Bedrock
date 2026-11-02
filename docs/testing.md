@@ -184,7 +184,7 @@ Added:
 
 ### `tools/hook-templates/test-session-start-vault-context.sh`: the `session-start-vault-context` hook
 
-Loads the repo's vault doc and, for each contributor, the latest daily note about this repo (forward-looking sections only) at session start.
+Loads the repo's vault doc, your own latest note about this repo and the latest note from up to three other contributors (trimmed), and a list of open items across all contributors, at session start. Every hook run in the tests sees an empty global git config, and the fixture repo's `user.name` is `alice`.
 
 Original scenarios: no vault root, no repo doc, the default layout, the latest note from each contributor, `compact` and malformed stdin, a note with no forward sections, no notes, `vault-config.md` paths and quoting and CRLF, an unclosed config, unsafe config paths, the `{author}` placeholder, and the appended-update handling (latest only, truncation, position, update-only notes).
 
@@ -193,7 +193,7 @@ Added:
 | Test | What it checks |
 |---|---|
 | `the_hook_always_exits_zero` | Exit 0 with no vault, on compact, on a normal load, with no repo doc and with a vault that does not exist. |
-| `every_source_except_compact_injects_context` | `startup`, `resume`, `clear`, `fork` and an unknown source all load. |
+| `every_source_except_compact_and_resume_injects_context` | `startup`, `clear`, `fork` and an unknown source all load. |
 | `compact_is_recognised_whatever_the_json_layout` | Spaces around the colon, other fields, several lines; and the word "compact" in another field does not skip. |
 | `repo_name_falls_back_to_the_folder_name_without_an_origin` | No `origin`: the folder name is used. |
 | `the_repo_is_named_after_its_folder_not_its_remote` | A folder and a remote with different names: the folder's doc is loaded. |
@@ -201,7 +201,7 @@ Added:
 | `the_case_setting_also_decides_which_notes_belong_to_the_repo` | With `keep`, a note named in a different case is a different repo's. |
 | `a_linked_worktree_is_the_same_repo_as_its_main_checkout` / `a_subfolder_of_the_repo_is_still_the_repo` / `claude_project_dir_wins_over_the_working_directory` / `outside_a_git_repo_the_folder_name_is_used` | The ways the hook can be started, all naming the repo correctly. |
 | `every_contributors_latest_note_is_loaded_most_recent_first` / `only_each_contributors_newest_note_is_loaded` | One note per contributor, newest first, labelled with who wrote it. |
-| `the_contributor_limit_defaults_to_three_and_can_be_changed` | Three by default with a "more contributors" line, `CONTEXT_MAX_CONTRIBUTORS` 1 and 9, and a non-number falling back to three. |
+| `the_contributor_limit_defaults_to_three_and_can_be_changed` | With no note of yours, three others by default with a "more contributors" line, `CONTEXT_MAX_CONTRIBUTORS` 1 and 9, and a non-number falling back to three. |
 | `the_filename_date_beats_the_modification_time` / `the_modification_time_breaks_a_tie_on_the_same_date` | A git checkout's pull times do not decide which note is latest; same date: the newer file. |
 | `another_repos_newer_note_is_never_loaded` / `a_repo_with_no_notes_says_so_even_when_others_have_some` | The repo filter, and "No daily notes yet for this repo." |
 | `the_repo_filter_needs_the_whole_name_between_separators` / `glob_characters_in_a_repo_name_match_literally` | `widgetry` and `mywidget` are not `widget`; brackets and a star in a repo name are literal. |
@@ -221,6 +221,36 @@ Added:
 | `a_repos_path_without_a_placeholder_names_one_fixed_doc` | A fixed doc path. |
 | `config_values_with_trailing_comments_and_empty_values` | Trailing `# comment` stripped; empty values use defaults. |
 | `a_longer_config_key_is_not_mistaken_for_a_shorter_one` | `reposPathExtra` is not read as `reposPath`. |
+| `the_default_pattern_names_the_repo` | With no config the pattern is `{date}-{repo}-{topic}`: this repo's note loads, a newer note named for another repo does not. |
+| `a_longer_repo_name_does_not_claim_a_shorter_ones_notes` | `widget` and `widget-ui` both documented: each repo gets only its own notes. |
+| `known_repos_come_from_the_repos_path_listing` | The known repo names are listed from the configured `reposPath`, not a fixed folder. |
+| `resume_loads_nothing_but_startup_and_clear_do` | `resume` prints nothing; `startup` and `clear` still load. |
+| `your_note_loads_first_even_when_others_are_newer` | Your note (folder from `git config user.name`) comes first and is labelled `Your latest note`, then the others newest first. |
+| `the_limit_counts_others_not_you` | Yours plus three others by default; `CONTEXT_MAX_CONTRIBUTORS=1` gives yours plus one. |
+| `busier_contributors_never_displace_your_note` | Five newer contributors do not push your older note out. |
+| `no_user_name_means_nothing_is_yours` | No `user.name`, or one that matches no folder: the others load, nothing is labelled yours, exit 0. |
+| `a_solo_install_loads_one_note` | One contributor: exactly their latest note and no "more contributors" line. |
+| `others_notes_get_context_only` | Yours has the context, open questions and latest update; another contributor's has the context only. |
+| `no_checkbox_lines_appear_in_loaded_notes` | No loaded note, whether yours, another's or loaded in full, shows a `- [ ]`, `[x]`, `[-]` or `[>]` line. |
+| `the_tag_line_is_shown_for_each_loaded_note` | Inline and list-form `tags` print as a `Tags:` line under each loaded note. |
+| `open_items_are_listed_once_with_owner_and_age` | Each open item appears once, with its owner and age. |
+| `items_from_contributors_beyond_the_limit_are_still_listed` | Contributors whose notes are not loaded still have their open items listed. |
+| `an_item_older_than_the_threshold_is_flagged_stale_and_listed_first` | `staleOpenItemDays` (default 30, configurable) decides `stale`; stale items come first. |
+| `an_item_exactly_at_the_threshold_is_not_stale_and_one_day_over_is` | 30 days is not stale, 31 is. |
+| `opened_date_beats_the_note_date` | An `opened YYYY-MM-DD` on a carried line is the age that counts. |
+| `the_list_is_capped_with_an_and_n_more_line` | `CONTEXT_MAX_OPEN_ITEMS` (default 10) with an "and N more" line. |
+| `odd_item_lines_never_crash_or_read_stale_by_accident` | CRLF, trailing spaces, `[X]`, a malformed opened date and a future-dated note: exit 0 and never stale. |
+| `closed_items_are_not_listed` | `[x]`, `[-]` and `[>]` lines never appear in the list. |
+| `a_very_long_open_item_is_cut` | An item over 300 characters is cut and marked `(cut)`. |
+| `over_budget_drops_the_furthest_back_other_note_first` | Over `CONTEXT_MAX_CHARS` the oldest other note goes first and the output says so. |
+| `your_note_and_the_open_items_are_never_cut` | A tiny budget still prints the repo doc, your note and the list, with an "exceeds on its own" line. |
+| `within_budget_prints_everything_and_no_left_out_line` | No budget messages when everything fits. |
+| `a_bad_budget_value_falls_back_to_the_default` | `abc`, `0` and empty fall back to 12000. |
+| `a_repo_with_no_notes_loads_the_newest_older_note` | The newest note with no repo in its name loads, labelled as older, with an "at least N" count. |
+| `the_fallback_stops_once_the_repo_has_a_note` | As soon as the repo has a note of its own, older notes are not loaded or counted. |
+| `an_older_note_naming_another_repo_is_skipped_and_never_loaded` | Frontmatter `repo` of another repo rules a note out. |
+| `at_most_five_older_notes_are_opened` | Only the five newest older notes have their frontmatter read. |
+| `a_note_whose_frontmatter_names_this_repo_counts_as_its_own` | Loaded under the normal label, not as an older note. |
 
 ### `tools/testing/test-install-claude-config.sh`: the installer
 

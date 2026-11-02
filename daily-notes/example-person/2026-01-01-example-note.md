@@ -1,6 +1,7 @@
 ---
 title: Example daily note
-tags: [example]
+repo: widget-service
+tags: [daily-note, widget-service, example]
 date: 2026-01-01
 ---
 
@@ -35,3 +36,4 @@ This is what a filled-in daily note looks like. Real ones will be written by you
 ## Open Questions / Next Steps
 
 - [ ] Replace this example with your team's own first real daily note.
+- [ ] Review the generated widget-service doc with a teammate (from [[2025-12-20-widget-service-first-draft]], opened 2025-12-20)

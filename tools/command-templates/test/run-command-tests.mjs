@@ -92,16 +92,16 @@ const walk = (root, base = root) => fs.existsSync(root) ? fs.readdirSync(root, {
 const read = (v, rel) => fs.readFileSync(path.join(v, rel), 'utf8');
 
 // Runs one command template headlessly and returns { calls, files, final }.
-function runCommand({ vault, repo, template, args = '', system = '' }) {
+function runCommand({ vault, repo, template, args = '', system = '', stubEnv = null }) {
   const cmdDir = path.join(repo, '.claude', 'commands'); fs.mkdirSync(cmdDir, { recursive: true });
   fs.copyFileSync(path.join(templates, `${template}.md`), path.join(cmdDir, 'tpl-under-test.md'));
   const server = backend === 'rest-api'
-    ? { command: process.execPath, args: [stub, vault] }
+    ? { command: process.execPath, args: [stub, vault], ...(stubEnv ? { env: stubEnv } : {}) }
     : { command: 'npx', args: ['-y', '@bitbonsai/mcpvault@latest', vault.split(path.sep).join('/')] };
   const mcp = path.join(path.dirname(repo), 'mcp.json');
   fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { obsidian: server } }));
   const a = ['-p', `/tpl-under-test ${args}`.trim(), '--mcp-config', mcp, '--strict-mcp-config', '--model', model, '--max-turns', '25', '--verbose', '--output-format', 'stream-json',
-    '--allowedTools', 'mcp__obsidian__*', 'Edit', 'Read', 'Bash(git config:*)', 'Bash(git rev-parse:*)', 'Bash(git remote:*)', 'Bash(hostname)', 'PowerShell(*)'];
+    '--allowedTools', 'mcp__obsidian__*', 'Edit', 'Read', 'Bash(git config:*)', 'Bash(git rev-parse:*)', 'Bash(git -C:*)', 'Bash(git remote:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git cat-file:*)', 'Bash(git merge-base:*)', 'Bash(git rev-list:*)', 'Bash(hostname)', 'PowerShell(*)'];
   if (system) a.push('--append-system-prompt', system);
   const r = sh('claude', a, repo);
   const { calls, final } = parseEvents(r.stdout || '');
@@ -137,13 +137,40 @@ const FIVE = ['What Was Done', 'Decisions Made & Why', 'Problems Solved', 'Conte
 const firstRead = (c) => c.find((x) => x.op === 'read')?.path;
 const usedOnly = (calls) => calls.every((c) => backend === 'rest-api' ? c.name.startsWith('vault_') : !c.name.startsWith('vault_'));
 
+const DOC = 'repos/widget/index.md';
+const headFull = (repo) => sh('git', ['rev-parse', 'HEAD'], repo).stdout.trim();
+const frontmatter = (t) => t.split('---')[1] || '';
+const sourceCommit = (f) => (f.match(/^source-commit: (\S+)$/m) || [])[1] || '';
+// A repo with a second commit, and a doc whose source-commit is the first one (or `sc` if given).
+function seeded(marker, sc) {
+  const { repo } = mkRepo('widget'); const first = headFull(repo);
+  fs.appendFileSync(path.join(repo, 'app.py'), "print('second change')\n");
+  sh('git', ['commit', '-qam', 'change app'], repo);
+  const doc = `---\nrepo: widget\nlast-populated: 2026-01-01\nsource-commit: ${sc || first.slice(0, 7)}\ntags: [repo-doc, widget]\n---\n\n# widget\n\nOld generated text.\n\n## Hand-written notes\n${marker}\n`;
+  return { repo, vault: mkVault({ 'index.md': DEFAULT_HUB, [DOC]: doc }) };
+}
+
+const TODAY = new Date().toISOString().slice(0, 10);
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+// A daily note: a context section marker and Open Questions lines.
+const dnote = (marker, items = '', fmRepo = '') => `---\ntitle: ${marker}\n${fmRepo ? `repo: ${fmRepo}\n` : ''}---\n\n## Context for Future Sessions\nCTX-${marker}\n\n## Open Questions / Next Steps\n${items}`;
+const readPaths = (r) => r.calls.filter((c) => c.op === 'read').map((c) => c.path);
+const DOCS = { 'repos/widget/index.md': '# widget\n', 'repos/gadget/index.md': '# gadget\n', 'repos/gizmo/index.md': '# gizmo\n' };
+
+// A session that worked in three repos: widget (the working directory) plus gadget and gizmo, given by path.
+function threeRepoSession(gadget, gizmo, extra = '') {
+  return `TEST HARNESS: synthetic session, there is no real work to summarise. Treat the session as having done exactly this. In the working repo widget you edited the config loader (marker WIDGET-WORK-1). In the separate repo at ${gadget} you ran its tests and fixed a failing one (marker GADGET-WORK-2). In the separate repo at ${gizmo} you only read and investigated its code and made no edits (marker GIZMO-WORK-3). The common theme across all three was hooks configuration. ${extra}`;
+}
+const fmOf = (t) => t.split('---')[1] || '';
+const notesOf = (r) => r.files.filter((f) => f.startsWith('daily-notes/'));
+
 const scenarios = [
   { name: 'log: default config, new note', run() {
     const { repo } = mkRepo('widget'); const vault = mkVault({ 'index.md': DEFAULT_HUB });
     fs.mkdirSync(path.join(vault, 'daily-notes', 'test-user'), { recursive: true });
     const r = runCommand({ vault, repo, template: 'vault-log', args: 'first-topic', system: SESSION });
-    const note = r.files.find((f) => /^daily-notes\/test-user\/\d{4}-\d\d-\d\d-first-topic\.md$/.test(f));
-    check('writes daily-notes/<author>/<date>-<topic>.md', !!note, r.files.join(', '));
+    const note = r.files.find((f) => /^daily-notes\/test-user\/\d{4}-\d\d-\d\d-widget-first-topic\.md$/.test(f));
+    check('writes daily-notes/<author>/<date>-<repo>-<topic>.md', !!note, r.files.join(', '));
     const t = note ? read(vault, note) : '';
     check('the six default sections, in order', sections(t).join('|') === SIX.join('|'), sections(t).join('|'));
     check('has the # YYYY-MM-DD — heading', /^# \d{4}-\d\d-\d\d — /m.test(t));
@@ -153,9 +180,9 @@ const scenarios = [
   } },
   { name: 'log: default config, same-day second topic appends by full rewrite', run() {
     const { repo } = mkRepo('widget');
-    const first = '---\ntitle: First\ntags: [x]\ndate: 2026-10-05\n---\n\n# 2026-10-05 — First\n\n## What Was Done\nORIGINAL-CONTENT-MARKER\n\n## Open Questions / Next Steps\n- [ ] one\n';
+    const first = '---\ntitle: First\nrepo: widget\ntags: [x]\ndate: 2026-10-05\n---\n\n# 2026-10-05 — First\n\n## What Was Done\nORIGINAL-CONTENT-MARKER\n\n## Open Questions / Next Steps\n- [ ] one\n';
     const today = new Date().toISOString().slice(0, 10);
-    const vault = mkVault({ [`daily-notes/test-user/${today}-first-topic.md`]: first });
+    const vault = mkVault({ [`daily-notes/test-user/${today}-widget-first-topic.md`]: first });
     const r = runCommand({ vault, repo, template: 'vault-log', args: 'second-topic', system: SESSION + ' This is a LATER part of the same session: additionally you tested the append behaviour.' });
     const notes = r.files.filter((f) => f.startsWith('daily-notes/'));
     check('still exactly one note (appended, not a new file)', notes.length === 1, notes.join(', '));
@@ -212,6 +239,205 @@ const scenarios = [
     check('no hub index.md created at the root', !files.includes('index.md'));
     check('no repos/ folder created', !files.some((f) => f.startsWith('repos/')));
   } },
+  { name: 'populate: writes repo, last-populated, source-commit, tags and a hand-written section', run() {
+    const { repo } = mkRepo('widget'); const vault = mkVault({ 'index.md': DEFAULT_HUB });
+    runCommand({ vault, repo, template: 'vault-populate' });
+    const t = fs.existsSync(path.join(vault, DOC)) ? read(vault, DOC) : '';
+    const f = frontmatter(t);
+    check('frontmatter names the repo', /^repo: widget$/m.test(f), f);
+    check('last-populated is a date', /^last-populated: \d{4}-\d\d-\d\d$/m.test(f), f);
+    const sc = sourceCommit(f);
+    check('source-commit is the current HEAD', sc.length >= 7 && headFull(repo).startsWith(sc), sc);
+    check('tags include repo-doc and the repo name', /repo-doc/.test(f) && /widget/.test(f.split('tags')[1] || ''), f);
+    check('has a Hand-written notes section', /^## Hand-written notes$/m.test(t));
+  } },
+  { name: 'populate: a second run at the same commit stops with up to date and writes nothing', run() {
+    const { repo } = mkRepo('widget'); const vault = mkVault({ 'index.md': DEFAULT_HUB });
+    runCommand({ vault, repo, template: 'vault-populate' });
+    const r = runCommand({ vault, repo, template: 'vault-populate' });
+    check('no write call on the second run', !r.calls.some((c) => c.op === 'write'), r.calls.map((c) => c.name).join(','));
+    check('it says the doc is up to date', /up to date/i.test(r.final), r.final.slice(0, 160));
+  } },
+  { name: 'populate: a refresh keeps the hand-written notes and moves source-commit on', run() {
+    const { repo, vault } = seeded('MARKER-HAND-9', null);
+    runCommand({ vault, repo, template: 'vault-populate' });
+    const t = read(vault, DOC);
+    check('the hand-written marker is kept', t.includes('MARKER-HAND-9'));
+    check('the Hand-written notes heading is kept', /^## Hand-written notes$/m.test(t));
+    const sc = sourceCommit(frontmatter(t));
+    check('source-commit is now HEAD', sc.length >= 7 && headFull(repo).startsWith(sc), sc);
+  } },
+  { name: 'populate: stops when the doc changed between the read and the write', run() {
+    if (backend !== 'rest-api') { console.log('  (skipped: needs the stub)'); return; }
+    const { repo, vault } = seeded('MARKER-HAND-9', null);
+    const r = runCommand({ vault, repo, template: 'vault-populate', stubEnv: { STUB_MUTATE_AFTER_READ: `${DOC}::\nEDITED-BY-SOMEONE-ELSE\n` } });
+    check('the other person\'s edit is still there', read(vault, DOC).includes('EDITED-BY-SOMEONE-ELSE'));
+    check('no write to the doc', !r.calls.some((c) => c.op === 'write' && c.path === DOC), r.calls.map((c) => c.name + ':' + c.path).join(','));
+    check('it reports the change', /changed|stop|again|re-?run/i.test(r.final), r.final.slice(0, 160));
+  } },
+  { name: 'populate: a worktree is documented under the main repo name', run() {
+    const { repo, dir } = mkRepo('widget'); const wt = path.join(dir, 'feature-x');
+    sh('git', ['worktree', 'add', '-q', '-b', 'feature', wt], repo);
+    const vault = mkVault({ 'index.md': DEFAULT_HUB });
+    const r = runCommand({ vault, repo: wt, template: 'vault-populate' });
+    check('the doc is written under widget', r.files.includes(DOC), r.files.join(', '));
+    check('nothing is named after the worktree folder', !r.files.some((f) => f.includes('feature-x')), r.files.join(', '));
+  } },
+  { name: 'populate: a source-commit that is not in the history falls back to a full survey', run() {
+    const { repo, vault } = seeded('MARKER-HAND-9', 'deadbee');
+    runCommand({ vault, repo, template: 'vault-populate' });
+    const sc = sourceCommit(frontmatter(read(vault, DOC)));
+    check('source-commit is now HEAD', sc.length >= 7 && headFull(repo).startsWith(sc), sc);
+  } },
+  { name: 'context: loads your latest note and up to three others for this repo only', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB,
+      'daily-notes/test-user/2026-10-01-widget-a.md': dnote('MINE'), 'daily-notes/alice/2026-10-05-widget-a.md': dnote('ALICE'),
+      'daily-notes/bob/2026-10-06-widget-b.md': dnote('BOB'), 'daily-notes/carol/2026-10-07-widget-c.md': dnote('CAROL'),
+      'daily-notes/dave/2026-10-08-widget-d.md': dnote('DAVE'), 'daily-notes/erin/2026-10-09-gadget-e.md': dnote('ERINGADGET') });
+    const r = runCommand({ vault, repo, template: 'vault-context' });
+    const reads = readPaths(r);
+    for (const who of ['test-user', 'dave', 'carol', 'bob']) check(`read ${who}'s note`, reads.some((p) => p.startsWith(`daily-notes/${who}/`)), reads.join(', '));
+    check('did not show the fourth other contributor (its open items may still be read)', !r.final.includes('CTX-ALICE'), r.final.slice(0, 200));
+    check('never read the note for another repo', !reads.some((p) => p.includes('gadget-e')), reads.join(', '));
+  } },
+  { name: 'context: with only another repo\'s notes it loads nothing from them', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'daily-notes/erin/2026-10-09-gadget-e.md': dnote('ERINGADGET') });
+    const r = runCommand({ vault, repo, template: 'vault-context' });
+    check('never read the gadget note', !readPaths(r).some((p) => p.includes('gadget-e')), readPaths(r).join(', '));
+    check('says there are no notes for this repo yet', /no (daily )?notes|nothing/i.test(r.final), r.final.slice(0, 200));
+  } },
+  { name: 'context: open items are listed once with owner, stale ones first', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB,
+      [`daily-notes/alice/${daysAgo(80)}-widget-a.md`]: dnote('ALICE', '- [ ] OLD-ITEM-ALICE\n'),
+      [`daily-notes/test-user/${daysAgo(2)}-widget-b.md`]: dnote('MINE', '- [ ] NEW-ITEM-MINE\n') });
+    const r = runCommand({ vault, repo, template: 'vault-context' });
+    const f = r.final;
+    check('both items are shown', f.includes('OLD-ITEM-ALICE') && f.includes('NEW-ITEM-MINE'), f.slice(0, 300));
+    check('the old one is flagged stale', /stale/i.test(f));
+    check('the stale one comes first', f.indexOf('OLD-ITEM-ALICE') < f.indexOf('NEW-ITEM-MINE'));
+  } },
+  { name: 'context: with nothing for the repo it loads the newest older note and labels it', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'daily-notes/test-user/2026-10-05-old-a.md': dnote('OLDA'), 'daily-notes/test-user/2026-10-06-old-b.md': dnote('OLDB') });
+    const r = runCommand({ vault, repo, template: 'vault-context' });
+    check('read the newest older note', readPaths(r).some((p) => p.includes('old-b')), readPaths(r).join(', '));
+    check('did not show the other older note', !r.final.includes('CTX-OLDA') && r.final.includes('CTX-OLDB'), r.final.slice(0, 200));
+    check('labelled as an older note of unknown repo', /older/i.test(r.final) && /unknown|no repo/i.test(r.final), r.final.slice(0, 300));
+  } },
+  { name: 'context: hook output already in the conversation is not reloaded', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'daily-notes/test-user/2026-10-05-widget-a.md': dnote('MINE') });
+    const hook = '--- Vault context for widget (auto-loaded) ---\n## repos/widget/index.md\n# widget\n## Your latest note: daily-notes/test-user/2026-10-05-widget-a.md\nCTX-MINE\n## Open items for widget\n- test-user (3d): ITEM-ALREADY-LISTED';
+    const r = runCommand({ vault, repo, template: 'vault-context', system: `The session-start hook has already run, and its output is part of this conversation:\n${hook}` });
+    check('did not read any daily note again', !readPaths(r).some((p) => p.startsWith('daily-notes/')), readPaths(r).join(', '));
+    check('says it is already loaded', /already/i.test(r.final), r.final.slice(0, 200));
+  } },
+  { name: 'context: a topic search returns at most 5 notes and says how many more matched', run() {
+    if (backend === 'rest-api') { console.log('  (skipped: the stub has no search tool)'); return; }
+    const { repo } = mkRepo('widget'); const files = { ...DOCS, 'index.md': DEFAULT_HUB };
+    for (let i = 1; i <= 8; i++) files[`daily-notes/a${i}/2026-10-0${i}-widget-x.md`] = dnote(`FROB${i}`, '').replace('CTX-', 'frobnicate CTX-');
+    const r = runCommand({ vault: mkVault(files), repo, template: 'vault-context', args: 'frobnicate' });
+    check('read at most 5 daily notes', readPaths(r).filter((p) => p.startsWith('daily-notes/')).length <= 5, readPaths(r).join(', '));
+    check('says how many more matched', /3 more|more/i.test(r.final), r.final.slice(0, 200));
+  } },
+  { name: 'log: three repos in one session give three notes, each with its own tags and only its own work', run() {
+    const { repo } = mkRepo('widget'); const g = mkRepo('gadget'); const z = mkRepo('gizmo');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'hooks-config', system: threeRepoSession(g.repo, z.repo) });
+    const notes = notesOf(r);
+    const by = Object.fromEntries(['widget', 'gadget', 'gizmo'].map((n) => [n, notes.find((f) => new RegExp(`^daily-notes/test-user/\\d{4}-\\d\\d-\\d\\d-${n}-`).test(f))]));
+    check('one note per repo, named for it', Object.values(by).every(Boolean), notes.join(', '));
+    const marker = { widget: 'WIDGET-WORK-1', gadget: 'GADGET-WORK-2', gizmo: 'GIZMO-WORK-3' };
+    const tagSets = [];
+    for (const [n, f] of Object.entries(by)) {
+      if (!f) continue;
+      const t = read(vault, f); const fm = fmOf(t);
+      check(`${n}: frontmatter repo is ${n}`, new RegExp(`^repo: ${n}$`, 'm').test(fm), fm);
+      check(`${n}: tags include daily-note and the repo`, /daily-note/.test(fm) && (fm.split('tags')[1] || '').includes(n), fm);
+      check(`${n}: holds its own work`, t.includes(marker[n]));
+      check(`${n}: holds none of the other repos' work`, Object.entries(marker).every(([o, m]) => o === n || !t.includes(m)));
+      tagSets.push(new Set((fm.split('tags')[1] || '').match(/[a-z][a-z-]+/g) || []));
+    }
+    const shared = tagSets.length === 3 ? [...tagSets[0]].filter((x) => tagSets.every((s2) => s2.has(x)) && !['daily-note', 'widget', 'gadget', 'gizmo', 'repo'].includes(x)) : [];
+    check('a theme tag is shared by all three notes', shared.length > 0, [...(tagSets[0] || [])].join(','));
+  } },
+  { name: 'log: a repo that was only glanced at gets no note', run() {
+    const { repo } = mkRepo('widget'); const g = mkRepo('gadget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'glance', system: `TEST HARNESS: synthetic session. In the working repo widget you edited the config loader (marker WIDGET-WORK-1). In the other repo at ${g.repo} you ran one command, cat README.md, to answer a quick question and did nothing else there.` });
+    check('a note for widget', notesOf(r).some((f) => f.includes('-widget-')), notesOf(r).join(', '));
+    check('no note for gadget', !notesOf(r).some((f) => f.includes('-gadget-')), notesOf(r).join(', '));
+  } },
+  { name: 'log: a repo investigated with no edits gets a note', run() {
+    const { repo } = mkRepo('widget'); const z = mkRepo('gizmo');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'investigate', system: `TEST HARNESS: synthetic session. In the working repo widget you edited the config loader (marker WIDGET-WORK-1). In the separate repo at ${z.repo} you only read and investigated its code over a long stretch and made no edits (marker GIZMO-WORK-3).` });
+    check('a note for gizmo although nothing was edited there', notesOf(r).some((f) => f.includes('-gizmo-')), notesOf(r).join(', '));
+  } },
+  { name: 'log: default config appends only to todays note for the same repo', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [`daily-notes/test-user/${TODAY}-widget-first.md`]: dnote('FIRST', '', 'widget'), [`daily-notes/test-user/${TODAY}-gadget-other.md`]: dnote('OTHERREPO', '', 'gadget') });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'second', system: SESSION });
+    const mine = notesOf(r).filter((f) => f.includes('-widget-'));
+    check('still one widget note', mine.length === 1, notesOf(r).join(', '));
+    check('it gained an Update section', mine[0] && /^## Update/m.test(read(vault, mine[0])));
+    check('the gadget note is untouched', read(vault, `daily-notes/test-user/${TODAY}-gadget-other.md`) === dnote('OTHERREPO', '', 'gadget'));
+  } },
+  { name: 'log: appending to todays note leaves its open items in place and keeps new ones out of the Update section', run() {
+    const { repo } = mkRepo('widget'); const today = `daily-notes/test-user/${TODAY}-widget-first.md`;
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [today]: dnote('FIRST', `- [ ] EARLIER-ITEM
+`, 'widget') });
+    runCommand({ vault, repo, template: 'vault-log', args: 'second', system: `TEST HARNESS: synthetic second session today in repo widget. Nothing touched EARLIER-ITEM. You found one new follow-up for the next session: NEW-FOLLOWUP.` });
+    const t = read(vault, today);
+    check('the earlier item is still open and was not carried', /^- \[ \] EARLIER-ITEM/m.test(t) && !/^- \[>\]/m.test(t), t.slice(-400));
+    check('the new follow-up is in the Open Questions list', /## Open Questions \/ Next Steps[\s\S]*NEW-FOLLOWUP/.test(t.split(/^## Update/m)[0]), t.slice(-400));
+  } },
+  { name: 'log: reconcile ticks done, drops dropped, carries untouched silently with its opened date', run() {
+    const { repo } = mkRepo('widget'); const prev = `daily-notes/test-user/${daysAgo(3)}-widget-prev.md`;
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [prev]: dnote('PREV', `- [ ] DONE-ITEM\n- [ ] DROP-ITEM\n- [ ] UNTOUCHED-ITEM (opened ${daysAgo(10)})\n`, 'widget') });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'reconcile', system: `TEST HARNESS: synthetic session in repo widget. You finished the work behind DONE-ITEM (commit abc1234, tests pass). The user said to drop DROP-ITEM. Nothing in this session touched UNTOUCHED-ITEM.` });
+    const old = read(vault, prev);
+    check('done item ticked', /^- \[x\] DONE-ITEM/m.test(old), old);
+    check('dropped item marked dropped', /^- \[-\] DROP-ITEM/m.test(old), old);
+    check('untouched item marked carried', /^- \[>\] UNTOUCHED-ITEM/m.test(old), old);
+    const fresh = notesOf(r).find((f) => f !== prev && f.includes('-widget-'));
+    const t = fresh ? read(vault, fresh) : '';
+    check('the new note carries it open, with its original opened date', new RegExp(`^- \\[ \\] UNTOUCHED-ITEM.*opened ${daysAgo(10)}`, 'm').test(t), t.slice(-300));
+    check('...and where it came from', /^- \[ \] UNTOUCHED-ITEM.*from \[\[/m.test(t), t.slice(-300));
+  } },
+  { name: 'log: another authors items are only closed with evidence, and only those lines change', run() {
+    const { repo } = mkRepo('widget'); const bob = `daily-notes/bob/${daysAgo(3)}-widget-b.md`;
+    const seed = dnote('BOB', '- [ ] BOB-DONE\n- [ ] BOB-UNTOUCHED\n', 'widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [bob]: seed });
+    runCommand({ vault, repo, template: 'vault-log', args: 'others', system: `TEST HARNESS: synthetic session in repo widget. This session finished the work behind BOB-DONE (commit def5678, tests pass). Nothing touched BOB-UNTOUCHED.` });
+    const after = read(vault, bob);
+    check('the finished item is ticked', /^- \[x\] BOB-DONE/m.test(after), after);
+    check('the untouched item is left open', /^- \[ \] BOB-UNTOUCHED/m.test(after), after);
+    const changed = after.split('\n').filter((l, i) => l !== seed.split('\n')[i]);
+    check('only checkbox lines changed', changed.every((l) => /^- \[/.test(l)), changed.join(' | '));
+  } },
+  { name: 'log: partly touched and stale items are put to the user in the report', run() {
+    const { repo } = mkRepo('widget'); const prev = `daily-notes/test-user/${daysAgo(3)}-widget-prev.md`;
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [prev]: dnote('PREV', `- [ ] PART-ITEM\n- [ ] STALE-ITEM (opened ${daysAgo(60)})\n`, 'widget') });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'ask', system: `TEST HARNESS: synthetic session in repo widget. You worked on the subject of PART-ITEM but did not finish it. Nothing touched STALE-ITEM.` });
+    check('the report puts both to the user', r.final.includes('PART-ITEM') && r.final.includes('STALE-ITEM'), r.final.slice(0, 400));
+    check('...as a question', /\?|say if|let me know|confirm|your call|which|answer/i.test(r.final));
+  } },
+  { name: 'log: your newest older note is offered for adoption', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'daily-notes/test-user/2026-09-01-misc.md': dnote('LEGACY', '- [ ] LEGACY-ITEM\n') });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'adopt', system: SESSION });
+    check('the report mentions the older note item', r.final.includes('LEGACY-ITEM'), r.final.slice(0, 400));
+  } },
+  { name: 'log: with no open items older notes are not read', run() {
+    const { repo } = mkRepo('widget'); const older = `daily-notes/bob/${daysAgo(9)}-widget-old.md`;
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [older]: dnote('OLDBOB', '- [x] closed (done)\n', 'widget'), [`daily-notes/bob/${daysAgo(2)}-widget-new.md`]: dnote('NEWBOB', '', 'widget') });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'quiet', system: SESSION });
+    check('the older note is never read', !readPaths(r).includes(older), readPaths(r).join(', '));
+  } },
   { name: 'log: secrets are never written', run() {
     const { repo } = mkRepo('widget'); const vault = mkVault({ 'index.md': DEFAULT_HUB });
     const KEY = 'sk-test-FAKE-0123456789abcdefSECRET';
@@ -225,7 +451,7 @@ const scenarios = [
     const { repo } = mkRepo('widget');
     const vault = mkVault({ 'vault-config.md': '---\ndailyNotesPath: Inbox/daily-notes\nfilenamePattern: [unclosed\n  bad: : :\n---\n', 'Inbox/daily-notes/.keep': '' });
     const r = runCommand({ vault, repo, template: 'vault-log', args: 'edge', system: SESSION });
-    check('a note was written under the readable dailyNotesPath', r.files.some((f) => /^Inbox\/daily-notes\/\d{4}-\d\d-\d\d-edge\.md$/.test(f)), r.files.join(', '));
+    check('a note was written under the readable dailyNotesPath', r.files.some((f) => /^Inbox\/daily-notes\/\d{4}-\d\d-\d\d-widget-edge\.md$/.test(f)), r.files.join(', '));
     check('the unreadable part was reported', /malformed|unreadable|could not|couldn't|can't/i.test(r.final), r.final.slice(0, 160));
   } },
 ];

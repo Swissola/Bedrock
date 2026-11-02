@@ -56,11 +56,11 @@ post-merge@@pm8@@tools/hook-templates/post-merge@@s# || \[ -f "$GLOBAL_KILL_SWIT
 post-merge@@pm9@@tools/hook-templates/post-merge@@s#^REPO_FOLDER_NAME="$(basename "$(repo_folder)")"#REPO_FOLDER_NAME="$(basename -s .git "$(git remote get-url origin 2>/dev/null)" 2>/dev/null)"#@@the repo is named after its git remote again
 
 # ---- session-start-vault-context ----------------------------------------------------------------
-session-start-vault-context@@cx1@@tools/hook-templates/session-start-vault-context@@s/\[ "\$SOURCE" = "compact" \] && exit 0/:/@@a /compact reloads the context
+session-start-vault-context@@cx1@@tools/hook-templates/session-start-vault-context@@s/compact|resume) exit 0/resume) exit 0/@@a /compact reloads the context
 session-start-vault-context@@cx2@@tools/hook-templates/session-start-vault-context@@s/UPDATE_MAX_LINES="\${UPDATE_MAX_LINES:-40}"/UPDATE_MAX_LINES=40/@@UPDATE_MAX_LINES is ignored
-session-start-vault-context@@cx3@@tools/hook-templates/session-start-vault-context@@s#^NOTE_GLOB="$NOTE_GLOB.md"#NOTE_GLOB="$NOTE_GLOB"#@@non-markdown files can be picked as the latest note
-session-start-vault-context@@cx4@@tools/hook-templates/session-start-vault-context@@s#NOTE_GLOB="${NAME_PATTERN//\\{repo\\}/$REPO_GLOB}"#NOTE_GLOB="${NAME_PATTERN//\\{repo\\}/*}"#@@notes about any repo match, so another repo's newer note is loaded
-session-start-vault-context@@cx5@@tools/hook-templates/session-start-vault-context@@s#^    REPO_GLOB=.*#    REPO_GLOB="$REPO_NAME"#@@glob characters in a repo name are not escaped
+session-start-vault-context@@cx3@@tools/hook-templates/session-start-vault-context@@s#find . -type f -name '\*\.md'#find . -type f#@@non-markdown files can be picked as the latest note
+session-start-vault-context@@cx4@@tools/hook-templates/session-start-vault-context@@s#CURRENT_GLOB="\$(glob_for "\$REPO_NAME")"#CURRENT_GLOB="*.md"#@@notes about any repo match, so another repo's newer note is loaded
+session-start-vault-context@@cx5@@tools/hook-templates/session-start-vault-context@@s#^  repo_glob=.*#  repo_glob="$1"#@@glob characters in a repo name are not escaped
 session-start-vault-context@@cx6@@tools/hook-templates/session-start-vault-context@@s#\[\[ "$d" > "$best" \]\]#false#@@the newest date in the filename no longer decides which note is latest
 session-start-vault-context@@cx7@@tools/hook-templates/session-start-vault-context@@s#head -n "$MAX_CONTRIBUTORS"#head -n 99#@@every contributor is loaded, whatever the limit
 session-start-vault-context@@cx8@@tools/hook-templates/session-start-vault-context@@s#MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-3}"#MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-4}"#@@the default contributor limit is four
@@ -74,6 +74,18 @@ session-start-vault-context@@cx15@@tools/hook-templates/session-start-vault-cont
 session-start-vault-context@@cx16@@tools/hook-templates/session-start-vault-context@@s#elif \[ "$REPO_FILTERED" = 1 \]; then#elif false; then#@@a repo with no notes gets the generic empty message
 session-start-vault-context@@cx17@@tools/hook-templates/session-start-vault-context@@s#if \[ "$TOTAL" -gt "$MAX_CONTRIBUTORS" \]; then#if false; then#@@contributors left out are not mentioned
 session-start-vault-context@@cx18@@tools/hook-templates/session-start-vault-context@@s#^  keep) ;;#  keepx) ;;#@@repoNameCase: keep is ignored
+session-start-vault-context@@cx19@@tools/hook-templates/session-start-vault-context@@s/\$4 == me/\$4 == "zz-none"/@@your own note is no longer recognised, so it is not loaded first
+session-start-vault-context@@cx20@@tools/hook-templates/session-start-vault-context@@s/head -n "\$MAX_CONTRIBUTORS")" | grep \./head -n 0)" | grep ./@@other contributors are never loaded
+session-start-vault-context@@cx21@@tools/hook-templates/session-start-vault-context@@s/compact|resume) exit 0/compact) exit 0/@@a /resume reloads the context
+session-start-vault-context@@cx22@@tools/hook-templates/session-start-vault-context@@s#^  sed -E '/.*/d'$#  cat#@@checkbox lines are left in the loaded notes
+session-start-vault-context@@cx23@@tools/hook-templates/session-start-vault-context@@s/"\$age" -gt "\$STALE_DAYS"/"$age" -ge "$STALE_DAYS"/@@an item exactly at the threshold is flagged stale
+session-start-vault-context@@cx24@@tools/hook-templates/session-start-vault-context@@s/\(OPENED_RE \]\]; then \)ref="[^"]*"/\1:/@@the opened date on a carried item is ignored
+session-start-vault-context@@cx25@@tools/hook-templates/session-start-vault-context@@s/head -n "\$MAX_ITEMS" |/head -n 999 |/@@the open-item cap is ignored
+session-start-vault-context@@cx26@@tools/hook-templates/session-start-vault-context@@s/^while \[ "\$SIZE" -gt "\$MAX_CHARS" \] \&\& \[ "\$i" -ge 0 \]; do/while false; do/@@the size budget is ignored
+session-start-vault-context@@cx27@@tools/hook-templates/session-start-vault-context@@s/if \[ "\${NOTE_MINE\[\$i\]}" = 0 \]; then/if true; then/@@your own note can be dropped to fit the budget
+session-start-vault-context@@cx28@@tools/hook-templates/session-start-vault-context@@s/^      continue$/      OLDER_PATH="$path"/@@an older note naming another repo is loaded
+session-start-vault-context@@cx29@@tools/hook-templates/session-start-vault-context@@s/-k1,1r -k2,2nr | head -n 5)/-k1,1r -k2,2nr | head -n 50)/@@the older-note fallback opens more than five notes
+session-start-vault-context@@cx30@@tools/hook-templates/session-start-vault-context@@s/if \[\[ "\$known" != "\$REPO_NAME" \&\& "\$known" == "\$REPO_NAME-"\* \]\]; then/if false; then/@@a longer repo name no longer claims its own notes
 
 # ---- install-claude-config ---------------------------------------------------------------------
 install-claude-config@@in1@@tools/install-claude-config.sh@@s/\[\[ "\$iv" -lt "\$sv" \]\]/[[ "$iv" -gt "$sv" ]]/@@--check calls an older install newer and a newer one outdated

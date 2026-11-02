@@ -42,26 +42,33 @@
 # It is not taken from the git remote: a remote can be spelt differently from
 # the folder, and the commands never look at it.
 #
-# WHICH NOTES. When filenamePattern contains {repo}, only notes whose filename
-# matches the pattern for THIS repo are considered, so a busy day in another
-# repo cannot push this repo's last session out. Without {repo} in the pattern
-# there is nothing to tell repos apart by and every note is a candidate.
+# WHICH NOTES. The default filenamePattern is {date}-{repo}-{topic}. When it
+# contains {repo}, only notes whose filename matches the pattern for THIS repo
+# are considered, so a busy day in another repo cannot push this repo's last
+# session out. Where one repo's name is the start of another's (widget and
+# widget-ui) a note belongs to the longest known name, so widget does not claim
+# widget-ui's notes. The known names are the entries found under the part of
+# reposPath before {repo}. Without {repo} in the pattern there is nothing to
+# tell repos apart by and every note is a candidate.
 #
 # WHOSE NOTES. When dailyNotesPath contains {author}, each subfolder of its base
-# is one contributor and the latest note from each is loaded, most recent first,
-# up to CONTEXT_MAX_CONTRIBUTORS (default 3) of them. Otherwise everything is
-# one group and just the latest note is loaded. "Latest" is the newest date in
+# is one contributor. YOUR latest note (the folder named after git config
+# user.name, slugged as /vault-log does) is always loaded, first, then the latest
+# note from each other contributor, most recent first, up to
+# CONTEXT_MAX_CONTRIBUTORS (default 3) of them. So a solo install loads one note
+# and a team of four up to four. Otherwise everything is one group and just the
+# latest note is loaded. "Latest" is the newest date in
 # the filename, then the newest file modification time among notes sharing that
 # date: a git checkout stamps every file with the time it was pulled, so the
 # modification time alone would mean "last pulled", not "last written". Hidden
 # files, anything that is not .md and Syncthing conflict copies are never
 # candidates.
 #
-# Skips entirely on a mid-session /compact. Claude Code passes
+# Skips entirely on a mid-session /compact and on a /resume. Claude Code passes
 # {"source": "startup"|"resume"|"clear"|"compact"|"fork", ...} on stdin; a
-# /compact's own summary already carries whatever this hook injected earlier
-# in the same session, so re-injecting here is pure duplication with no
-# fidelity gained. Fails open (still injects) on malformed or missing stdin
+# /compact's own summary, and a resumed session's transcript, already carry
+# whatever this hook injected earlier in the same session, so re-injecting
+# here is pure duplication with no fidelity gained. startup and clear still load. Fails open (still injects) on malformed or missing stdin
 # rather than risk silently skipping a genuine session start - the safer
 # failure mode for a hook whose entire job is not letting context go missing.
 #
@@ -83,7 +90,7 @@ set -u
 
 STDIN_JSON=$(cat 2>/dev/null)
 SOURCE=$(printf '%s' "$STDIN_JSON" | grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)"$/\1/')
-[ "$SOURCE" = "compact" ] && exit 0
+case "$SOURCE" in compact|resume) exit 0 ;; esac
 
 # Must be passed in, not derived - unlike post-merge, this script's cwd is
 # always some OTHER repo, never the vault itself, so `git rev-parse
@@ -138,7 +145,8 @@ repo_folder() {
 }
 
 REPO_NAME="$(basename "$(repo_folder)")"
-case "$(config_value repoNameCase)" in
+REPO_CASE="$(config_value repoNameCase)"
+case "$REPO_CASE" in
   keep) ;;
   *) REPO_NAME="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]')" ;;
 esac
@@ -164,22 +172,92 @@ DAILY_DIR="$VAULT_ROOT/$DAILY_BASE"
 HAS_AUTHOR=0
 case "$DAILY_PATH" in *"{author}"*) HAS_AUTHOR=1 ;; esac
 
-# The filename pattern as a glob. With {repo} in it, only this repo's notes
-# match; every other {placeholder} becomes a wildcard. Glob characters in the
-# repo name itself are escaped so they match literally.
 NAME_PATTERN="$(config_value filenamePattern)"
-[ -n "$NAME_PATTERN" ] || NAME_PATTERN="{date}-{topic}"
+[ -n "$NAME_PATTERN" ] || NAME_PATTERN="{date}-{repo}-{topic}"
 REPO_FILTERED=0
-NOTE_GLOB="*"
-case "$NAME_PATTERN" in
-  *"{repo}"*)
-    REPO_FILTERED=1
-    REPO_GLOB="$(printf '%s' "$REPO_NAME" | sed 's/[][*?\\]/\\&/g')"
-    NOTE_GLOB="${NAME_PATTERN//\{repo\}/$REPO_GLOB}"
-    NOTE_GLOB="$(printf '%s' "$NOTE_GLOB" | sed -E 's/\{[A-Za-z]+\}/*/g')"
-    ;;
-esac
-NOTE_GLOB="$NOTE_GLOB.md"
+case "$NAME_PATTERN" in *"{repo}"*) REPO_FILTERED=1 ;; esac
+
+# The filename glob for notes about repo $1: the pattern with {repo} replaced by
+# that name, {date} a date-shaped glob (so `my-widget` is never read as `widget`)
+# and every other {placeholder} a wildcard. Glob characters in the
+# repo name itself are escaped so they match literally.
+glob_for() {
+  local repo_glob g
+  repo_glob="$(printf '%s' "$1" | sed 's/[][*?\\]/\\&/g')"
+  g="${NAME_PATTERN//\{repo\}/$repo_glob}"
+  g="${g//\{date\}/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]}"
+  g="$(printf '%s' "$g" | sed -E 's/\{[A-Za-z]+\}/*/g')"
+  printf '%s.md' "$g"
+  return 0
+}
+
+# The names of the repos the vault documents, one per line, cased per
+# repoNameCase, plus this repo. Found by listing the entries under the part of
+# reposPath before {repo} and stripping the part after it. A reposPath with no
+# {repo} names one fixed doc, so there is nothing to list.
+known_repos() {
+  local base after entry name keep=0
+  [[ "$REPO_CASE" == keep ]] && keep=1
+  if [[ "$REPOS_PATH" == *"{repo}"* ]]; then
+    base="${REPOS_PATH%%\{repo\}*}"
+    after="${REPOS_PATH#*\{repo\}}"
+    for entry in "$VAULT_ROOT/$base"*; do
+      entry="${entry##*/}"
+      case "$after" in
+        /*) [[ -e "$VAULT_ROOT/$base$entry$after" ]] || continue; name="$entry" ;;
+        *) [[ -z "$after" || "$entry" == *"$after" ]] || continue; name="${entry%"$after"}" ;;
+      esac
+      [[ -n "$name" ]] || continue
+      if [[ "$keep" = 1 ]]; then printf '%s\n' "$name"; else printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]'; fi
+    done
+  fi
+  printf '%s\n' "$REPO_NAME"
+  return 0
+}
+
+# With {repo} in the pattern: the glob for this repo, and the globs of every
+# longer known repo whose name starts with this one's plus a hyphen. A note that
+# matches one of those belongs to the longer repo.
+CURRENT_GLOB="*.md"
+LONGER_GLOBS=()
+ALL_GLOBS=()
+if [[ "$REPO_FILTERED" = 1 ]]; then
+  CURRENT_GLOB="$(glob_for "$REPO_NAME")"
+  while IFS= read -r known; do
+    [[ -n "$known" ]] || continue
+    ALL_GLOBS+=("$(glob_for "$known")")
+    if [[ "$known" != "$REPO_NAME" && "$known" == "$REPO_NAME-"* ]]; then
+      LONGER_GLOBS+=("$(glob_for "$known")")
+    fi
+  done < <(known_repos)
+fi
+
+# belongs_to_repo <filename>: exit 0 if the note is about this repo.
+belongs_to_repo() {
+  local name="$1" g
+  # The unquoted expansions below are deliberate: the globs are the patterns.
+  # shellcheck disable=SC2254
+  case "$name" in $CURRENT_GLOB) ;; *) return 1 ;; esac
+  if [[ ${#LONGER_GLOBS[@]} -gt 0 ]]; then
+    for g in "${LONGER_GLOBS[@]}"; do
+      # shellcheck disable=SC2254
+      case "$name" in $g) return 1 ;; esac
+    done
+  fi
+  return 0
+}
+
+# Who you are: the author folder name /vault-log uses, from git config user.name
+# (lowercased, spaces to hyphens). Empty when no name is set, in which case no
+# note counts as yours.
+AUTHOR_SLUG="$(cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null && git config user.name 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr ' ' '-')"
+
+MAX_CHARS="${CONTEXT_MAX_CHARS:-12000}"
+case "$MAX_CHARS" in ""|*[!0-9]*|0) MAX_CHARS=12000 ;; esac
+MAX_ITEMS="${CONTEXT_MAX_OPEN_ITEMS:-10}"
+case "$MAX_ITEMS" in ""|*[!0-9]*|0) MAX_ITEMS=10 ;; esac
+STALE_DAYS="$(config_value staleOpenItemDays)"
+case "$STALE_DAYS" in ""|*[!0-9]*) STALE_DAYS=30 ;; esac
 
 MAX_CONTRIBUTORS="${CONTEXT_MAX_CONTRIBUTORS:-3}"
 case "$MAX_CONTRIBUTORS" in ""|*[!0-9]*|0) MAX_CONTRIBUTORS=3 ;; esac
@@ -202,13 +280,14 @@ latest_in() {
   local dir="$1" f name d best="" tied="" m best_m=-1 best_f=""
   while IFS= read -r f; do
     name="${f##*/}"
+    belongs_to_repo "$name" || continue
     d="0000-00-00"
     if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
     if [ -z "$best" ] || [[ "$d" > "$best" ]]; then best="$d"; tied="$f"
     elif [ "$d" = "$best" ]; then tied="$tied
 $f"
     fi
-  done < <(cd "$dir" 2>/dev/null && find . -type f -name "$NOTE_GLOB" ! -name '*.sync-conflict-*' ! -path '*/.*' 2>/dev/null)
+  done < <(cd "$dir" 2>/dev/null && find . -type f -name '*.md' ! -name '*.sync-conflict-*' ! -path '*/.*' 2>/dev/null)
   [ -n "$best" ] || return 0
   while IFS= read -r f; do
     m="$(mtime_of "$dir/${f#./}")"
@@ -237,24 +316,115 @@ if [ -d "$DAILY_DIR" ]; then
   fi
 fi
 
-# Most recent first: newest date, then newest modification time.
+# Most recent first: newest date, then newest modification time. Your own latest
+# note is always loaded, first; CONTEXT_MAX_CONTRIBUTORS then limits how many
+# OTHER contributors are loaded after it. TOTAL counts the others.
 SELECTED=""
 TOTAL=0
-if [ -n "$CANDIDATES" ]; then
-  SORTED="$(printf '%s' "$CANDIDATES" | sort -t "$TAB" -k1,1r -k2,2nr)"
-  TOTAL="$(printf '%s\n' "$SORTED" | grep -c .)"
-  SELECTED="$(printf '%s\n' "$SORTED" | head -n "$MAX_CONTRIBUTORS")"
+ALL_SORTED=""
+if [[ -n "$CANDIDATES" ]]; then
+  ALL_SORTED="$(printf '%s' "$CANDIDATES" | sort -t "$TAB" -k1,1r -k2,2nr)"
+  MINE=""
+  OTHERS="$ALL_SORTED"
+  if [[ -n "$AUTHOR_SLUG" ]]; then
+    MINE="$(printf '%s\n' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 == me')"
+    OTHERS="$(printf '%s\n' "$ALL_SORTED" | awk -F"$TAB" -v me="$AUTHOR_SLUG" '$4 != me')"
+  fi
+  TOTAL="$(printf '%s\n' "$OTHERS" | grep -c . || true)"
+  SELECTED="$(printf '%s\n%s\n' "$MINE" "$(printf '%s\n' "$OTHERS" | head -n "$MAX_CONTRIBUTORS")" | grep . || true)"
 fi
+
+# --- older notes -------------------------------------------------------------
+
+# An "older" note is one whose name matches no known repo's glob: written before
+# repo names went into filenames. When this repo has no notes of its own, the
+# newest older note is loaded in its place, labelled as such.
+is_older_note() {
+  local name="$1" g
+  for g in "${ALL_GLOBS[@]}"; do
+    # The unquoted expansion is deliberate: the glob is the pattern.
+    # shellcheck disable=SC2254
+    case "$name" in $g) return 1 ;; esac
+  done
+  return 0
+}
+
+# The repo named in a note's frontmatter, cased per repoNameCase, or nothing.
+fm_repo() {
+  local v
+  v="$(tr -d '\r' < "$1" | awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    /^repo:/ { v = $0; sub(/^repo:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); gsub(/^["\047]|["\047]$/, "", v); print v; exit }
+  ')"
+  if [[ "$REPO_CASE" == keep ]]; then printf '%s' "$v"; else printf '%s' "$v" | tr '[:upper:]' '[:lower:]'; fi
+  return 0
+}
+
+OLDER_PATH=""
+OLDER_NOTE_LINE=""
+OLDER_LABEL="Older note (repo unknown, written before per-repo notes)"
+
+# Sets SELECTED and ALL_SORTED to the note to load, if there is one. The newest
+# five older notes (by filename date, then modification time) are the only ones
+# whose frontmatter is read: one naming another repo is skipped, one naming this
+# repo is this repo's own note, one naming nothing is loaded as an older note.
+older_fallback() {
+  local f name d who cands="" n=0 d5 tied="" m line r path
+  [[ -d "$DAILY_DIR" ]] || return 0
+  while IFS= read -r f; do
+    name="${f##*/}"
+    is_older_note "$name" || continue
+    d="0000-00-00"
+    if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
+    who=""
+    if [[ "$HAS_AUTHOR" = 1 && "${f#./}" == */* ]]; then who="${f#./}"; who="${who%%/*}"; fi
+    cands="$cands$d$TAB$f$TAB$who
+"
+    n=$((n + 1))
+  done < <(cd "$DAILY_DIR" 2>/dev/null && find . -type f -name '*.md' ! -name '*.sync-conflict-*' ! -path '*/.*' 2>/dev/null)
+  [[ "$n" -gt 0 ]] || return 0
+  d5="$(printf '%s' "$cands" | sort -t "$TAB" -k1,1r | head -n 5 | tail -n 1 | cut -f1)"
+  while IFS="$TAB" read -r d f who; do
+    [[ -n "$f" ]] || continue
+    m="$(mtime_of "$DAILY_DIR/${f#./}")"
+    tied="$tied$d$TAB${m:-0}$TAB$DAILY_DIR/${f#./}$TAB$who
+"
+  done < <(printf '%s' "$cands" | awk -F"$TAB" -v d="$d5" '$1 >= d')
+  OLDER_NOTE_LINE="(at least $n older note(s) have no repo in the filename)"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    path="$(printf '%s' "$line" | cut -f3)"
+    r="$(fm_repo "$path")"
+    if [[ -z "$r" ]]; then
+      OLDER_PATH="$path"
+    elif [[ "$r" = "$REPO_NAME" ]]; then
+      OLDER_NOTE_LINE=""
+    else
+      continue
+    fi
+    SELECTED="$line"
+    ALL_SORTED="$line"
+    break
+  done < <(printf '%s' "$tied" | sort -t "$TAB" -k1,1r -k2,2nr | head -n 5)
+  return 0
+}
+if [[ "$REPO_FILTERED" = 1 && -z "$SELECTED" ]]; then older_fallback; fi
 
 # --- output ------------------------------------------------------------------
 
-echo "--- Vault context for $REPO_NAME (auto-loaded) ---"
-echo
-echo "## $INDEX_REL"
-cat "$INDEX_FILE"
+# The output is assembled in parts first, so a size budget can be applied before
+# anything is printed.
+HEAD_OUT="$(
+  echo "--- Vault context for $REPO_NAME (auto-loaded) ---"
+  echo
+  echo "## $INDEX_REL"
+  cat "$INDEX_FILE"
+)"
 
 extract_section() {
   awk -v h="$2" '
+    { sub(/\r$/, "") }
     $0 == h { grabbing=1; print; next }
     grabbing && /^## / { grabbing=0 }
     grabbing { print }
@@ -276,54 +446,221 @@ extract_last_update() {
 # Cap on how much of that update is loaded (UPDATE_MAX_LINES to override).
 UPDATE_MAX_LINES="${UPDATE_MAX_LINES:-40}"
 
-# render_note <path> <contributor, or empty>
+# Lines that are open-item checkboxes (open, done, dropped or carried) are left
+# out of every loaded note: the open-item list is the one place open items appear.
+strip_checkboxes() {
+  sed -E '/^- \[[ xX>-]\]/d'
+  return 0
+}
+
+# The tags of a note from its first frontmatter block, whether written inline
+# (tags: [a, b]) or as a list, printed as "[a, b]".
+note_tags() {
+  tr -d '\r' < "$1" | awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    intags && /^[ \t]*-[ \t]/ { v = $0; sub(/^[ \t]*-[ \t]*/, "", v); list = (list == "" ? v : list ", " v); next }
+    { intags = 0 }
+    /^tags:/ { v = $0; sub(/^tags:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); if (v == "") { intags = 1; next } print v; done = 1; exit }
+    END { if (!done && list != "") print "[" list "]" }
+  '
+  return 0
+}
+
+# True if a section (its heading line, then text) has any text under the heading.
+has_body() {
+  printf '%s\n' "$1" | sed '1d' | grep -q '[^[:space:]]'
+  return $?
+}
+
+# render_note <path> <contributor, or empty> <1 if it is your own note, else 0>
+# Yours: both forward-looking sections plus the latest appended update. Another
+# contributor's: the context section only. Checkbox lines are left out of both.
 render_note() {
-  local note="$1" who="$2" rel label context next update total earlier update_note lines
+  local note="$1" who="$2" mine="$3" override="${4:-}" rel label ctx_raw next_raw context next update total earlier update_note lines tags
   rel="${note#"$VAULT_ROOT/"}"
-  if [ -n "$who" ]; then label="Latest note from $who"; else label="Most recent daily note"; fi
-  context=$(extract_section "$note" "## Context for Future Sessions")
-  next=$(extract_section "$note" "## Open Questions / Next Steps")
+  if [[ -n "$override" ]]; then label="$override"
+  elif [[ "$mine" = 1 ]]; then label="Your latest note"
+  elif [ -n "$who" ]; then label="Latest note from $who"
+  else label="Most recent daily note"; fi
+  ctx_raw=$(extract_section "$note" "## Context for Future Sessions")
+  next_raw=$(extract_section "$note" "## Open Questions / Next Steps")
+  tags=$(note_tags "$note")
 
-  if [ -n "$context" ] || [ -n "$next" ]; then
+  if [ -n "$ctx_raw" ] || [ -n "$next_raw" ]; then
     echo
-    echo "## $label: $rel (forward-looking sections only; read the note itself, or ask, for full history)"
-    [ -n "$context" ] && { echo; echo "$context"; }
-    [ -n "$next" ] && { echo; echo "$next"; }
+    if [[ "$mine" = 1 ]]; then
+      echo "## $label: $rel (forward-looking sections only; read the note itself, or ask, for full history)"
+    else
+      echo "## $label: $rel (context section only; read the note itself, or ask, for full history)"
+    fi
+    [ -n "$tags" ] && echo "Tags: $tags"
+    context=$(printf '%s\n' "$ctx_raw" | strip_checkboxes)
+    [ -n "$ctx_raw" ] && has_body "$context" && { echo; echo "$context"; }
+    if [[ "$mine" = 1 ]]; then
+      next=$(printf '%s\n' "$next_raw" | strip_checkboxes)
+      [ -n "$next_raw" ] && has_body "$next" && { echo; echo "$next"; }
 
-    # An appended "## Update ..." section (what /vault-log adds when a note for
-    # the same session already exists) can't rewrite the two sections above, so
-    # without this the latest state never reached the next session and the
-    # forward-looking sections could be out of date. Load the MOST RECENT update
-    # only, capped, and say how many earlier ones were left out: the older ones
-    # are history, which this hook deliberately doesn't load.
-    update=$(extract_last_update "$note")
-    if [ -n "$update" ]; then
-      total=$(grep -c '^## Update' "$note" 2>/dev/null || true)
-      earlier=$(( ${total:-1} - 1 ))
-      update_note=""
-      [ "$earlier" -gt 0 ] && update_note=" - $earlier earlier update(s) in the note not loaded"
-      echo
-      echo "## Appended to that note, most recent update (a later same-session addition; it supersedes the sections above where they differ)$update_note"
-      lines=$(printf '%s\n' "$update" | wc -l | tr -d ' ')
-      printf '%s\n' "$update" | head -n "$UPDATE_MAX_LINES"
-      if [ "$lines" -gt "$UPDATE_MAX_LINES" ]; then
-        echo "(update truncated: $((lines - UPDATE_MAX_LINES)) more lines in the note)"
+      # An appended "## Update ..." section (what /vault-log adds when a note for
+      # the same session already exists) can't rewrite the two sections above, so
+      # without this the latest state never reached the next session and the
+      # forward-looking sections could be out of date. Load the MOST RECENT update
+      # only, capped, and say how many earlier ones were left out: the older ones
+      # are history, which this hook deliberately doesn't load.
+      update=$(extract_last_update "$note" | strip_checkboxes)
+      if [ -n "$update" ]; then
+        total=$(grep -c '^## Update' "$note" 2>/dev/null || true)
+        earlier=$(( ${total:-1} - 1 ))
+        update_note=""
+        [ "$earlier" -gt 0 ] && update_note=" - $earlier earlier update(s) in the note not loaded"
+        echo
+        echo "## Appended to that note, most recent update (a later same-session addition; it supersedes the sections above where they differ)$update_note"
+        lines=$(printf '%s\n' "$update" | wc -l | tr -d ' ')
+        printf '%s\n' "$update" | head -n "$UPDATE_MAX_LINES"
+        if [ "$lines" -gt "$UPDATE_MAX_LINES" ]; then
+          echo "(update truncated: $((lines - UPDATE_MAX_LINES)) more lines in the note)"
+        fi
       fi
     fi
   else
     echo
     echo "## $label: $rel (no forward-looking sections, loading in full)"
-    cat "$note"
+    [ -n "$tags" ] && echo "Tags: $tags"
+    strip_checkboxes < "$note"
   fi
   return 0
 }
 
+# Days since 0000-03-01 for a YYYY-MM-DD date, in plain arithmetic (no date -d,
+# which differs between GNU and BSD). Prints nothing for anything that is not a
+# date, so a malformed one can never read as old.
+day_number() {
+  local ymd="$1" y m d era yoe doy doe
+  [[ "$ymd" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]] || return 0
+  y=$((10#${BASH_REMATCH[1]})); m=$((10#${BASH_REMATCH[2]})); d=$((10#${BASH_REMATCH[3]}))
+  (( m >= 1 && m <= 12 && d >= 1 && d <= 31 )) || return 0
+  (( m <= 2 )) && y=$((y - 1))
+  era=$(( y / 400 ))
+  yoe=$(( y - era * 400 ))
+  doy=$(( (153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1 ))
+  doe=$(( yoe * 365 + yoe / 4 - yoe / 100 + doy ))
+  echo $(( era * 146097 + doe ))
+  return 0
+}
+
+# CONTEXT_TODAY (YYYY-MM-DD) overrides today's date; it exists for the tests.
+TODAY="${CONTEXT_TODAY:-$(date +%Y-%m-%d)}"
+TODAY_N="$(day_number "$TODAY")"
+
+OPEN_ITEM_RE='^-[[:space:]]+\[ \][[:space:]]+(.*)$'
+OPENED_RE='opened[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
+
+# The open items of one note, one per line: "<age in days><TAB><1 if stale><TAB>
+# <owner><TAB><text>". Only "- [ ]" lines in the Open Questions section count. The
+# age runs from the "opened YYYY-MM-DD" on the line, else from the note's own date.
+open_items_of() {
+  local note="$1" owner="$2" name fdate="" line text ref n age stale
+  name="${note##*/}"
+  if [[ "$name" =~ $DATE_RE ]]; then fdate="${BASH_REMATCH[1]}"; fi
+  while IFS= read -r line; do
+    [[ "$line" =~ $OPEN_ITEM_RE ]] || continue
+    text="${BASH_REMATCH[1]}"
+    text="${text%"${text##*[![:space:]]}"}"
+    ref="$fdate"
+    if [[ "$text" =~ $OPENED_RE ]]; then ref="${BASH_REMATCH[1]}"; fi
+    # One item cannot flood the context: the text is cut at 300 characters.
+    if [[ ${#text} -gt 300 ]]; then text="${text:0:300} (cut)"; fi
+    age=0; stale=0
+    n="$(day_number "$ref")"
+    if [[ -n "$n" && -n "$TODAY_N" && "$TODAY_N" -gt "$n" ]]; then
+      age=$((TODAY_N - n))
+      [[ "$age" -gt "$STALE_DAYS" ]] && stale=1
+    fi
+    printf '%s%s%s%s%s%s%s\n' "$age" "$TAB" "$stale" "$TAB" "${owner:-unknown}" "$TAB" "$text"
+  done < <(extract_section "$note" "## Open Questions / Next Steps")
+  return 0
+}
+
+# The list of open items across every contributor's latest note, loaded or not.
+print_open_items() {
+  local _d _m path who items total age stale owner text flag
+  items="$(
+    while IFS="$TAB" read -r _d _m path who; do
+      [[ -n "$path" ]] && open_items_of "$path" "$who"
+    done <<EOF
+$ALL_SORTED
+EOF
+  )"
+  [[ -n "$items" ]] || return 0
+  items="$(printf '%s\n' "$items" | sort -t "$TAB" -k2,2nr -k1,1nr)"
+  total="$(printf '%s\n' "$items" | grep -c .)"
+  echo
+  echo "## Open items for $REPO_NAME (from each contributor's latest note; stale means open more than $STALE_DAYS days)"
+  printf '%s\n' "$items" | head -n "$MAX_ITEMS" | while IFS="$TAB" read -r age stale owner text; do
+    flag="${age}d"
+    [[ "$stale" = 1 ]] && flag="${age}d, stale"
+    echo "- $owner ($flag): $text"
+  done
+  if [[ "$total" -gt "$MAX_ITEMS" ]]; then echo "(and $((total - MAX_ITEMS)) more)"; fi
+  return 0
+}
+
+# Render every selected note (yours first), then the open-item list, then apply
+# the budget: while the whole output is over CONTEXT_MAX_CHARS, other
+# contributors' notes are dropped, furthest back first. The repo doc, your own
+# note and the open-item list are never cut.
+NOTE_TEXT=()
+NOTE_MINE=()
+NOTE_KEPT=()
+N_NOTES=0
+ITEMS_OUT=""
 if [ -n "$SELECTED" ]; then
   while IFS="$TAB" read -r _date _mtime path who; do
-    [ -n "$path" ] && render_note "$path" "$who"
+    [ -n "$path" ] || continue
+    mine=0
+    [[ -n "$AUTHOR_SLUG" && "$who" = "$AUTHOR_SLUG" ]] && mine=1
+    override=""
+    [[ -n "$OLDER_PATH" && "$path" = "$OLDER_PATH" ]] && override="$OLDER_LABEL"
+    NOTE_TEXT[N_NOTES]="$(render_note "$path" "$who" "$mine" "$override")"
+    NOTE_MINE[N_NOTES]=$mine
+    NOTE_KEPT[N_NOTES]=1
+    N_NOTES=$((N_NOTES + 1))
   done <<EOF
 $SELECTED
 EOF
+  ITEMS_OUT="$(print_open_items)"
+fi
+
+SIZE=$(( ${#HEAD_OUT} + ${#ITEMS_OUT} ))
+i=0
+while [ "$i" -lt "$N_NOTES" ]; do SIZE=$(( SIZE + ${#NOTE_TEXT[$i]} + 1 )); i=$((i + 1)); done
+DROPPED=0
+i=$((N_NOTES - 1))
+while [ "$SIZE" -gt "$MAX_CHARS" ] && [ "$i" -ge 0 ]; do
+  if [ "${NOTE_MINE[$i]}" = 0 ]; then
+    NOTE_KEPT[i]=0
+    SIZE=$(( SIZE - ${#NOTE_TEXT[$i]} - 1 ))
+    DROPPED=$((DROPPED + 1))
+  fi
+  i=$((i - 1))
+done
+
+printf '%s\n' "$HEAD_OUT"
+i=0
+while [ "$i" -lt "$N_NOTES" ]; do
+  [ "${NOTE_KEPT[$i]}" = 1 ] && printf '%s\n' "${NOTE_TEXT[$i]}"
+  i=$((i + 1))
+done
+[ -n "$ITEMS_OUT" ] && printf '%s\n' "$ITEMS_OUT"
+if [ "$DROPPED" -gt 0 ]; then
+  echo
+  echo "($DROPPED other note(s) left out to stay within CONTEXT_MAX_CHARS=$MAX_CHARS)"
+fi
+if [ "$SIZE" -gt "$MAX_CHARS" ]; then
+  echo
+  echo "(context exceeds CONTEXT_MAX_CHARS=$MAX_CHARS on its own; nothing more was dropped)"
+fi
+if [ -n "$SELECTED" ]; then
   if [ "$TOTAL" -gt "$MAX_CONTRIBUTORS" ]; then
     echo
     echo "($((TOTAL - MAX_CONTRIBUTORS)) more contributor(s) have notes too; CONTEXT_MAX_CONTRIBUTORS=$TOTAL would load them all)"
@@ -334,6 +671,10 @@ elif [ "$REPO_FILTERED" = 1 ]; then
 else
   echo
   echo "(No daily notes in the vault yet.)"
+fi
+if [ -n "$OLDER_NOTE_LINE" ]; then
+  echo
+  echo "$OLDER_NOTE_LINE"
 fi
 
 exit 0
