@@ -184,6 +184,28 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
   return 0
 }
 
+# The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
+test_vault_command_templates_are_at_version_4() {
+  local n v
+  for n in vault-log vault-context vault-populate; do
+    v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
+    assert_eq "$n.md is at version 4" "4" "$v"
+  done
+  return 0
+}
+
+# A command template is a prompt read in full on every run, so its length is a running cost:
+# each has a line ceiling (the version 3 length plus about 40%). Tighten wording before raising one.
+test_vault_command_templates_stay_under_their_line_ceilings() {
+  local pair n max lines
+  for pair in vault-log:134 vault-context:56 vault-populate:54; do
+    n="${pair%%:*}"; max="${pair##*:}"
+    lines="$(wc -l < "$TOOLS_DIR/command-templates/$n.md" | tr -d ' ')"
+    assert_eq "$n.md is within $max lines (it has $lines)" "yes" "$([[ "$lines" -le "$max" ]] && echo yes || echo no)"
+  done
+  return 0
+}
+
 test_every_command_template_carries_a_version_stamp() {
   local f
   for f in "$TOOLS_DIR"/command-templates/*.md; do
@@ -281,6 +303,8 @@ test_javascript_files_parse
 test_powershell_scripts_parse
 test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads
 test_every_command_template_carries_a_version_stamp
+test_vault_command_templates_are_at_version_4
+test_vault_command_templates_stay_under_their_line_ceilings
 test_test_scripts_avoid_bash_4_only_features
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback
 test_every_suite_cleans_up_after_itself_with_a_trap
