@@ -114,6 +114,26 @@ claude mcp list
 
 Ask your AI assistant to read a known file (e.g. `index.md`) to confirm it works end-to-end.
 
+## Using more than one vault on one machine (optional)
+
+If you work in two vaults, the Local REST API plugin gets in the way in three ways. Each vault's plugin generates its **own API key**; both default to the **same ports** (HTTP 27123, HTTPS 27124); and only one Obsidian vault window can serve those ports at a time. Registered as one `obsidian` server with one key, the MCP tools return HTTP 401 whenever the other vault is the open one, even though the server is up.
+
+The setup Bedrock supports is **one key and one port per machine, and you open the vault you want to work in**:
+
+1. Pick one vault's `apiKey` (in `.obsidian/plugins/obsidian-local-rest-api/data.json`) and copy the same value into the other vault's `data.json`. Close that vault in Obsidian first, so the plugin does not overwrite the edit, then reopen it.
+2. Leave both on the same ports.
+3. Register `obsidian` once (Step 4, or `setup-mcp`). It now works for whichever vault is open.
+4. Before a session that reads or writes a vault, open that vault in Obsidian.
+
+What follows from that:
+
+- **Claude's MCP tools and the `post-merge` hook act on the open vault, whichever vault the repo belongs to.** A hook for the vault that is not open has its write land in the wrong vault or nowhere, and then fails its check. See [Working across more than one vault](automation.md#working-across-more-than-one-vault).
+- **Do not run `setup-mcp` from the second vault** unless the keys match. It reads that vault's own key and replaces the single `obsidian` registration, which silently switches the key.
+- **HTTP 401 with Obsidian running** means the open vault's key differs from the registered one. Make them match, or re-register with the open vault's key.
+- The same key is now in two `data.json` files. Both stay gitignored, and the key is the one credential for whichever vault is open, so regenerate it in both places if it leaks.
+
+If you would rather keep separate keys, the alternative is one registration per vault under different names (for example `obsidian-<vault>`), on different ports, with one Obsidian window each. That works, but the commands and hooks assume a server called `obsidian`, so it is not covered here.
+
 ## Enterprise MCP allowlists (optional)
 
 Some enterprise Claude Code deployments restrict `claude mcp add` to an explicit allowlist of URL patterns, and reject anything else — including `localhost` — with an error like `not allowed by enterprise policy`. If that's your situation, one working pattern:
@@ -139,6 +159,7 @@ This only affects your own machine's local name resolution — it isn't a real D
 | Certificate errors on port 27124 | Use plain HTTP on 27123 instead (`"enableInsecureServer": true`) — Step 3 |
 | `claude mcp add` fails with "not allowed by enterprise policy" | Your org's allowlist likely does a literal string match, port included — see [Enterprise MCP allowlists](#enterprise-mcp-allowlists-optional) |
 | Obsidian must be open | The MCP server runs inside the app — no Obsidian running means no MCP connection, regardless of what `claude mcp list` says |
+| After switching the open vault, the HTTP server does not start | Flip the plugin's "Non-encrypted (HTTP) Server" toggle off and on by hand, even when `enableInsecureServer` is already `true` in `data.json`. Seen more than once after switching vaults |
 | API key exposed in a shell history or chat | Regenerate it in the plugin settings, then re-run the registration step with the new key |
 | `.obsidian/plugins/*/data.json` committed to git | Contains the live API key and certificate — confirm it's in `.gitignore` **before** your first commit, not after |
 | Wrote a file into a dot-prefixed folder (e.g. `.claude/`) inside the vault via the MCP write tool | Reports success, but the file is then invisible to every other vault tool afterward (not listed, not readable, not deletable) — Obsidian's plugin API treats dot-folders as hidden/plugin-config space, not indexed vault content. Use a plain folder name instead |

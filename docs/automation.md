@@ -205,6 +205,8 @@ Add the two `session-start-vault-check` entries under `PostToolUse` as well, as 
 
 `~/.claude/hook-configs/vault-root` holds a single path. With several vaults, the explicit `VAULT_ROOT=` in each registered command is what decides, and the file only serves hooks that rely on the default. `install-claude-config --vault` overwrites that one path, and needs `--force` to replace a different one. A vault's own `post-merge` hook ignores the file (see above), so the file only affects `post-merge` hooks installed in repos that are not vaults.
 
+The hooks that talk to Obsidian (`post-merge`) and your interactive session reach whichever vault Obsidian has open, through one `obsidian` MCP server. Set up the shared key and port, and open the right vault before you work, as described in [Using more than one vault on one machine](mcp-setup.md#using-more-than-one-vault-on-one-machine-optional).
+
 ## Related
 
 - [`statusline.md`](statusline.md) — an optional status line for Claude Code, separate from the vault commands and hooks
