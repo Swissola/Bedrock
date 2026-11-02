@@ -202,3 +202,11 @@ One-time setup (repository admin):
 3. Run it from **Actions → model harness (manual) → Run workflow** on `main`, pick a scenario (start with one), and approve the pending deployment.
 
 What the workflow does and does not allow: it only starts from `workflow_dispatch`; it refuses to run off `main` or for another actor; inputs are fixed choices; permissions are read-only; actions and the `claude` CLI version are pinned; it uses the stub REST API backend only, so nothing is fetched from a package registry at run time; and it has a 30-minute limit and one run at a time. The token is visible to the `claude` process during a run, so only run scenarios you have read. Revoke the token and delete the environment secret if you stop using this.
+
+## Bot reviewer for pull requests (optional)
+
+GitHub does not let you approve your own pull request, and a solo repository has no second reviewer. `.github/workflows/pr-review.yml` stands in for one: it has Claude read a pull request's diff and post what it finds as a comment headed "Bot review (advisory, not an approval)". It never approves, requests changes or merges, so you still decide.
+
+It reuses the `model-harness` environment and `CLAUDE_CODE_OAUTH_TOKEN` secret from the section above, so there is nothing new to set up. Run it from **Actions → bot review (manual) → Run workflow** on `main`, give the pull request number, and approve the pending deployment.
+
+Because this repository is public and a pull request is untrusted text, it is built to keep the token away from it: it starts only from `workflow_dispatch`, runs only on `main` for the owner, and fetches the diff as a file without checking out or running the branch. The step that holds the token has read-only permissions and only the `Read` tool. A second job, which never sees the token, has `pull-requests: write` and posts the comment. The diff is cut at 200 KB and the comment at 6000 characters. Treat the review like any other model output: it can miss things and it can be wrong. `tools/testing/test-structure.sh` checks that these properties still hold.
