@@ -302,6 +302,22 @@ test_gitattributes_forces_lf_for_every_script
 test_javascript_files_parse
 test_powershell_scripts_parse
 test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads
+test_the_bot_review_workflow_stays_locked_down() {
+  local wf="$ROOT/.github/workflows/pr-review.yml"
+  assert_eq "the bot review can only be started by hand (workflow_dispatch)" "1" "$(awk '/^on:/ { on = 1; next } /^[a-z]/ { on = 0 } on && /^  [a-z_]+:/ { n++ } END { print n }' "$wf")"
+  assert_eq "...and that one trigger is workflow_dispatch" "yes" "$(grep -qE '^  workflow_dispatch:' "$wf" && echo yes || echo no)"
+  assert_eq "it never approves, requests changes or merges" "no" "$(grep -qE 'gh pr (review|merge)|--approve' "$wf" && echo yes || echo no)"
+  assert_eq "the model step is limited to the Read tool" "yes" "$(grep -qF -- "--allowedTools 'Read(./**)'" "$wf" && echo yes || echo no)"
+  assert_eq "the token is read only in the review job (two steps), never in the posting job" "2" "$(grep -cE '^[[:space:]]+CLAUDE_CODE_OAUTH_TOKEN: .*secrets' "$wf")"
+  assert_eq "write permission exists only on the posting job" "1" "$(grep -cE '^[[:space:]]+pull-requests: write$' "$wf")"
+  assert_eq "it refuses to run off main or for another actor" "yes" "$(grep -qF "github.ref == 'refs/heads/main' && github.actor == 'Swissola'" "$wf" && echo yes || echo no)"
+  assert_eq "every action is pinned to a commit" "" "$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$wf" | grep -vE '@[0-9a-f]{40}( |$)' || true)"
+  assert_eq "the model step denies every other tool, and Read outside the checkout" "yes" "$(grep -qF 'Bash Write Edit' "$wf" && grep -qF "'Read(//proc/**)'" "$wf" && echo yes || echo no)"
+  assert_eq "the posting job has its own owner and main guard" "2" "$(grep -cF "if: github.repository == 'Swissola/Bedrock' && github.ref == 'refs/heads/main' && github.actor == 'Swissola'" "$wf")"
+  assert_eq "docs/automation.md documents it" "yes" "$(grep -qF 'pr-review.yml' "$ROOT/docs/automation.md" 2>/dev/null && echo yes || echo no)"
+  return 0
+}
+
 test_every_command_template_carries_a_version_stamp
 test_vault_command_templates_are_at_version_4
 test_vault_command_templates_stay_under_their_line_ceilings
@@ -310,6 +326,7 @@ test_test_scripts_avoid_gnu_only_commands_without_a_fallback
 test_every_suite_cleans_up_after_itself_with_a_trap
 test_mutation_config_is_well_formed_and_every_mutant_applies
 test_the_manual_workflow_offers_exactly_the_mutation_groups
+test_the_bot_review_workflow_stays_locked_down
 test_shellcheck_reports_no_warnings
 
 echo "--- $PASS passed, $FAIL failed, $SKIPS skipped ---"
