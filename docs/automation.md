@@ -89,7 +89,7 @@ chmod +x .git/hooks/post-merge .git/hooks/pre-commit
 
 **What it writes:** the doc's frontmatter carries `last-populated`, `source-commit` and the tags `repo-doc` and the repo name; the hook keeps those current and never changes the `## Hand-written notes` section.
 
-**Per-vault settings:** `post-merge` also reads the optional [`vault-config.md`](vault-config.md) (`reposPath` for where the doc lives, `repoNameCase` for how the repo is named, `backend` for which MCP tool names the run may use), and can find the vault from a one-line `~/.claude/hook-configs/vault-root` file when `VAULT_ROOT` isn't set. If the vault is **not a git repo** it only flags unexpected writes (never reverts, removes or commits), see [Hooks in `vault-config.md`](vault-config.md#hooks).
+**Per-vault settings:** `post-merge` also reads the optional [`vault-config.md`](vault-config.md) (`reposPath` for where the doc lives, `repoNameCase` for how the repo is named, `backend` for which MCP tool names the run may use), and finds the vault in this order: the `VAULT_ROOT` environment variable; the repo it is installed in, when that repo is itself a vault (it has a `vault-config.md`, or an `index.md` next to a `daily-notes` folder); the one-line `~/.claude/hook-configs/vault-root` file; the repo itself. Git runs hooks without `VAULT_ROOT` set, so the order matters: a vault's own hook documents into that vault even when the installer's file names a different one. The hook's MCP config (`~/.claude/hook-configs/obsidian-mcp-config.json`) names one Obsidian server, and the Local REST API plugin serves only the vault that Obsidian window has open, so a `post-merge` hook for a vault that is not the open one is expected to fail its write check and leave the doc unchanged. That case has not been run against a real pull. Set `MCP_CONFIG` per repo, pointing at a server for that vault, if you need it. If the vault is **not a git repo** it only flags unexpected writes (never reverts, removes or commits), see [Hooks in `vault-config.md`](vault-config.md#hooks).
 
 **Stopping it:** create `~/.claude/hook-templates/DISABLED` (any content) to stop the hook in every repo on the machine at once, or `~/.claude/hook-logs/.<repo>.disabled` to stop it in one.
 
@@ -178,6 +178,32 @@ Stays silent if the repo you're actually pushing *is* the vault — its own unpu
 ### Why not just auto-push?
 
 Deliberately rejected. Having a hook push its own commit immediately would remove the one human-review checkpoint the whole "no PR gate" governance model depends on (see [Push policy](../runbooks/using-the-vault.md#push-policy-direct-to-main-no-required-pr)) — specifically for AI-generated content landing in a shared knowledge base — and risks unattended non-fast-forward races between multiple people's machines with nobody there to resolve them. These hooks shrink the window an update can sit unpushed and unseen; they don't close it completely. Someone who goes quiet across every repo for a long stretch is still a blind spot, and that's an accepted, known limitation rather than something solved here.
+
+### Working across more than one vault
+
+If you work in two team vaults, register the vault hooks once per vault, in user-scope `~/.claude/settings.json`, each entry with its own `VAULT_ROOT`:
+
+- `session-start-vault-check` under both `SessionStart` and `PostToolUse`. It is about the vault, not the repo you are in, so it should fire everywhere and not be made conditional on the repo. One entry per vault gives one reminder for each vault that has unpushed commits.
+- `session-start-vault-context` under `SessionStart`. It names the repo from the folder it runs in and says nothing when that vault holds no doc for the repo (`reposPath`), so one entry per vault does not clash: each vault speaks only for the repos it documents. If both vaults hold a doc for the same repo, both entries load context for it.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [
+        { "type": "command", "command": "VAULT_ROOT=\"<vault-a>\" bash \"<vault-a>/tools/hook-templates/session-start-vault-check\"" },
+        { "type": "command", "command": "VAULT_ROOT=\"<vault-a>\" bash \"<vault-a>/tools/hook-templates/session-start-vault-context\"" },
+        { "type": "command", "command": "VAULT_ROOT=\"<vault-b>\" bash \"<vault-b>/tools/hook-templates/session-start-vault-check\"" },
+        { "type": "command", "command": "VAULT_ROOT=\"<vault-b>\" bash \"<vault-b>/tools/hook-templates/session-start-vault-context\"" }
+      ] }
+    ]
+  }
+}
+```
+
+Add the two `session-start-vault-check` entries under `PostToolUse` as well, as in the single-vault example above.
+
+`~/.claude/hook-configs/vault-root` holds a single path. With several vaults, the explicit `VAULT_ROOT=` in each registered command is what decides, and the file only serves hooks that rely on the default. `install-claude-config --vault` overwrites that one path, and needs `--force` to replace a different one. A vault's own `post-merge` hook ignores the file (see above), so the file only affects `post-merge` hooks installed in repos that are not vaults.
 
 ## Related
 

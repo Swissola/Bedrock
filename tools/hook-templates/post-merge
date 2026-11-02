@@ -92,16 +92,25 @@ REPO_FOLDER_NAME="$(basename "$(repo_folder)")"
 # out a real 15s retry delay.
 #
 # VAULT_ROOT is resolved in this order: the VAULT_ROOT environment variable;
-# else the single line in the file named by VAULT_ROOT_FILE (default
+# else this repo's own git root, when that repo is itself a vault (it has a
+# vault-config.md, or an index.md next to a daily-notes folder); else the single
+# line in the file named by VAULT_ROOT_FILE (default
 # ~/.claude/hook-configs/vault-root), which is how a per-machine installer can
 # point every repo's hook at a vault that isn't the repo itself, without editing
 # each .git/hooks/post-merge; else this repo's own git root (the original
-# behaviour, unchanged for anyone with neither set).
+# behaviour, unchanged for anyone with neither set). A vault's own hook comes
+# before the file so that a person with several vaults, whose file names only one
+# of them, does not have every other vault's hook redirected to that one.
 VAULT_ROOT_FILE="${VAULT_ROOT_FILE:-$HOME/.claude/hook-configs/vault-root}"
+OWN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "${VAULT_ROOT:-}" ] && [ -n "$OWN_ROOT" ] \
+   && { [ -f "$OWN_ROOT/vault-config.md" ] || { [ -f "$OWN_ROOT/index.md" ] && [ -d "$OWN_ROOT/daily-notes" ]; }; }; then
+    VAULT_ROOT="$OWN_ROOT"
+fi
 if [ -z "${VAULT_ROOT:-}" ] && [ -f "$VAULT_ROOT_FILE" ]; then
     VAULT_ROOT="$(head -n1 "$VAULT_ROOT_FILE" | tr -d '\r')"
 fi
-VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+VAULT_ROOT="${VAULT_ROOT:-$OWN_ROOT}"
 HOOK_LOG_DIR="${HOOK_LOG_DIR:-$HOME/.claude/hook-logs}"
 MCP_CONFIG="${MCP_CONFIG:-$HOME/.claude/hook-configs/obsidian-mcp-config.json}"
 FAILURES_LOG="$HOOK_LOG_DIR/FAILURES.log"

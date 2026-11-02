@@ -680,6 +680,27 @@ test_vault_root_read_from_file_when_env_unset() {
   return $?
 }
 
+test_a_repo_that_is_itself_a_vault_ignores_the_vault_root_file() {
+  # Two vaults on one machine: the installer's vault-root file names only one of them,
+  # but the other vault's own hook must still document into that other vault.
+  local base repo logdir bindir rootfile waited=0
+  base=$(mktemp -d); repo="$base/team-vault"; mkdir -p "$repo/repos/team-vault"
+  git -C "$repo" init -q -b main; git -C "$repo" config user.email t@example.com; git -C "$repo" config user.name Test; git -C "$repo" config core.autocrlf false
+  printf -- '---\n---\n' > "$repo/vault-config.md"; echo "original index" > "$repo/repos/team-vault/index.md"
+  echo "readme" > "$repo/README.md"; git -C "$repo" add -A; git -C "$repo" commit -q -m seed
+  git -C "$repo" update-ref refs/remotes/origin/main "$(git -C "$repo" rev-parse HEAD)"; git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  logdir=$(mktemp -d); bindir=$(mktemp -d); rootfile="$bindir/vault-root"
+  printf '%s\n' "/nonexistent/other/vault" > "$rootfile"
+  make_stub_claude_writing_index "$bindir" "$repo" "team-vault" "$INDEX_CONTENT"
+  echo "$CHANGE_MSG" >> "$repo/README.md"; git -C "$repo" commit -aq -m "$CHANGE_MSG"
+  ( cd "$repo" && env -u VAULT_ROOT PATH="$bindir:$PATH" HOOK_LOG_DIR="$logdir" VAULT_ROOT_FILE="$rootfile" bash "$HOOK_SCRIPT" )
+  LOG_FILE="$logdir/team-vault-post-merge.log"
+  while [[ ! -s "$LOG_FILE" ]] && [[ "$waited" -lt 80 ]]; do sleep 0.1; waited=$((waited + 1)); done
+  assert_eq "a vault's own hook targets its own repo, not the vault-root file (exit=0)" "1" "$(gcount "$LOG_EXIT_0" "$LOG_FILE")"
+  rm -rf "$base" "$logdir" "$bindir"
+  return $?
+}
+
 test_env_vault_root_beats_file() {
   local repo vault logdir bindir rootfile
   repo=$(make_other_repo "$REPO_NAME"); vault=$(make_plain_vault "$REPO_NAME")
@@ -743,6 +764,7 @@ test_repos_path_missing_doc_aborts_naming_configured_path
 test_unsafe_repos_path_falls_back_to_default
 test_vault_root_read_from_file_when_env_unset
 test_env_vault_root_beats_file
+test_a_repo_that_is_itself_a_vault_ignores_the_vault_root_file
 test_default_backend_allows_rest_api_tools_only
 test_mcpvault_backend_detected_from_mcp_config
 test_backend_key_in_vault_config_overrides_detection
