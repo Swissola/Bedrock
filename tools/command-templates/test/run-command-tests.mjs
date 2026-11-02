@@ -70,6 +70,19 @@ const DEFAULT_HUB ='# Hub\n\nMARKER-HUB-42\n\n## Repos\n\n| Repo | Doc |\n|---|-
 let pass = 0, fail = 0;
 const check = (desc, ok, extra = '') => { if (ok) { pass++; console.log(`  PASS: ${desc}`); } else { fail++; console.log(`  FAIL: ${desc}${extra ? ' (' + extra + ')' : ''}`); } };
 
+// Pinned: the mcpvault backend runs this package through npx, so never ask for @latest.
+const MCPVAULT_VERSION = '0.18.3';
+// Exactly what the three templates run. No blanket shell access.
+const GIT_READS = ['git config user.name', 'git config --get:*', 'git rev-parse:*', 'git -C * rev-parse:*', 'git remote:*', 'git diff:*', 'git log:*', 'git cat-file:*', 'git merge-base:*', 'git rev-list:*'];
+const ALLOWED_SHELL = [...GIT_READS, 'hostname'].flatMap((p) => [`Bash(${p})`, `PowerShell(${p})`]);
+// The spawned claude gets a throwaway home so it cannot touch real config or hooks. That
+// also hides a stored login, so it needs ANTHROPIC_API_KEY; without one it keeps the real home.
+let tmpHome = null;
+function claudeEnv() {
+  if (!process.env.ANTHROPIC_API_KEY) return process.env;
+  tmpHome ??= fs.mkdtempSync(path.join(os.tmpdir(), 'bedrock-t-home-'));
+  return { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome, CLAUDE_CONFIG_DIR: path.join(tmpHome, '.claude') };
+}
 function sh(cmd, args, cwd) { return spawnSync(cmd, args, { cwd, encoding: 'utf8' }); }
 function mkRepo(name) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `bedrock-t-${name}-`));
@@ -97,13 +110,14 @@ function runCommand({ vault, repo, template, args = '', system = '', stubEnv = n
   fs.copyFileSync(path.join(templates, `${template}.md`), path.join(cmdDir, 'tpl-under-test.md'));
   const server = backend === 'rest-api'
     ? { command: process.execPath, args: [stub, vault], ...(stubEnv ? { env: stubEnv } : {}) }
-    : { command: 'npx', args: ['-y', '@bitbonsai/mcpvault@latest', vault.split(path.sep).join('/')] };
+    : { command: 'npx', args: ['-y', '@bitbonsai/mcpvault@' + MCPVAULT_VERSION, vault.split(path.sep).join('/')] };
   const mcp = path.join(path.dirname(repo), 'mcp.json');
   fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { obsidian: server } }));
   const a = ['-p', `/tpl-under-test ${args}`.trim(), '--mcp-config', mcp, '--strict-mcp-config', '--model', model, '--max-turns', '25', '--verbose', '--output-format', 'stream-json',
-    '--allowedTools', 'mcp__obsidian__*', 'Edit', 'Read', 'Bash(git config:*)', 'Bash(git rev-parse:*)', 'Bash(git -C:*)', 'Bash(git remote:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git cat-file:*)', 'Bash(git merge-base:*)', 'Bash(git rev-list:*)', 'Bash(hostname)', 'PowerShell(*)'];
+    '--allowedTools', 'mcp__obsidian__*', 'Edit', 'Read', ...ALLOWED_SHELL,
+    '--disallowedTools', 'Bash(git * -c *)', 'PowerShell(git * -c *)'];
   if (system) a.push('--append-system-prompt', system);
-  const r = sh('claude', a, repo);
+  const r = spawnSync('claude', a, { cwd: repo, encoding: 'utf8', env: claudeEnv() });
   const { calls, final } = parseEvents(r.stdout || '');
   if (r.error) console.log(`  (could not run claude: ${r.error.message})`);
   // A run that made no vault call at all usually died early (not logged in, bad token,
