@@ -981,6 +981,35 @@ test_a_longer_repo_name_does_not_claim_a_shorter_ones_notes() {
   return 0
 }
 
+test_a_repo_name_inside_another_repos_name_does_not_claim_its_notes() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_named_note "$vault" alice 2026-10-06 my-widget tweak ALICEMY 202610060900
+  fx_named_note "$vault" alice 2026-10-04 foo widget-bar ALICETOPIC 202610040900
+  fx_named_note "$vault" bob 2026-10-05 widget fix BOBWIDGET 202610050900
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_eq "only the note whose repo segment is widget" "CONTEXT-BOBWIDGET" "$(printf '%s' "$out" | heading_order)"
+  return 0
+}
+
+test_a_repos_path_ending_in_the_repo_name_still_finds_the_longer_repos() {
+  local short long vault out
+  short=$(fx_repo widget); long=$(fx_repo widget-ui); vault=$(fx_dir)
+  mkdir -p "$vault/repos/widget" "$vault/repos/widget-ui"
+  echo "WIDGET-DOC" > "$vault/repos/widget"/index.md; echo "UI-DOC" > "$vault/repos/widget-ui"/index.md
+  printf -- '---
+reposPath: "repos/{repo}"
+---
+' > "$vault/vault-config.md"
+  mv "$vault/repos/widget/index.md" "$vault/repos/widget.tmp" && rmdir "$vault/repos/widget" && mv "$vault/repos/widget.tmp" "$vault/repos/widget"
+  mv "$vault/repos/widget-ui/index.md" "$vault/repos/widget-ui.tmp" && rmdir "$vault/repos/widget-ui" && mv "$vault/repos/widget-ui.tmp" "$vault/repos/widget-ui"
+  fx_named_note "$vault" alice 2026-10-06 widget-ui tweak ALICEUI 202610060900
+  fx_named_note "$vault" bob 2026-10-05 widget fix BOBWIDGET 202610050900
+  out=$(run_hook "$short" "$vault" "$STARTUP_EVENT")
+  assert_eq "widget does not claim widget-ui's note when reposPath names a file" "CONTEXT-BOBWIDGET" "$(printf '%s' "$out" | heading_order)"
+  return 0
+}
+
 test_known_repos_come_from_the_repos_path_listing() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_flat_vault widget)
@@ -1007,6 +1036,8 @@ test_resume_loads_nothing_but_startup_and_clear_do() {
 
 test_the_default_pattern_names_the_repo
 test_a_longer_repo_name_does_not_claim_a_shorter_ones_notes
+test_a_repo_name_inside_another_repos_name_does_not_claim_its_notes
+test_a_repos_path_ending_in_the_repo_name_still_finds_the_longer_repos
 test_known_repos_come_from_the_repos_path_listing
 test_resume_loads_nothing_but_startup_and_clear_do
 

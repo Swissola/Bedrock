@@ -386,6 +386,15 @@ const scenarios = [
     check('it gained an Update section', mine[0] && /^## Update/m.test(read(vault, mine[0])));
     check('the gadget note is untouched', read(vault, `daily-notes/test-user/${TODAY}-gadget-other.md`) === dnote('OTHERREPO', '', 'gadget'));
   } },
+  { name: 'log: appending to todays note leaves its open items in place and keeps new ones out of the Update section', run() {
+    const { repo } = mkRepo('widget'); const today = `daily-notes/test-user/${TODAY}-widget-first.md`;
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [today]: dnote('FIRST', `- [ ] EARLIER-ITEM
+`, 'widget') });
+    runCommand({ vault, repo, template: 'vault-log', args: 'second', system: `TEST HARNESS: synthetic second session today in repo widget. Nothing touched EARLIER-ITEM. You found one new follow-up for the next session: NEW-FOLLOWUP.` });
+    const t = read(vault, today);
+    check('the earlier item is still open and was not carried', /^- \[ \] EARLIER-ITEM/m.test(t) && !/^- \[>\]/m.test(t), t.slice(-400));
+    check('the new follow-up is in the Open Questions list', /## Open Questions \/ Next Steps[\s\S]*NEW-FOLLOWUP/.test(t.split(/^## Update/m)[0]), t.slice(-400));
+  } },
   { name: 'log: reconcile ticks done, drops dropped, carries untouched silently with its opened date', run() {
     const { repo } = mkRepo('widget'); const prev = `daily-notes/test-user/${daysAgo(3)}-widget-prev.md`;
     const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [prev]: dnote('PREV', `- [ ] DONE-ITEM\n- [ ] DROP-ITEM\n- [ ] UNTOUCHED-ITEM (opened ${daysAgo(10)})\n`, 'widget') });

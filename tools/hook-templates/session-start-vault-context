@@ -145,7 +145,8 @@ repo_folder() {
 }
 
 REPO_NAME="$(basename "$(repo_folder)")"
-case "$(config_value repoNameCase)" in
+REPO_CASE="$(config_value repoNameCase)"
+case "$REPO_CASE" in
   keep) ;;
   *) REPO_NAME="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]')" ;;
 esac
@@ -177,12 +178,14 @@ REPO_FILTERED=0
 case "$NAME_PATTERN" in *"{repo}"*) REPO_FILTERED=1 ;; esac
 
 # The filename glob for notes about repo $1: the pattern with {repo} replaced by
-# that name and every other {placeholder} a wildcard. Glob characters in the
+# that name, {date} a date-shaped glob (so `my-widget` is never read as `widget`)
+# and every other {placeholder} a wildcard. Glob characters in the
 # repo name itself are escaped so they match literally.
 glob_for() {
   local repo_glob g
   repo_glob="$(printf '%s' "$1" | sed 's/[][*?\\]/\\&/g')"
   g="${NAME_PATTERN//\{repo\}/$repo_glob}"
+  g="${g//\{date\}/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]}"
   g="$(printf '%s' "$g" | sed -E 's/\{[A-Za-z]+\}/*/g')"
   printf '%s.md' "$g"
   return 0
@@ -194,7 +197,7 @@ glob_for() {
 # {repo} names one fixed doc, so there is nothing to list.
 known_repos() {
   local base after entry name keep=0
-  [[ "$(config_value repoNameCase)" == keep ]] && keep=1
+  [[ "$REPO_CASE" == keep ]] && keep=1
   if [[ "$REPOS_PATH" == *"{repo}"* ]]; then
     base="${REPOS_PATH%%\{repo\}*}"
     after="${REPOS_PATH#*\{repo\}}"
@@ -202,7 +205,7 @@ known_repos() {
       entry="${entry##*/}"
       case "$after" in
         /*) [[ -e "$VAULT_ROOT/$base$entry$after" ]] || continue; name="$entry" ;;
-        *) [[ -n "$after" && "$entry" == *"$after" ]] || continue; name="${entry%"$after"}" ;;
+        *) [[ -z "$after" || "$entry" == *"$after" ]] || continue; name="${entry%"$after"}" ;;
       esac
       [[ -n "$name" ]] || continue
       if [[ "$keep" = 1 ]]; then printf '%s\n' "$name"; else printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]'; fi
@@ -354,7 +357,7 @@ fm_repo() {
     $0 == "---" { exit }
     /^repo:/ { v = $0; sub(/^repo:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); gsub(/^["\047]|["\047]$/, "", v); print v; exit }
   ')"
-  if [[ "$(config_value repoNameCase)" == keep ]]; then printf '%s' "$v"; else printf '%s' "$v" | tr '[:upper:]' '[:lower:]'; fi
+  if [[ "$REPO_CASE" == keep ]]; then printf '%s' "$v"; else printf '%s' "$v" | tr '[:upper:]' '[:lower:]'; fi
   return 0
 }
 
