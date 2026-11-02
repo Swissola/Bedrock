@@ -12,10 +12,10 @@ The vault only pays off if it's actually part of how you work, not a separate ch
 ## Starting a session
 
 - **`git pull` first, before anything else.** This is a shared vault, not a personal one — skipping this means reading stale `index.md`/`repos/` content and risking a conflict later if you edit something someone else already changed.
-- Ask your assistant to *"read `index.md` and the most recent daily note"* before diving in — it picks up where you left off without you re-explaining it.
+- Ask your assistant to *"read `index.md` and the most recent daily note"* before diving in — it picks up where you left off without you re-explaining it. With the per-repo notes, ask for the notes about the repo you are in: your latest one, and the open items anyone left.
 - Resuming something specific? Name it: *"read the last daily note about the deploy pipeline."*
 - If you've installed the optional `/vault-context` command (see [`docs/automation.md`](../docs/automation.md)), it does exactly this in one step.
-- If a repo has the optional `session-start-vault-context` hook installed (opt-in per repo, see [`docs/automation.md`](../docs/automation.md)), this happens automatically at the start of every session there, no asking required.
+- If a repo has the optional `session-start-vault-context` hook installed (opt-in per repo, see [`docs/automation.md`](../docs/automation.md)), this happens automatically at the start of every session there, no asking required: your latest note for that repo, a short form of up to three other contributors' notes for it, and the open `- [ ]` items with their owners and ages. It stays quiet on `resume`.
 
 ## During the session
 
@@ -24,9 +24,9 @@ The vault only pays off if it's actually part of how you work, not a separate ch
 
 ## Ending a session
 
-- Ask your assistant to *"write today's session as a daily note"* before you close down. It'll follow the template in [`using-the-vault.md`](using-the-vault.md).
+- Ask your assistant to *"write today's session as a daily note"* before you close down. It writes one note per repo you worked in, following the template in [`using-the-vault.md`](using-the-vault.md), and first reconciles open items: it ticks what the session finished, carries untouched ones forward with their original `opened` date, and asks about the rest.
 - If anything durable came out (a system now understood, a procedure worth repeating), ask for it to be pulled into `repos/` or `runbooks/` and cross-linked — don't leave it stranded in the daily note where the next person won't think to look.
-- If you've installed the optional `/vault-log` command, it automates this exact step — discovering the folder/filename convention, checking for a same-day/same-topic note, and appending or creating as appropriate.
+- If you've installed the optional `/vault-log` command, it automates this exact step — discovering the folder/filename convention, checking for a same-day note for the same repo, and appending or creating as appropriate.
 - **Check `git status`, commit, and push before you close down.** If you've installed the `post-merge` hook, it auto-commits its own doc updates locally as they happen, so they won't be lost — but it never pushes. If you don't push, nobody else's vault gets the update. This is the actual mechanism by which anyone else "sees" what changed — there's no other notification, so an unpushed session might as well not have happened, for everyone else.
 
 ## If you install the `post-merge` self-documenting hook (optional)
@@ -111,7 +111,7 @@ This repo pushes straight to `main`, no PR required — see [`using-the-vault.md
 ## Weekly-ish housekeeping
 
 - Skim `index.md` and add links for any `repos/` docs that piled up during the week without being wired in.
-- Check the `Open Questions / Next Steps` checklists in recent daily notes — tick off what's resolved, or fold it into the durable doc it affects.
+- Check the open items (`- [ ]`) in recent daily notes — anything older than `staleOpenItemDays` (30) is flagged stale. Tick off what's resolved, drop what no longer matters, or fold it into the durable doc it affects.
 - **If you've installed the `post-merge` hook, skim the week's automated commits** (`git log --oneline --grep "via post-merge hook"`) — this repo doesn't require PR review before anything reaches `main` (see [`using-the-vault.md`](using-the-vault.md)'s push-policy section for why), so this weekly skim is the batch-review backstop, on top of the per-push glance in Example 3 above.
 
 ## Related

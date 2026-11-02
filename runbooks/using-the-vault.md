@@ -61,9 +61,10 @@ Before closing down, ask your assistant:
 
 ### The folder and filename convention
 
-This is a shared vault, so notes are split one subfolder per contributor: `daily-notes/<your-full-name>/YYYY-MM-DD-<short-topic>.md`.
+This is a shared vault, so notes are split one subfolder per contributor: `daily-notes/<your-full-name>/YYYY-MM-DD-<repo>-<short-topic>.md`. **One note per repo you worked in**, so a session that touched three repos writes three notes, each holding only its own repo's work.
 
 - **Subfolder, not filename, carries the author** — `daily-notes/jane-doe/`, not `daily-notes/2026-09-14-jane-doe-topic.md`. Once there are more than a couple of contributors, a flat folder with everyone's notes mixed together gets hard to scan; a subfolder per person keeps it navigable.
+- **The repo is in the filename and in the frontmatter** (`repo: widget-service`, plus the same name as a tag). The repo name is the folder the repo lives in, lowercased. This is what lets the session-start hook load the notes for the repo you are in without reading every note in the vault.
 - **Always your full name, forename-surname** (`jane-doe`, from `git config user.name`, lowercased with spaces turned to hyphens) — **never just a forename** (`jane`). A team of any size can easily end up with two people sharing a first name, and a forename-only folder would silently merge their notes together.
 
 ### The template
@@ -73,7 +74,8 @@ There's no enforced template, but converging on one consistently is worth it —
 ```markdown
 ---
 title: Short descriptive title
-tags: [relevant, tags]
+repo: widget-service
+tags: [daily-note, widget-service, theme-tags]
 date: YYYY-MM-DD
 ---
 
@@ -98,9 +100,11 @@ date: YYYY-MM-DD
 - [ ] checklist of what's unresolved
 ```
 
-If you pick a session back up later the same day, **append an `## Update (later same session) — ...` section to the existing file** rather than starting a new one — keeps the full story in one place.
+**Open items carry across notes.** Each `- [ ]` is tracked until it is closed, with these markers: `- [x]` done `(done YYYY-MM-DD, see [[note]])`, `- [-]` dropped `(dropped YYYY-MM-DD: reason)`, `- [>]` carried to a newer note `(carried to [[new note]] YYYY-MM-DD)`. A carried item in the new note reads `- [ ] text (from [[old note]], opened YYYY-MM-DD)`; the opened date stays the original one, so an item's age is never reset by carrying it. `/vault-log` reconciles them at the end of a session: ticks what the session finished, carries untouched items silently, and asks you about partly touched ones and anything open longer than `staleOpenItemDays` (30). It closes another person's item only with evidence, and then changes only that line's marker.
 
-> **Different conventions in your own vault?** The folder, filename, template and same-day rule above are the defaults. A vault that wants something else (a different folder layout, extra frontmatter, several notes per day) can say so in an optional `vault-config.md`; see [`docs/vault-config.md`](../docs/vault-config.md). With no such file, everything on this page applies as written.
+If you pick a session back up later the same day in the same repo, **append an `## Update (later same session) — ...` section to your existing note for that repo** rather than starting a new one (another repo's note from the same day is never appended to) — keeps the full story in one place.
+
+> **Different conventions in your own vault?** The folder, filename, template and same-day-same-repo rule above are the defaults. A vault that wants something else (a different folder layout, extra frontmatter, several notes per day) can say so in an optional `vault-config.md`; see [`docs/vault-config.md`](../docs/vault-config.md). With no such file, everything on this page applies as written.
 
 If anything durable came out of the session (a system now understood, a procedure worth repeating), ask for it to be pulled into `repos/` or `runbooks/` and cross-linked — don't leave it stranded in the daily note where the next person won't think to look.
 

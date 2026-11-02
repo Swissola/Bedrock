@@ -20,9 +20,9 @@ Quick-reference pointer, not the source of truth — the canonical version lives
 
 ## Daily-note naming
 
-`daily-notes/<author-full-name-hyphenated>/YYYY-MM-DD-<short-topic>.md` — always the full name (`jane-doe`), never just a forename, since a forename-only folder can silently merge two people's notes together. The author slug comes from `git config user.name`, lowercased, spaces turned to hyphens.
+`daily-notes/<author-full-name-hyphenated>/YYYY-MM-DD-<repo>-<short-topic>.md`, one note per repo worked in, with `repo: <repo>` in the frontmatter and the repo as a tag. Always the full name (`jane-doe`), never just a forename, since a forename-only folder can silently merge two people's notes together. The author slug comes from `git config user.name`, lowercased, spaces turned to hyphens.
 
-If picking a session back up later the same day, append a `## Update (later same session) — ...` section to the existing file rather than starting a new one.
+If picking a session back up later the same day in the same repo, append a `## Update (later same session) — ...` section to your existing note for that repo rather than starting a new one. Open items (`- [ ]`) carry between notes with `opened YYYY-MM-DD` dates; see `runbooks/using-the-vault.md`.
 
 ## Cross-linking
 
