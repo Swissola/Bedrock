@@ -1442,6 +1442,29 @@ test_at_most_five_older_notes_are_opened() {
   return 0
 }
 
+test_at_most_five_older_notes_are_opened_even_when_they_share_a_date() {
+  local repo vault out i
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_fm_note "$vault" alice 2026-10-08 t0 widget "TIEDEEP" 202610080800
+  for i in 1 2 3 4 5 6; do fx_fm_note "$vault" alice 2026-10-08 "t$i" gadget "OTHER$i" "20261008090$i"; done
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_not_contains "a sixth note from the same day is never opened, even one naming this repo" "CONTEXT-TIEDEEP" "$out"
+  assert_contains "...so the repo is reported as having no notes" "(No daily notes yet for this repo.)" "$out"
+  return 0
+}
+
+test_non_markdown_files_are_not_older_notes_either() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_fm_note "$vault" alice 2026-10-05 old "" "REALOLD" 202610050900
+  echo "NOT-A-NOTE" > "$vault/daily-notes/alice/2026-10-09-misc.txt"
+  touch -t 202610092300 "$vault/daily-notes/alice/2026-10-09-misc.txt"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "the newer .txt is ignored, the older .md is the fallback" "CONTEXT-REALOLD" "$out"
+  assert_not_contains "the .txt content never appears" "NOT-A-NOTE" "$out"
+  return 0
+}
+
 test_a_note_whose_frontmatter_names_this_repo_counts_as_its_own() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
@@ -1457,6 +1480,8 @@ test_a_repo_with_no_notes_loads_the_newest_older_note
 test_the_fallback_stops_once_the_repo_has_a_note
 test_an_older_note_naming_another_repo_is_skipped_and_never_loaded
 test_at_most_five_older_notes_are_opened
+test_at_most_five_older_notes_are_opened_even_when_they_share_a_date
+test_non_markdown_files_are_not_older_notes_either
 test_a_note_whose_frontmatter_names_this_repo_counts_as_its_own
 
 test_a_very_long_open_item_is_cut() {
