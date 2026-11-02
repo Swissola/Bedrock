@@ -28,8 +28,9 @@ usage() {
 Usage: install-claude-config.sh [options]
 
   --vault <path>       the vault's absolute path. Written to
-                       <prefix>/hook-configs/vault-root so hooks installed in
-                       other repos can find the vault without VAULT_ROOT.
+                       <prefix>/hook-configs/vault-root (one path per line; added
+                       if not listed, the first line stays the default) so hooks
+                       can find the vault without VAULT_ROOT. Run it once per vault.
   --backend <name>     rest-api | mcpvault. With mcpvault and --vault, also
                        writes the hook MCP config (<prefix>/hook-configs/
                        obsidian-mcp-config.json) if there isn't one. The
@@ -37,7 +38,7 @@ Usage: install-claude-config.sh [options]
   --check              report whether installed files are current; change nothing.
                        Exit 1 if anything is missing, outdated or modified.
   --dry-run            say what would be installed; change nothing.
-  --force              allow replacing an existing vault-root file, and (with
+  --force              make --vault the default in an existing vault-root file, and (with
                        --statusline) a different statusLine in settings.json.
   --statusline         also install the Claude Code status line: copies
                        tools/statusline/statusline.mjs to <prefix>/statusline.mjs
@@ -241,14 +242,25 @@ fi
 if [[ -n "$VAULT" ]]; then
   vault_norm="$(printf '%s' "$VAULT" | tr '\\' '/')"
   root_file="$PREFIX/hook-configs/vault-root"
-  if [[ -f "$root_file" ]] && [[ "$(head -n1 "$root_file" | tr -d '\r')" != "$vault_norm" ]] && [[ "$FORCE" != "1" ]]; then
-    echo "kept      $root_file (already points at '$(head -n1 "$root_file" | tr -d '\r')'; pass --force to change it to '$vault_norm')"
-  elif [[ -f "$root_file" ]] && [[ "$(head -n1 "$root_file" | tr -d '\r')" = "$vault_norm" ]]; then
+  # One absolute vault path per line. The first line is the default for hooks installed
+  # in other repos; a vault's own post-merge hook also recognises its repo when listed.
+  first_listed=""; is_listed=0
+  if [[ -f "$root_file" ]]; then
+    first_listed="$(head -n1 "$root_file" | tr -d '\r')"
+    tr -d '\r' < "$root_file" | grep -Fxq -- "$vault_norm" && is_listed=1
+  fi
+  if [[ ! -f "$root_file" ]]; then
+    if [[ "$DRY" = "1" ]]; then echo "would write $root_file"
+    else mkdir -p "$PREFIX/hook-configs" && printf '%s\n' "$vault_norm" > "$root_file" && echo "wrote     $root_file"; fi
+  elif [[ "$is_listed" = "1" ]] && { [[ "$first_listed" = "$vault_norm" ]] || [[ "$FORCE" != "1" ]]; }; then
     echo "unchanged $root_file"
+  elif [[ "$FORCE" = "1" ]]; then
+    if [[ "$DRY" = "1" ]]; then echo "would make $vault_norm the default in $root_file"
+    else { printf '%s\n' "$vault_norm"; tr -d '\r' < "$root_file" | grep -vFx -- "$vault_norm" || true; } > "$root_file.tmp" && mv "$root_file.tmp" "$root_file" && echo "wrote     $root_file ('$vault_norm' is now the default)"; fi
   elif [[ "$DRY" = "1" ]]; then
-    echo "would write $root_file"
+    echo "would add $vault_norm to $root_file (default stays '$first_listed')"
   else
-    mkdir -p "$PREFIX/hook-configs" && printf '%s\n' "$vault_norm" > "$root_file" && echo "wrote     $root_file"
+    { [[ -z "$(tail -c1 "$root_file")" ]] || printf '\n' >> "$root_file"; } && printf '%s\n' "$vault_norm" >> "$root_file" && echo "added     $vault_norm to $root_file (the default stays '$first_listed'; pass --force to make it the default)"
   fi
 
   if [[ "$BACKEND" = "mcpvault" ]]; then

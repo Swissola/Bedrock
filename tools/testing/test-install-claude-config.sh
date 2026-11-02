@@ -267,6 +267,29 @@ test_option_order_does_not_matter() {
   return $?
 }
 
+test_a_second_vault_is_added_to_the_vault_root_file_without_changing_the_default() {
+  local p v v2 out f; p=$(mktemp -d); v=$(mktemp -d); v2=$(mktemp -d); f="$p/claude/hook-configs/vault-root"
+  bash "$INSTALLER" --prefix "$p/claude" --vault "$v" >/dev/null 2>&1
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" --dry-run 2>&1)
+  assert_contains "dry run: says it would add the second vault" "would add" "$out"
+  assert_eq "dry run: the file is untouched" "1" "$(wc -l < "$f" | tr -d ' ')"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" 2>&1)
+  assert_contains "second vault: reports that it was added" "added" "$out"
+  assert_eq "second vault: the first line, the default, is unchanged" "$v" "$(head -n1 "$f" | tr -d '\r')"
+  assert_eq "second vault: it is listed on its own line" "$v2" "$(sed -n 2p "$f" | tr -d '\r')"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" 2>&1)
+  assert_contains "second vault again: unchanged" "unchanged $f" "$out"
+  assert_eq "second vault again: still two lines" "2" "$(wc -l < "$f" | tr -d ' ')"
+  bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" --force >/dev/null 2>&1
+  assert_eq "--force on a listed vault makes it the default" "$v2" "$(head -n1 "$f" | tr -d '\r')"
+  assert_eq "...and the other vault stays listed, once" "1" "$(grep -cFx -- "$v" "$f")"
+  printf '%s' "$v" > "$f"
+  bash "$INSTALLER" --prefix "$p/claude" --vault "$v2" >/dev/null 2>&1
+  assert_eq "a file with no trailing newline: the new vault still gets its own line" "$v2" "$(sed -n 2p "$f" | tr -d '\r')"
+  rm -rf "$p" "$v" "$v2"
+  return $?
+}
+
 test_vault_root_is_idempotent_for_the_same_vault() {
   local p v out; p=$(mktemp -d); v=$(mktemp -d)
   bash "$INSTALLER" --prefix "$p/claude" --vault "$v" >/dev/null 2>&1
@@ -762,6 +785,7 @@ test_second_run_is_idempotent
 test_check_mode
 test_update_replaces_outdated_copy
 test_vault_root_file
+test_a_second_vault_is_added_to_the_vault_root_file_without_changing_the_default
 test_nonexistent_vault_is_an_error
 test_mcpvault_config_generated_once
 test_rest_api_backend_writes_no_config_and_explains
