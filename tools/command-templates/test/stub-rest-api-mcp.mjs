@@ -16,6 +16,8 @@
 //
 // Usage:  node stub-rest-api-mcp.mjs <vault-folder>
 // Env:    STUB_LOG=<file>  append one JSON line per tool call (for assertions)
+//         STUB_MUTATE_AFTER_READ=<path>::<text>  after the FIRST read of that file, append the
+//         text to it, as if someone else had edited it in the meantime (for race tests)
 // Zero dependencies: a minimal MCP stdio server (newline-delimited JSON-RPC).
 
 import fs from 'node:fs';
@@ -28,6 +30,8 @@ if (!process.argv[2] || !fs.existsSync(root) || !fs.statSync(root).isDirectory()
   process.exit(2);
 }
 const logFile = process.env.STUB_LOG || '';
+const mutateSpec = (process.env.STUB_MUTATE_AFTER_READ || '').split('::');
+let mutated = false;
 
 const pathProp = { type: 'string', description: 'Path relative to the vault root' };
 const tools = [
@@ -72,7 +76,9 @@ function callTool(name, args) {
     case 'vault_read': {
       const f = resolveInside(args.path);
       if (!fs.existsSync(f) || !fs.statSync(f).isFile()) return text(`File not found: ${args.path}`, true);
-      return text(fs.readFileSync(f, 'utf8'));
+      const content = fs.readFileSync(f, 'utf8');
+      if (!mutated && mutateSpec.length === 2 && args.path === mutateSpec[0]) { mutated = true; fs.appendFileSync(f, mutateSpec[1], 'utf8'); }
+      return text(content);
     }
     case 'vault_write': {
       const f = resolveInside(args.path);

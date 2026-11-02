@@ -152,6 +152,17 @@ const noLog = raw(v2, [rpc(1, 'tools/call', { name: 'vault_read', arguments: { p
 check('without STUB_LOG nothing extra is written and the call still works', noLog[0]?.result?.content?.[0]?.text === 'overwritten\n');
 fs.rmSync(logFile, { force: true });
 
+// STUB_MUTATE_AFTER_READ: the first read returns the file as it was, a later one sees the edit.
+const v3 = fs.mkdtempSync(path.join(os.tmpdir(), 'bedrock-stub-vault3-'));
+fs.writeFileSync(path.join(v3, 'd.md'), 'orig\n');
+const reqs = [call('vault_read', { path: 'd.md' }), call('vault_read', { path: 'd.md' }), call('vault_read', { path: 'd.md' })];
+const mutInput = reqs.map((r, i) => JSON.stringify({ jsonrpc: '2.0', id: i + 1, ...r })).join('\n') + '\n';
+const mutRun = spawnSync(process.execPath, [stub, v3], { input: mutInput, encoding: 'utf8', timeout: 20000, env: { ...process.env, STUB_MUTATE_AFTER_READ: 'd.md::EDITED' } });
+const mutOut = {}; for (const line of (mutRun.stdout || '').split('\n').filter(Boolean)) { const j = JSON.parse(line); mutOut[j.id] = j.result; }
+check('mutate-after-read: the first read returns the file as it was', textOf(mutOut[1]) === 'orig\n', textOf(mutOut[1]));
+check('mutate-after-read: a later read sees the edit, applied only once', textOf(mutOut[2]) === 'orig\nEDITED' && textOf(mutOut[3]) === 'orig\nEDITED', textOf(mutOut[2]) + '|' + textOf(mutOut[3]));
+fs.rmSync(v3, { recursive: true, force: true });
+
 for (const d of [vault, outside, v2]) fs.rmSync(d, { recursive: true, force: true });
 
 console.log(`--- ${pass} passed, ${fail} failed ---`);
