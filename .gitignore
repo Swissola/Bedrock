@@ -62,3 +62,6 @@ Thumbs.db
 
 # Local plan-execution workspace
 .superpowers/
+
+# Superpowers plans and specs are working documents, not vault content.
+docs/superpowers/
