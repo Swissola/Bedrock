@@ -285,7 +285,7 @@ fi
 # right for both, and does not depend on the reflog (which can be off, or expired). HEAD@{1}
 # is only the fallback.
 old_ref=$(git rev-parse --verify -q ORIG_HEAD 2>/dev/null) || old_ref=$(git rev-parse --verify -q "HEAD@{1}" 2>/dev/null) || old_ref=""
-[ -z "$old_ref" ] && exit 0
+[[ -z "$old_ref" ]] && exit 0
 changed=$(git diff "$old_ref" HEAD --name-only 2>/dev/null \
     | grep -Ev '\.(lock|log|tmp)$' \
     | grep -Ev '\.tfstate($|\.)' \

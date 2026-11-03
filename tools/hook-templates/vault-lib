@@ -10,8 +10,8 @@
 # vault_branch <vault root>: the branch the vault's origin treats as default
 # (origin/HEAD), else main.
 vault_branch() {
-    local ref
-    ref=$(git -C "$1" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+    local root="$1" ref
+    ref=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
     ref="${ref#origin/}"
     printf '%s\n' "${ref:-main}"
     return 0
@@ -23,8 +23,9 @@ vault_branch() {
 # Only hashes are printed: commit subjects are chosen by whoever can commit to the vault,
 # so no hook echoes them.
 vault_unpushed_hashes() {
-    git -C "$1" rev-parse --verify "$2" >/dev/null 2>&1 || return 1
-    git -C "$1" rev-parse --verify "origin/$2" >/dev/null 2>&1 || return 1
-    git -C "$1" log "origin/${2}..${2}" --format='%h' 2>/dev/null
+    local root="$1" branch="$2"
+    git -C "$root" rev-parse --verify "$branch" >/dev/null 2>&1 || return 1
+    git -C "$root" rev-parse --verify "origin/$branch" >/dev/null 2>&1 || return 1
+    git -C "$root" log "origin/${branch}..${branch}" --format='%h' 2>/dev/null
     return 0
 }

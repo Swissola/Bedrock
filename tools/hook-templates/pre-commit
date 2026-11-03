@@ -79,7 +79,7 @@ scan_status=$?
 # failed (bad config, unreadable repo, a crash), so nothing was checked. Say that plainly
 # instead of calling it a finding, and block only in strict mode, where an unchecked commit is
 # not acceptable.
-if [ "$scan_status" -ne 1 ]; then
+if [[ "$scan_status" -ne 1 ]]; then
     {
         echo ""
         echo "=========================================================="
@@ -92,7 +92,7 @@ if [ "$scan_status" -ne 1 ]; then
         echo "=========================================================="
         echo ""
     } >&2
-    if [ "$STRICT" = "1" ] || [ "$STRICT" = "true" ]; then
+    if [[ "$STRICT" = "1" || "$STRICT" = "true" ]]; then
         exit 1
     fi
     exit 0

@@ -54,9 +54,10 @@ make_vault() {
 }
 
 add_commit() {  # <vault> <file>
-  echo "$2" > "$1/$2"
-  git -C "$1" add "$2"
-  git -C "$1" commit -q -m "SUBJECT_MARKER $2"
+  local vault="$1" file="$2"
+  echo "$file" > "$vault/$file"
+  git -C "$vault" add "$file"
+  git -C "$vault" commit -q -m "SUBJECT_MARKER $file"
   return $?
 }
 
@@ -111,4 +112,4 @@ test_unpushed_commits_are_listed_as_short_hashes_only
 test_a_missing_branch_or_origin_copy_is_not_an_error_to_print
 
 echo "--- $PASS passed, $FAIL failed ---"
-[ "$FAIL" -eq 0 ]
+[[ "$FAIL" -eq 0 ]]

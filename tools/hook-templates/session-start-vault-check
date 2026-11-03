@@ -51,8 +51,8 @@ LAST_CHECK_FILE="$STATE_DIR/.vault-nudge-last-check"
 
 # Shared helpers (default branch, unpushed commits). Missing means no reminder, never an error.
 vault_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/vault-lib"
-[ -f "$vault_lib" ] || vault_lib="$HOME/.claude/hook-templates/vault-lib"
-[ -f "$vault_lib" ] || exit 0
+[[ -f "$vault_lib" ]] || vault_lib="$HOME/.claude/hook-templates/vault-lib"
+[[ -f "$vault_lib" ]] || exit 0
 # shellcheck source=vault-lib
 . "$vault_lib"
 

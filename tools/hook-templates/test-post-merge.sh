@@ -370,7 +370,7 @@ EOF
   waited=0
   while [ ! -s "$log_file" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done
   assert_eq "unexpected new file downgrades exit code to 3" "1" "$(grep -c "$LOG_EXIT_3" "$log_file" 2>/dev/null || echo 0)"
-  assert_eq "unexpected new file is left in place (flag only)" "0" "$([ -f "$vault/repos/other-thing/index.md" ] && echo 0 || echo 1)"
+  assert_eq "unexpected new file is left in place (flag only)" "0" "$([[ -f "$vault/repos/other-thing/index.md" ]] && echo 0 || echo 1)"
   assert_eq "unexpected write recorded in FAILURES.log" "1" "$(grep -c "$REPO_NAME" "$logdir/FAILURES.log" 2>/dev/null || echo 0)"
   rm -rf "$(dirname "$repo")" "$vault" "$logdir" "$bindir"
 }
