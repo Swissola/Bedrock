@@ -185,11 +185,12 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
 }
 
 # The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
-test_vault_command_templates_are_at_version_4() {
-  local n v
-  for n in vault-log vault-context vault-populate; do
+test_vault_command_templates_carry_the_expected_versions() {
+  local pair n want v
+  for pair in vault-log:5 vault-context:5 vault-populate:4; do
+    n="${pair%%:*}"; want="${pair##*:}"
     v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
-    assert_eq "$n.md is at version 4" "4" "$v"
+    assert_eq "$n.md is at version $want" "$want" "$v"
   done
   return 0
 }
@@ -376,7 +377,7 @@ test_the_bot_review_workflow_stays_locked_down() {
 }
 
 test_every_command_template_carries_a_version_stamp
-test_vault_command_templates_are_at_version_4
+test_vault_command_templates_carry_the_expected_versions
 test_vault_command_templates_stay_under_their_line_ceilings
 test_test_scripts_avoid_bash_4_only_features
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback

@@ -356,6 +356,8 @@ test_the_default_is_a_short_pointer_not_the_contents() {
 - [ ] ALICE-ITEM
 EOF
   out=$(run_default_mode "$repo" "$vault" CONTEXT_TODAY=2026-10-10)
+  assert_eq "the first line is the pointer header, not the full-output one" "--- Vault context pointer for widget (auto-loaded) ---" "$(printf '%s
+' "$out" | head -n1)"
   assert_contains "names the repo doc by path" "Repo doc: repos/widget/index.md" "$out"
   assert_contains "names your latest note by path and date" "Your latest note: daily-notes/alice/2026-10-05-widget-a.md (2026-10-05)" "$out"
   assert_contains "lists the open item with owner and age" "- alice (5d): ALICE-ITEM" "$out"
