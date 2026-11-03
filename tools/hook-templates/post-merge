@@ -49,8 +49,9 @@ set -u
 # Called as post-rewrite, only a rebase counts, and its list of rewritten commits ("<old> <new>"
 # per line) on stdin says where the old tip was. Called as post-merge, the argument is 1 for a
 # squash merge, which commits nothing, so there is nothing to document.
+hook_arg="${1:-}"
 rewrite_pairs=""
-case "${1:-}" in
+case "$hook_arg" in
     amend|1) exit 0 ;;
     rebase) rewrite_pairs=$(cat 2>/dev/null) ;;
 esac
@@ -291,7 +292,7 @@ fi
 #    merge or fast-forward); otherwise the reflog's previous position is the fallback.
 head_sha=$(git rev-parse --verify -q HEAD 2>/dev/null)
 old_ref=""
-if [[ "${1:-}" = "rebase" ]]; then
+if [[ "$hook_arg" = "rebase" ]]; then
     old_ref=$(printf '%s\n' "$rewrite_pairs" | awk -v h="$head_sha" '$2 == h { print $1; exit }')
 else
     old_ref=$(git rev-parse --verify -q ORIG_HEAD 2>/dev/null)

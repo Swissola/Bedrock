@@ -1226,10 +1226,10 @@ test_the_range_starts_at_orig_head_and_falls_back_to_the_reflog() {
 # step with a failures log present is to mark it as seen, so that marker, not a sleep, tells
 # whether the hook got past the argument check.
 hook_got_past_the_argument_check() {  # <arg> -> yes | no
-  local logdir marker
+  local arg="$1" logdir marker
   logdir=$(fx_dir); marker="$logdir/.failures-seen"
   echo "2026-01-01T00:00:00+00:00 earlier-repo exit=1 see somewhere" > "$logdir/FAILURES.log"
-  ( cd "$FX_REPO" && printf 'aaa bbb\n' | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" $1 >/dev/null 2>&1 )
+  ( cd "$FX_REPO" && printf 'aaa bbb\n' | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" ${arg:+"$arg"} >/dev/null 2>&1 )
   [[ -f "$marker" ]] && echo yes || echo no
   return 0
 }

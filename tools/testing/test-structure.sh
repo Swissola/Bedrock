@@ -218,7 +218,7 @@ test_the_bot_review_credential_guard_ignores_long_paths_but_catches_secrets() {
   if ! command -v perl >/dev/null 2>&1; then
     skip "perl not installed, cannot apply the guard's pattern to sample strings"
   else
-    flagged() { printf '%s\n' "$1" | PAT="$pat" perl -e 'undef $/; my $t = <STDIN>; exit(($t =~ /$ENV{PAT}/) ? 0 : 1)' && echo yes || echo no; return 0; }
+    flagged() { local text="$1"; printf '%s\n' "$text" | PAT="$pat" perl -e 'undef $/; my $t = <STDIN>; exit(($t =~ /$ENV{PAT}/) ? 0 : 1)' && echo yes || echo no; return 0; }
     assert_eq "a long file path is not flagged" "no" "$(flagged 'see tools/hook-templates/test-session-start-vault-context.sh:366')"
     assert_eq "a long path with digits is not flagged" "no" "$(flagged 'tools/hook-templates/session-start-vault-context-v4-notes2.md')"
     assert_eq "a 40 character mixed-case alphanumeric string is flagged" "yes" "$(flagged 'key aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1fG3hJ5kL7m')"
