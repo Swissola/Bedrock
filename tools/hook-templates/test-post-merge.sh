@@ -680,6 +680,55 @@ test_vault_root_read_from_file_when_env_unset() {
   return $?
 }
 
+make_vault_repo_named() {
+  # $1 = base dir, $2 = folder name. A git repo shaped like a vault with a doc for itself.
+  local repo="$1/$2"
+  mkdir -p "$repo/repos/$2"
+  git -C "$repo" init -q -b main; git -C "$repo" config user.email t@example.com; git -C "$repo" config user.name Test; git -C "$repo" config core.autocrlf false
+  echo "original index" > "$repo/repos/$2/index.md"; echo "readme" > "$repo/README.md"
+  git -C "$repo" add -A; git -C "$repo" commit -q -m seed
+  git -C "$repo" update-ref refs/remotes/origin/main "$(git -C "$repo" rev-parse HEAD)"; git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  echo "$repo"
+}
+
+test_a_repo_listed_in_the_vault_root_file_is_its_own_vault() {
+  # Two vaults on one machine: the file's first line names the other vault, but this
+  # vault is listed too, so its own hook must still document into this vault.
+  local base repo logdir bindir rootfile waited=0
+  base=$(mktemp -d); repo=$(make_vault_repo_named "$base" team-vault)
+  logdir=$(mktemp -d); bindir=$(mktemp -d); rootfile="$bindir/vault-root"
+  printf '%s\n%s\n' "/nonexistent/other/vault" "$repo" > "$rootfile"
+  make_stub_claude_writing_index "$bindir" "$repo" "team-vault" "$INDEX_CONTENT"
+  echo "$CHANGE_MSG" >> "$repo/README.md"; git -C "$repo" commit -aq -m "$CHANGE_MSG"
+  ( cd "$repo" && env -u VAULT_ROOT PATH="$bindir:$PATH" HOOK_LOG_DIR="$logdir" VAULT_ROOT_FILE="$rootfile" bash "$HOOK_SCRIPT" )
+  LOG_FILE="$logdir/team-vault-post-merge.log"
+  while [[ ! -s "$LOG_FILE" ]] && [[ "$waited" -lt 80 ]]; do sleep 0.1; waited=$((waited + 1)); done
+  assert_eq "a listed vault's own hook targets its own repo (exit=0)" "1" "$(gcount "$LOG_EXIT_0" "$LOG_FILE")"
+  rm -rf "$base" "$logdir" "$bindir"
+  return $?
+}
+
+test_a_repo_that_only_looks_like_a_vault_does_not_override_the_file() {
+  # A pull can add a vault-config.md, or an index.md next to daily-notes, to any repo.
+  # That must not make the repo its own vault when the machine's file says otherwise.
+  local base repo logdir bindir rootfile waited=0
+  base=$(mktemp -d); repo=$(make_vault_repo_named "$base" team-vault)
+  printf -- '---\n---\n' > "$repo/vault-config.md"; echo "hub" > "$repo/index.md"; mkdir -p "$repo/daily-notes"; echo x > "$repo/daily-notes/a.md"
+  git -C "$repo" add -A; git -C "$repo" commit -q -m "lookalike"
+  logdir=$(mktemp -d); bindir=$(mktemp -d); rootfile="$bindir/vault-root"
+  printf '%s\n' "/nonexistent/other/vault" > "$rootfile"
+  make_stub_claude_writing_index "$bindir" "$repo" "team-vault" "$INDEX_CONTENT"
+  echo "$CHANGE_MSG" >> "$repo/README.md"; git -C "$repo" commit -aq -m "$CHANGE_MSG"
+  ( cd "$repo" && env -u VAULT_ROOT PATH="$bindir:$PATH" HOOK_LOG_DIR="$logdir" VAULT_ROOT_FILE="$rootfile" bash "$HOOK_SCRIPT" )
+  LOG_FILE="$logdir/team-vault-post-merge.log"
+  while [[ ! -s "$LOG_FILE" ]] && [[ "$waited" -lt 80 ]]; do sleep 0.1; waited=$((waited + 1)); done
+  assert_eq "an unlisted look-alike does not become the vault (exit=0 never logged)" "0" "$(gcount "$LOG_EXIT_0" "$LOG_FILE")"
+  assert_eq "...the hook aborts against the file's vault instead" "1" "$(gcount "/nonexistent/other/vault" "$LOG_FILE")"
+  assert_eq "...and the look-alike's own doc is untouched" "original index" "$(tr -d '\r' < "$repo/repos/team-vault/index.md")"
+  rm -rf "$base" "$logdir" "$bindir"
+  return $?
+}
+
 test_env_vault_root_beats_file() {
   local repo vault logdir bindir rootfile
   repo=$(make_other_repo "$REPO_NAME"); vault=$(make_plain_vault "$REPO_NAME")
@@ -743,6 +792,8 @@ test_repos_path_missing_doc_aborts_naming_configured_path
 test_unsafe_repos_path_falls_back_to_default
 test_vault_root_read_from_file_when_env_unset
 test_env_vault_root_beats_file
+test_a_repo_listed_in_the_vault_root_file_is_its_own_vault
+test_a_repo_that_only_looks_like_a_vault_does_not_override_the_file
 test_default_backend_allows_rest_api_tools_only
 test_mcpvault_backend_detected_from_mcp_config
 test_backend_key_in_vault_config_overrides_detection
