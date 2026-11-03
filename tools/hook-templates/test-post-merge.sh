@@ -344,10 +344,9 @@ EOF
 test_mcp_unavailable_marker_downgrades_exit_code
 
 test_unexpected_new_file_is_flagged_not_removed() {
-  # The bug this test pins down: `git checkout -- <path>` only restores a
-  # TRACKED file, it errors on an untracked one and leaves it in place.
-  # A brand-new unexpected file must be removed with `rm`, not (only)
-  # attempted via `git checkout --`.
+  # A brand-new unexpected file the run wrote outside the doc is reported
+  # in the log and left in place: the hook cannot tell the run's write from
+  # the user's own work, so it never deletes or reverts anything.
   local repo vault logdir bindir
   repo=$(make_other_repo "$REPO_NAME")
   vault=$(make_test_vault "$REPO_NAME")
@@ -1223,17 +1222,62 @@ test_the_range_starts_at_orig_head_and_falls_back_to_the_reflog() {
   return 0
 }
 
+# Arguments that must make the hook stop before it does anything. The hook's first synchronous
+# step with a failures log present is to mark it as seen, so that marker, not a sleep, tells
+# whether the hook got past the argument check.
+hook_got_past_the_argument_check() {  # <arg> -> yes | no
+  local logdir marker
+  logdir=$(fx_dir); marker="$logdir/.failures-seen"
+  echo "2026-01-01T00:00:00+00:00 earlier-repo exit=1 see somewhere" > "$logdir/FAILURES.log"
+  ( cd "$FX_REPO" && printf 'aaa bbb\n' | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" $1 >/dev/null 2>&1 )
+  [[ -f "$marker" ]] && echo yes || echo no
+  return 0
+}
+
 test_called_as_post_rewrite_it_acts_on_a_rebase_and_ignores_an_amend() {
   fx_new
   make_capturing_claude "$FX_BIN"
   commit_files "$FX_REPO" rebased-in.md
-  git -C "$FX_REPO" update-ref ORIG_HEAD HEAD~1
-  ( cd "$FX_REPO" && printf 'aaa bbb\n' | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" amend )
-  sleep 1
-  assert_eq "post-rewrite amend: does nothing" "no" "$([[ -f "$FX_BIN/argv.txt" ]] && echo yes || echo no)"
-  ( cd "$FX_REPO" && printf 'aaa bbb\n' | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" rebase )
+  assert_eq "no argument (post-merge): the hook runs past the argument check" "yes" "$(hook_got_past_the_argument_check '')"
+  assert_eq "post-rewrite amend: stops at once" "no" "$(hook_got_past_the_argument_check amend)"
+  assert_eq "post-merge with the squash flag: stops at once" "no" "$(hook_got_past_the_argument_check 1)"
+  assert_eq "post-rewrite rebase: runs past the argument check" "yes" "$(hook_got_past_the_argument_check rebase)"
+  return 0
+}
+
+test_after_a_rebase_the_range_comes_from_the_rewrite_list_not_a_stale_orig_head() {
+  local old new
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  commit_files "$FX_REPO" first-change.md
+  commit_files "$FX_REPO" second-change.md
+  old=$(git -C "$FX_REPO" rev-parse HEAD~2); new=$(git -C "$FX_REPO" rev-parse HEAD)
+  git -C "$FX_REPO" update-ref ORIG_HEAD HEAD~1      # stale: points at a commit inside the range
+  ( cd "$FX_REPO" && printf '%s %s\n' "$old" "$new" | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" rebase )
   wait_for_file "$FX_BIN/argv.txt"
-  assert_eq "post-rewrite rebase: runs, with the rebased-in file" "yes" "$(has_text '"rebased-in.md"' "$FX_BIN/argv.txt")"
+  assert_eq "the old tip from the rewrite list is used: both files are in range" "yes" "$(has_text '"first-change.md"' "$FX_BIN/argv.txt")"
+  assert_eq "...and the later one" "yes" "$(has_text '"second-change.md"' "$FX_BIN/argv.txt")"
+  rm -f "$FX_BIN/argv.txt"
+  ( cd "$FX_REPO" && printf '%s %s\n' "$old" "$old" | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" rebase )
+  sleep 1
+  assert_eq "a rewrite list that does not end at HEAD gives no range, so nothing runs" "no" "$([[ -f "$FX_BIN/argv.txt" ]] && echo yes || echo no)"
+  return 0
+}
+
+test_a_stale_orig_head_that_is_not_an_ancestor_falls_back_to_the_reflog() {
+  local side
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  git -C "$FX_REPO" checkout -q -b unrelated-side
+  commit_files "$FX_REPO" unrelated-history.md
+  side=$(git -C "$FX_REPO" rev-parse HEAD)
+  git -C "$FX_REPO" checkout -q -
+  commit_files "$FX_REPO" real-change.md
+  git -C "$FX_REPO" update-ref ORIG_HEAD "$side"
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_BIN/argv.txt"
+  assert_eq "a stale ORIG_HEAD is ignored: the real change is in range" "yes" "$(has_text '"real-change.md"' "$FX_BIN/argv.txt")"
+  assert_eq "...and the unrelated history is not sent" "no" "$(has_text '"unrelated-history.md"' "$FX_BIN/argv.txt")"
   return 0
 }
 
@@ -1273,6 +1317,8 @@ test_the_repo_name_is_lowercased_by_default_and_kept_with_repo_name_case_keep
 test_the_global_kill_switch_stops_the_hook_in_every_repo
 test_the_range_starts_at_orig_head_and_falls_back_to_the_reflog
 test_called_as_post_rewrite_it_acts_on_a_rebase_and_ignores_an_amend
+test_after_a_rebase_the_range_comes_from_the_rewrite_list_not_a_stale_orig_head
+test_a_stale_orig_head_that_is_not_an_ancestor_falls_back_to_the_reflog
 test_a_real_pull_with_rebase_that_replays_a_local_commit_still_runs_the_hook
 test_a_claude_that_rejects_restricted_is_reported_as_such_with_its_version
 test_an_ordinary_failure_does_not_claim_restricted_was_rejected

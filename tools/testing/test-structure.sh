@@ -344,6 +344,7 @@ test_the_bot_review_workflow_stays_locked_down() {
   assert_eq "...but /home as a whole is not denied (that would hide the checkout)" "no" "$(grep -qF -- "'Read(//home/**)'" "$wf" && echo yes || echo no)"
   assert_eq "checkout does not keep the workflow token in the repository config" "yes" "$(grep -qF 'persist-credentials: false' "$wf" && echo yes || echo no)"
   assert_eq "the posting job has its own owner and main guard" "2" "$(grep -cF "if: github.repository == 'Swissola/Bedrock' && github.ref == 'refs/heads/main' && github.actor == 'Swissola'" "$wf")"
+  assert_eq "a diff that is cut says so inside the file the model reads" "yes" "$(grep -qF '[diff truncated at 400000 bytes' "$wf" && echo yes || echo no)"
   assert_eq "docs/automation.md documents it" "yes" "$(grep -qF 'pr-review.yml' "$ROOT/docs/automation.md" 2>/dev/null && echo yes || echo no)"
   return 0
 }

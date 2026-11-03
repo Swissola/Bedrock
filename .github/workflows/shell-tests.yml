@@ -56,6 +56,15 @@ jobs:
           chmod +x "$HOME/.local/bin/betterleaks"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/betterleaks" version
+      # The post-merge suite checks the real CLI's help still lists --restricted, which the hook's
+      # safety rests on. Everywhere else that check skips. Pinned like the bot review's copy.
+      - name: Install the claude CLI (ubuntu only)
+        if: matrix.name == 'ubuntu'
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts @anthropic-ai/claude-code@2.1.291
+          node "$(npm root --global)/@anthropic-ai/claude-code/install.cjs"
+          claude --version
       - name: Tool versions
         run: |
           export PATH="${{ matrix.path_prefix }}$PATH"

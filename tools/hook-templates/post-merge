@@ -46,11 +46,13 @@
 
 set -u
 
-# Called as post-rewrite: only a rebase counts, and its list of rewritten commits on stdin is
-# not needed (the range comes from ORIG_HEAD below).
+# Called as post-rewrite, only a rebase counts, and its list of rewritten commits ("<old> <new>"
+# per line) on stdin says where the old tip was. Called as post-merge, the argument is 1 for a
+# squash merge, which commits nothing, so there is nothing to document.
+rewrite_pairs=""
 case "${1:-}" in
-    amend) exit 0 ;;
-    rebase) cat >/dev/null 2>&1 ;;
+    amend|1) exit 0 ;;
+    rebase) rewrite_pairs=$(cat 2>/dev/null) ;;
 esac
 
 # GNU `timeout` is not on macOS by default (coreutils provides `gtimeout`). Use whichever
@@ -281,10 +283,23 @@ fi
 # Terraform backup file like foo.tfstate.backup, and it misses anything
 # living inside a .cache/ directory entirely (.cache/some-file.json doesn't
 # end in ".cache"). Found and fixed against exactly this gap.
-# The commit HEAD was at before the pull. ORIG_HEAD is set by merge and by rebase, so it is
-# right for both, and does not depend on the reflog (which can be off, or expired). HEAD@{1}
-# is only the fallback.
-old_ref=$(git rev-parse --verify -q ORIG_HEAD 2>/dev/null) || old_ref=$(git rev-parse --verify -q "HEAD@{1}" 2>/dev/null) || old_ref=""
+# The commit HEAD was at before the pull, which must not be trusted blindly: ORIG_HEAD is also
+# left behind by an unrelated reset or rebase, and a stale value would send unrelated history
+# to the model.
+#  - After a rebase, the post-rewrite input names it: the pair whose new commit is HEAD.
+#  - After a merge, ORIG_HEAD is used only if it is an ancestor of HEAD (it always is for a real
+#    merge or fast-forward); otherwise the reflog's previous position is the fallback.
+head_sha=$(git rev-parse --verify -q HEAD 2>/dev/null)
+old_ref=""
+if [[ "${1:-}" = "rebase" ]]; then
+    old_ref=$(printf '%s\n' "$rewrite_pairs" | awk -v h="$head_sha" '$2 == h { print $1; exit }')
+else
+    old_ref=$(git rev-parse --verify -q ORIG_HEAD 2>/dev/null)
+    if [[ -n "$old_ref" ]] && ! git merge-base --is-ancestor "$old_ref" HEAD 2>/dev/null; then
+        old_ref=""
+    fi
+    [[ -z "$old_ref" ]] && old_ref=$(git rev-parse --verify -q "HEAD@{1}" 2>/dev/null)
+fi
 [[ -z "$old_ref" ]] && exit 0
 changed=$(git diff "$old_ref" HEAD --name-only 2>/dev/null \
     | grep -Ev '\.(lock|log|tmp)$' \
