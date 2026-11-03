@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs this repo's Claude Code commands, skills and hook templates into
+# Installs this repo's Claude Code commands and hook templates into
 # ~/.claude on THIS machine, and keeps them current.
 #
 # Why this exists: ~/.claude lives in your home directory, outside any repo,
@@ -20,7 +20,6 @@ BACKEND=""
 CHECK=0
 DRY=0
 FORCE=0
-SKIP_SKILLS=0
 STATUSLINE=0
 
 usage() {
@@ -46,10 +45,9 @@ Usage: install-claude-config.sh [options]
                        set (an existing different one is kept and the snippet
                        printed; --force replaces it, after a backup). Needs Node
                        18 or later. See docs/statusline.md.
-  --no-skills          do not install the two skills. They describe the TEAM vault
-                       layout (daily-notes/<author>/, repos/<name>/) and trigger on
-                       any obsidian MCP call, so leave them out for a vault laid
-                       out differently (see docs/vault-config.md).
+  --no-skills          ignored. The two skills it used to leave out are no longer
+                       installed; the vault's CLAUDE.md carries the conventions.
+                       Kept so old command lines still work.
   --prefix <dir>       install into <dir> instead of ~/.claude (used by tests).
   -h, --help           this text.
 EOF
@@ -64,7 +62,7 @@ while [[ $# -gt 0 ]]; do
     --check) CHECK=1; shift ;;
     --dry-run) DRY=1; shift ;;
     --force) FORCE=1; shift ;;
-    --no-skills) SKIP_SKILLS=1; shift ;;
+    --no-skills) shift ;;
     --statusline) STATUSLINE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -191,8 +189,7 @@ EOF
 
 # --- the file lists --------------------------------------------------------
 COMMAND_SRCS=("$SRC_ROOT"/tools/command-templates/*.md)
-HOOKS=(post-merge pre-commit pre-push session-start-vault-check session-start-vault-context)
-SKILL_DIRS=("$SRC_ROOT"/tools/skill-templates/*/)
+HOOKS=(post-merge pre-commit pre-push session-start-vault-check session-start-vault-context vault-lib)
 
 echo "Source:  $SRC_ROOT"
 echo "Install: $PREFIX"
@@ -210,10 +207,9 @@ if [[ "$CHECK" != "1" ]]; then
   fi
 fi
 
-# --- commands, skills, hooks -----------------------------------------------
+# --- commands and hooks ----------------------------------------------------
 if [[ "$CHECK" = "1" ]]; then
   for f in "${COMMAND_SRCS[@]}"; do [[ -f "$f" ]] && check_file "$f" "$PREFIX/commands/$(basename "$f")" "commands/$(basename "$f")"; done
-  [[ "$SKIP_SKILLS" = "1" ]] || for d in "${SKILL_DIRS[@]}"; do [[ -f "${d}SKILL.md" ]] && check_file "${d}SKILL.md" "$PREFIX/skills/$(basename "$d")/SKILL.md" "skills/$(basename "$d")/SKILL.md"; done
   for h in "${HOOKS[@]}"; do check_file "$SRC_ROOT/tools/hook-templates/$h" "$PREFIX/hook-templates/$h" "hook-templates/$h"; done
   tmpw="$(mktemp)"; wrapper_content > "$tmpw"
   check_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" "hook-templates/session-start-vault-context.sh"
@@ -228,7 +224,6 @@ if [[ "$CHECK" = "1" ]]; then
 fi
 
 for f in "${COMMAND_SRCS[@]}"; do [[ -f "$f" ]] && install_file "$f" "$PREFIX/commands/$(basename "$f")"; done
-[[ "$SKIP_SKILLS" = "1" ]] || for d in "${SKILL_DIRS[@]}"; do [[ -f "${d}SKILL.md" ]] && install_file "${d}SKILL.md" "$PREFIX/skills/$(basename "$d")/SKILL.md"; done
 for h in "${HOOKS[@]}"; do install_file "$SRC_ROOT/tools/hook-templates/$h" "$PREFIX/hook-templates/$h" exec; done
 tmpw="$(mktemp)"; wrapper_content > "$tmpw"
 install_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" exec
@@ -241,6 +236,7 @@ fi
 # --- vault-root file and hook MCP config -----------------------------------
 if [[ -n "$VAULT" ]]; then
   vault_norm="$(printf '%s' "$VAULT" | tr '\\' '/')"
+  while [[ "$vault_norm" == */ && "$vault_norm" != "/" ]]; do vault_norm="${vault_norm%/}"; done
   root_file="$PREFIX/hook-configs/vault-root"
   # One absolute vault path per line. The first line is the default for hooks installed
   # in other repos; a vault's own post-merge hook also recognises its repo when listed.
@@ -282,7 +278,16 @@ if [[ "$BACKEND" = "rest-api" ]]; then
 fi
 
 echo
-echo "Done. Commands and skills load in a NEW Claude Code session; hook templates are copied, not enabled."
-echo "Per-repo hooks (post-merge, pre-commit) still need copying into that repo's .git/hooks, see docs/automation.md."
+# Earlier versions installed two skills. They are not removed here (they are not ours to delete
+# silently), but they are stale, so say so.
+if [[ "$CHECK" != "1" ]]; then
+  for old_skill in obsidian-vault-conventions obsidian-mcp-setup; do
+    [[ -e "$PREFIX/skills/$old_skill/SKILL.md" ]] && echo "note: $PREFIX/skills/$old_skill is from an older Bedrock and is no longer installed or updated; delete it if you do not use it."
+  done
+fi
+
+echo
+echo "Done. Commands load in a NEW Claude Code session; hook templates are copied, not enabled."
+echo "Per-repo hooks still need copying into that repo's .git/hooks, see docs/automation.md: post-merge (also as post-rewrite, so a pull --rebase is covered), pre-commit, and pre-push."
 [[ "$STATUSLINE" = "1" ]] && [[ "$DRY" != "1" ]] && echo "The status line appears in a NEW Claude Code session (see docs/statusline.md)."
 exit "$NEED_ATTENTION"

@@ -8,6 +8,9 @@
 set -u
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="$TOOLS_DIR/install-claude-config.sh"
+# The wrapper tests below check that the right vault is found, by looking for its content, so they
+# run the hook in full mode. The default (pointer) mode is tested with the hook itself.
+export CONTEXT_MODE=full
 PASS=0
 FAIL=0
 STARTUP_JSON='{"source":"startup"}'
@@ -37,14 +40,14 @@ test_dry_run_changes_nothing() {
   return $?
 }
 
-test_fresh_install_copies_commands_skills_hooks() {
+test_fresh_install_copies_commands_and_hooks() {
   local p out; p=$(mktemp -d)
   out=$(bash "$INSTALLER" --prefix "$p/claude" 2>&1); local st=$?
   assert_eq "fresh install: exit 0" "0" "$st"
   assert_eq "installs /vault-log" "yes" "$(exists "$p/claude/commands/vault-log.md")"
   assert_eq "installs /vault-context" "yes" "$(exists "$p/claude/commands/vault-context.md")"
   assert_eq "installs /vault-populate" "yes" "$(exists "$p/claude/commands/vault-populate.md")"
-  assert_eq "installs the conventions skill" "yes" "$(exists "$p/claude/skills/obsidian-vault-conventions/SKILL.md")"
+  assert_eq "installs no skills (the vault CLAUDE.md carries the conventions)" "no" "$(exists "$p/claude/skills")"
   assert_eq "installs the post-merge hook template" "yes" "$(exists "$p/claude/hook-templates/post-merge")"
   assert_eq "installs the session-start hook template" "yes" "$(exists "$p/claude/hook-templates/session-start-vault-context")"
   assert_eq "installs the session-start .sh wrapper" "yes" "$(exists "$p/claude/hook-templates/session-start-vault-context.sh")"
@@ -180,21 +183,17 @@ test_session_start_wrapper_uses_vault_root_file() {
   return $?
 }
 
-test_no_skills_flag() {
-  # The conventions skill describes the TEAM vault's layout (daily-notes/<author>/,
-  # repos/<name>/) and triggers on any mcp__obsidian__* call, so a vault with a
-  # different layout must be able to leave the skills out.
+test_no_skills_flag_is_still_accepted_and_changes_nothing() {
+  # Skills are no longer installed at all. The flag stays so old command lines keep working.
   local p out st; p=$(mktemp -d)
   out=$(bash "$INSTALLER" --prefix "$p/claude" --no-skills 2>&1); st=$?
   assert_eq "--no-skills: exit 0" "0" "$st"
   assert_eq "--no-skills: commands still installed" "yes" "$(exists "$p/claude/commands/vault-log.md")"
   assert_eq "--no-skills: hook templates still installed" "yes" "$(exists "$p/claude/hook-templates/post-merge")"
   assert_eq "--no-skills: no skills directory created" "no" "$(exists "$p/claude/skills")"
-  out=$(bash "$INSTALLER" --prefix "$p/claude" --check --no-skills 2>&1); st=$?
-  assert_eq "--check --no-skills: current without the skills (exit 0)" "0" "$st"
-  assert_eq "--check --no-skills: skills not mentioned" "0" "$(printf '%s' "$out" | grep -c 'skills/')"
   out=$(bash "$INSTALLER" --prefix "$p/claude" --check 2>&1); st=$?
-  assert_eq "--check without --no-skills: missing skills are reported (exit 1)" "1" "$st"
+  assert_eq "--check: current, with no skills (exit 0)" "0" "$st"
+  assert_eq "--check: skills not mentioned" "0" "$(printf '%s' "$out" | grep -c 'skills/')"
   rm -rf "$p"
   return $?
 }
@@ -205,26 +204,21 @@ test_no_skills_flag() {
 # Added on top of the original scenarios. Same rules: every run installs into a
 # throwaway --prefix, nothing touches a real ~/.claude.
 
-SRC_HOOKS="post-merge pre-commit pre-push session-start-vault-check session-start-vault-context"
+SRC_HOOKS="post-merge pre-commit pre-push session-start-vault-check session-start-vault-context vault-lib"
 
-test_every_command_skill_and_hook_in_the_repo_is_installed_byte_for_byte() {
-  local p f d name missing=0 differing=0 h; p=$(mktemp -d)
+test_every_command_and_hook_in_the_repo_is_installed_byte_for_byte() {
+  local p f name missing=0 differing=0 h; p=$(mktemp -d)
   bash "$INSTALLER" --prefix "$p/claude" >/dev/null 2>&1
   for f in "$TOOLS_DIR"/command-templates/*.md; do
     name=$(basename "$f")
     [[ -f "$p/claude/commands/$name" ]] || missing=$((missing + 1))
     cmp -s "$f" "$p/claude/commands/$name" || differing=$((differing + 1))
   done
-  for d in "$TOOLS_DIR"/skill-templates/*/; do
-    name=$(basename "$d")
-    [[ -f "$p/claude/skills/$name/SKILL.md" ]] || missing=$((missing + 1))
-    cmp -s "${d}SKILL.md" "$p/claude/skills/$name/SKILL.md" || differing=$((differing + 1))
-  done
   for h in $SRC_HOOKS; do
     [[ -x "$p/claude/hook-templates/$h" ]] || missing=$((missing + 1))
     cmp -s "$TOOLS_DIR/hook-templates/$h" "$p/claude/hook-templates/$h" || differing=$((differing + 1))
   done
-  assert_eq "every source command, skill and hook is installed (and hooks are executable)" "0" "$missing"
+  assert_eq "every source command and hook is installed (and hooks are executable)" "0" "$missing"
   assert_eq "every installed copy is byte-identical to its source" "0" "$differing"
   assert_eq "the session-start wrapper is executable" "yes" "$([[ -x "$p/claude/hook-templates/session-start-vault-context.sh" ]] && echo yes || echo no)"
   rm -rf "$p"
@@ -290,6 +284,15 @@ test_a_second_vault_is_added_to_the_vault_root_file_without_changing_the_default
   return $?
 }
 
+test_a_trailing_slash_does_not_make_the_same_vault_look_like_two() {
+  local p v f; p=$(mktemp -d); v=$(mktemp -d); f="$p/claude/hook-configs/vault-root"
+  bash "$INSTALLER" --prefix "$p/claude" --vault "$v" >/dev/null 2>&1
+  bash "$INSTALLER" --prefix "$p/claude" --vault "$v/" >/dev/null 2>&1
+  assert_eq "same vault with a trailing slash: still one line" "1" "$(wc -l < "$f" | tr -d ' ')"
+  rm -rf "$p" "$v"
+  return $?
+}
+
 test_vault_root_is_idempotent_for_the_same_vault() {
   local p v out; p=$(mktemp -d); v=$(mktemp -d)
   bash "$INSTALLER" --prefix "$p/claude" --vault "$v" >/dev/null 2>&1
@@ -336,7 +339,6 @@ test_check_lists_every_missing_item_by_label() {
   local p out; p=$(mktemp -d)
   out=$(bash "$INSTALLER" --prefix "$p/claude" --check 2>&1)
   assert_contains "check, empty prefix: a command is labelled" "missing  commands/vault-log.md" "$out"
-  assert_contains "check, empty prefix: a skill is labelled" "missing  skills/obsidian-vault-conventions/SKILL.md" "$out"
   assert_contains "check, empty prefix: a hook is labelled" "missing  hook-templates/post-merge" "$out"
   assert_contains "check, empty prefix: the wrapper is labelled" "missing  hook-templates/session-start-vault-context.sh" "$out"
   rm -rf "$p"
@@ -388,11 +390,14 @@ test_unwritable_destination_fails_loudly_with_exit_1() {
   return $?
 }
 
-test_no_skills_leaves_already_installed_skills_alone() {
-  local p; p=$(mktemp -d)
-  bash "$INSTALLER" --prefix "$p/claude" >/dev/null 2>&1
-  bash "$INSTALLER" --prefix "$p/claude" --no-skills >/dev/null 2>&1
-  assert_eq "--no-skills after a full install: the skill is still there" "yes" "$(exists "$p/claude/skills/obsidian-vault-conventions/SKILL.md")"
+test_skills_from_an_older_install_are_left_alone_with_a_note() {
+  local p out; p=$(mktemp -d)
+  mkdir -p "$p/claude/skills/obsidian-vault-conventions"; echo old > "$p/claude/skills/obsidian-vault-conventions/SKILL.md"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" 2>&1)
+  assert_eq "an older install's skill is not deleted" "old" "$(cat "$p/claude/skills/obsidian-vault-conventions/SKILL.md")"
+  assert_contains "...but the installer says it is stale" "obsidian-vault-conventions is from an older Bedrock" "$out"
+  out=$(bash "$INSTALLER" --prefix "$p/claude" --check 2>&1)
+  assert_eq "--check does not complain about it" "0" "$(printf '%s' "$out" | grep -c 'obsidian-vault-conventions')"
   rm -rf "$p"
   return $?
 }
@@ -779,8 +784,8 @@ test_force_without_statusline_never_edits_settings() {
 }
 
 test_dry_run_changes_nothing
-test_no_skills_flag
-test_fresh_install_copies_commands_skills_hooks
+test_no_skills_flag_is_still_accepted_and_changes_nothing
+test_fresh_install_copies_commands_and_hooks
 test_second_run_is_idempotent
 test_check_mode
 test_update_replaces_outdated_copy
@@ -792,12 +797,13 @@ test_rest_api_backend_writes_no_config_and_explains
 test_unknown_option_is_a_usage_error
 test_never_touches_real_home_without_prefix_in_tests
 test_session_start_wrapper_uses_vault_root_file
-test_every_command_skill_and_hook_in_the_repo_is_installed_byte_for_byte
+test_every_command_and_hook_in_the_repo_is_installed_byte_for_byte
 test_invalid_backend_is_a_usage_error
 test_empty_prefix_is_a_usage_error
 test_help_prints_usage_and_exits_zero
 test_option_order_does_not_matter
 test_vault_root_is_idempotent_for_the_same_vault
+test_a_trailing_slash_does_not_make_the_same_vault_look_like_two
 test_crlf_in_an_existing_vault_root_file_still_counts_as_the_same_vault
 test_dry_run_with_a_vault_reports_but_writes_nothing
 test_check_mode_never_writes_anything_even_with_a_vault
@@ -806,7 +812,7 @@ test_installed_copy_newer_than_the_repo_is_reported_as_differs_not_outdated
 test_outdated_message_gives_both_version_numbers
 test_update_keeps_a_replaced_hook_executable
 test_unwritable_destination_fails_loudly_with_exit_1
-test_no_skills_leaves_already_installed_skills_alone
+test_skills_from_an_older_install_are_left_alone_with_a_note
 test_mcpvault_without_a_vault_writes_no_config
 test_mcpvault_config_points_at_the_vault_and_is_exact
 test_backslashes_in_a_windows_vault_path_are_normalised

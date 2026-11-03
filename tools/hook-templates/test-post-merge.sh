@@ -8,7 +8,7 @@
 # logic (jq-fencing, git-diff-based output validation, content-injection
 # detection) and zero automated coverage, only comments asserting they
 # work. Found a real bug in about five minutes of hand-testing that this
-# suite now pins down (test_unexpected_new_file_is_removed_not_reverted).
+# suite now pins down (test_unexpected_new_file_is_flagged_not_removed).
 #
 # The hook is installed into an OTHER repo, not the vault itself (the
 # common real deployment), so every fixture uses two separate git
@@ -343,11 +343,10 @@ EOF
 
 test_mcp_unavailable_marker_downgrades_exit_code
 
-test_unexpected_new_file_is_removed_not_reverted() {
-  # The bug this test pins down: `git checkout -- <path>` only restores a
-  # TRACKED file, it errors on an untracked one and leaves it in place.
-  # A brand-new unexpected file must be removed with `rm`, not (only)
-  # attempted via `git checkout --`.
+test_unexpected_new_file_is_flagged_not_removed() {
+  # A brand-new unexpected file the run wrote outside the doc is reported
+  # in the log and left in place: the hook cannot tell the run's write from
+  # the user's own work, so it never deletes or reverts anything.
   local repo vault logdir bindir
   repo=$(make_other_repo "$REPO_NAME")
   vault=$(make_test_vault "$REPO_NAME")
@@ -370,14 +369,14 @@ EOF
   waited=0
   while [ ! -s "$log_file" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done
   assert_eq "unexpected new file downgrades exit code to 3" "1" "$(grep -c "$LOG_EXIT_3" "$log_file" 2>/dev/null || echo 0)"
-  assert_eq "unexpected new file is actually removed from disk" "1" "$([ -f "$vault/repos/other-thing/index.md" ] && echo 0 || echo 1)"
+  assert_eq "unexpected new file is left in place (flag only)" "0" "$([[ -f "$vault/repos/other-thing/index.md" ]] && echo 0 || echo 1)"
   assert_eq "unexpected write recorded in FAILURES.log" "1" "$(grep -c "$REPO_NAME" "$logdir/FAILURES.log" 2>/dev/null || echo 0)"
   rm -rf "$(dirname "$repo")" "$vault" "$logdir" "$bindir"
 }
 
-test_unexpected_new_file_is_removed_not_reverted
+test_unexpected_new_file_is_flagged_not_removed
 
-test_unexpected_modification_to_tracked_file_is_reverted() {
+test_unexpected_modification_to_tracked_file_is_flagged_not_reverted() {
   local repo vault logdir bindir
   repo=$(make_other_repo "$REPO_NAME")
   vault=$(make_test_vault "$REPO_NAME")
@@ -403,11 +402,11 @@ EOF
   waited=0
   while [ ! -s "$log_file" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done
   assert_eq "unexpected modification downgrades exit code to 3" "1" "$(grep -c "$LOG_EXIT_3" "$log_file" 2>/dev/null || echo 0)"
-  assert_eq "pre-existing tracked file reverted to original content" "original unrelated content" "$(cat "$vault/repos/widget-service/other-doc.md")"
+  assert_eq "modified tracked file is left as it was written (flag only)" "unexpectedly modified" "$(cat "$vault/repos/widget-service/other-doc.md")"
   rm -rf "$(dirname "$repo")" "$vault" "$logdir" "$bindir"
 }
 
-test_unexpected_modification_to_tracked_file_is_reverted
+test_unexpected_modification_to_tracked_file_is_flagged_not_reverted
 
 test_no_unexpected_writes_stays_success() {
   local repo vault logdir bindir
@@ -912,7 +911,9 @@ test_noise_and_secret_shaped_files_never_reach_the_prompt() {
   ignored=(yarn.lock build.log scratch.tmp infra/terraform.tfstate infra/terraform.tfstate.backup
     .cache/x.json app/.cache/y.json .terraform/providers.json .ansible/tmp.yml .env svc/.env.production
     certs/server.pem certs/server.key certs/client.pfx certs/client.p12 .claude/settings.local.json
-    config/credentials.json keys/id_rsa keys/id_ed25519 keys/id_ecdsa keys/id_dsa .gitignore sub/.gitignore)
+    config/credentials.json keys/id_rsa keys/id_ed25519 keys/id_ecdsa keys/id_dsa .gitignore sub/.gitignore
+    infra/prod.tfvars vault.kdbx app/release.jks app/release.keystore keys/AuthKey.p8 keys/putty.ppk backup.gpg key.asc
+    .npmrc web/.npmrc .netrc .pgpass .htpasswd .pypirc deploy/kubeconfig config/secrets.yaml secret.json)
   kept=(src/app.cs docs/environment.md src/cache/data.json package-lock.json notes/credentials-howto.md)
   commit_files "$FX_REPO" "${ignored[@]}" "${kept[@]}"
   ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
@@ -1137,7 +1138,7 @@ test_the_repo_name_is_lowercased_by_default_and_kept_with_repo_name_case_keep() 
 }
 
 test_the_global_kill_switch_stops_the_hook_in_every_repo() {
-  local repo vault logdir bindir marker global
+  local repo vault logdir bindir marker global n
   repo=$(make_other_repo "$REPO_NAME"); vault=$(make_test_vault "$REPO_NAME")
   CLEANUP_DIRS+=("$(dirname "$repo")" "$vault")
   logdir=$(fx_dir); bindir=$(fx_dir); marker="$bindir/invoked"; global=$(fx_dir)/DISABLED
@@ -1150,9 +1151,155 @@ test_the_global_kill_switch_stops_the_hook_in_every_repo() {
   assert_eq "...and nothing is logged for the repo" "no" "$([[ -f "$logdir/$REPO_NAME-post-merge.log" ]] && echo yes || echo no)"
   rm -f "$global"
   ( cd "$repo" && PATH="$bindir:$PATH" VAULT_ROOT="$vault" HOOK_LOG_DIR="$logdir" VAULT_HOOK_DISABLED_FILE="$global" bash "$HOOK_SCRIPT" )
-  sleep 0.5
+  n=0; while [[ ! -e "$marker" ]] && [[ "$n" -lt 80 ]]; do sleep 0.1; n=$((n + 1)); done
   assert_eq "with the file gone, the same hook runs claude again" "yes" "$([[ -f "$marker" ]] && echo yes || echo no)"
   return $?
+}
+
+# ---------------------------------------------------------------- the range, and pull --rebase
+
+test_the_installed_claude_cli_still_lists_restricted() {
+  # The hook's safety rests on --restricted. Where a real claude is installed, check its own
+  # help still lists the flag, so a release that drops it fails here before it fails in a log.
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "SKIP: claude not installed, cannot check that it still lists --restricted"
+    return 0
+  fi
+  assert_eq "claude --help lists --restricted" "yes" "$(claude --help 2>&1 | grep -q -- '--restricted' && echo yes || echo no)"
+  return 0
+}
+
+test_a_claude_that_rejects_restricted_is_reported_as_such_with_its_version() {
+  local n
+  fx_new
+  cat > "$FX_BIN/claude" <<'STUB'
+#!/bin/bash
+if [ "$1" = "--version" ]; then echo "9.9.9 (Claude Code)"; exit 0; fi
+echo "error: unknown option '--restricted'" >&2
+exit 1
+STUB
+  chmod +x "$FX_BIN/claude"
+  commit_files "$FX_REPO" some-change.md
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  n=0
+  while [[ "$(has_text "rejected --restricted" "$FX_LOG/$REPO_NAME-post-merge.log")" = "no" ]] && [[ "$n" -lt 80 ]]; do sleep 0.1; n=$((n + 1)); done
+  assert_eq "the failure log says --restricted was rejected" "yes" "$(has_text "rejected --restricted" "$FX_LOG/FAILURES.log")"
+  assert_eq "...and names the CLI version" "yes" "$(has_text "9.9.9 (Claude Code)" "$FX_LOG/FAILURES.log")"
+  assert_eq "the repo's own log says it too" "yes" "$(has_text "rejected --restricted" "$FX_LOG/$REPO_NAME-post-merge.log")"
+  return 0
+}
+
+test_an_ordinary_failure_does_not_claim_restricted_was_rejected() {
+  fx_new
+  make_capturing_claude "$FX_BIN" "something else went wrong" "" 1
+  commit_files "$FX_REPO" some-change.md
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_LOG/FAILURES.log"
+  sleep 1
+  assert_eq "an ordinary failure is still recorded" "yes" "$(has_text "exit=1" "$FX_LOG/FAILURES.log")"
+  assert_eq "...without the --restricted message" "no" "$(has_text "rejected --restricted" "$FX_LOG/FAILURES.log")"
+  return 0
+}
+
+test_the_range_starts_at_orig_head_and_falls_back_to_the_reflog() {
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  commit_files "$FX_REPO" first-change.md
+  commit_files "$FX_REPO" second-change.md
+  # Without ORIG_HEAD the reflog's previous position is used: only the last commit is in range.
+  git -C "$FX_REPO" update-ref -d ORIG_HEAD 2>/dev/null
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_BIN/argv.txt"
+  assert_eq "no ORIG_HEAD: the reflog fallback lists the last commit's file" "yes" "$(has_text '"second-change.md"' "$FX_BIN/argv.txt")"
+  assert_eq "no ORIG_HEAD: ...and not the one before it" "no" "$(has_text '"first-change.md"' "$FX_BIN/argv.txt")"
+  # With ORIG_HEAD set (as a merge or rebase sets it) the range starts there.
+  rm -f "$FX_BIN/argv.txt"
+  git -C "$FX_REPO" update-ref ORIG_HEAD "$(git -C "$FX_REPO" rev-parse HEAD~2)"
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_BIN/argv.txt"
+  assert_eq "ORIG_HEAD set: the earlier commit's file is in range" "yes" "$(has_text '"first-change.md"' "$FX_BIN/argv.txt")"
+  assert_eq "ORIG_HEAD set: ...and the later one's" "yes" "$(has_text '"second-change.md"' "$FX_BIN/argv.txt")"
+  return 0
+}
+
+# Arguments that must make the hook stop before it does anything. The hook's first synchronous
+# step with a failures log present is to mark it as seen, so that marker, not a sleep, tells
+# whether the hook got past the argument check.
+hook_got_past_the_argument_check() {  # <arg> -> yes | no
+  local arg="$1" logdir marker
+  logdir=$(fx_dir); marker="$logdir/.failures-seen"
+  echo "2026-01-01T00:00:00+00:00 earlier-repo exit=1 see somewhere" > "$logdir/FAILURES.log"
+  ( cd "$FX_REPO" && printf 'aaa bbb\n' | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$logdir" bash "$HOOK_SCRIPT" ${arg:+"$arg"} >/dev/null 2>&1 )
+  [[ -f "$marker" ]] && echo yes || echo no
+  return 0
+}
+
+test_called_as_post_rewrite_it_acts_on_a_rebase_and_ignores_an_amend() {
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  commit_files "$FX_REPO" rebased-in.md
+  assert_eq "no argument (post-merge): the hook runs past the argument check" "yes" "$(hook_got_past_the_argument_check '')"
+  assert_eq "post-rewrite amend: stops at once" "no" "$(hook_got_past_the_argument_check amend)"
+  assert_eq "post-merge with the squash flag: stops at once" "no" "$(hook_got_past_the_argument_check 1)"
+  assert_eq "post-rewrite rebase: runs past the argument check" "yes" "$(hook_got_past_the_argument_check rebase)"
+  return 0
+}
+
+test_after_a_rebase_the_range_comes_from_the_rewrite_list_not_a_stale_orig_head() {
+  local old new
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  commit_files "$FX_REPO" first-change.md
+  commit_files "$FX_REPO" second-change.md
+  old=$(git -C "$FX_REPO" rev-parse HEAD~2); new=$(git -C "$FX_REPO" rev-parse HEAD)
+  git -C "$FX_REPO" update-ref ORIG_HEAD HEAD~1      # stale: points at a commit inside the range
+  ( cd "$FX_REPO" && printf '%s %s\n' "$old" "$new" | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" rebase )
+  wait_for_file "$FX_BIN/argv.txt"
+  assert_eq "the old tip from the rewrite list is used: both files are in range" "yes" "$(has_text '"first-change.md"' "$FX_BIN/argv.txt")"
+  assert_eq "...and the later one" "yes" "$(has_text '"second-change.md"' "$FX_BIN/argv.txt")"
+  rm -f "$FX_BIN/argv.txt"
+  ( cd "$FX_REPO" && printf '%s %s\n' "$old" "$old" | env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" rebase )
+  sleep 1
+  assert_eq "a rewrite list that does not end at HEAD gives no range, so nothing runs" "no" "$([[ -f "$FX_BIN/argv.txt" ]] && echo yes || echo no)"
+  return 0
+}
+
+test_a_stale_orig_head_that_is_not_an_ancestor_falls_back_to_the_reflog() {
+  local side
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  git -C "$FX_REPO" checkout -q -b unrelated-side
+  commit_files "$FX_REPO" unrelated-history.md
+  side=$(git -C "$FX_REPO" rev-parse HEAD)
+  git -C "$FX_REPO" checkout -q -
+  commit_files "$FX_REPO" real-change.md
+  git -C "$FX_REPO" update-ref ORIG_HEAD "$side"
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" bash "$HOOK_SCRIPT" )
+  wait_for_file "$FX_BIN/argv.txt"
+  assert_eq "a stale ORIG_HEAD is ignored: the real change is in range" "yes" "$(has_text '"real-change.md"' "$FX_BIN/argv.txt")"
+  assert_eq "...and the unrelated history is not sent" "no" "$(has_text '"unrelated-history.md"' "$FX_BIN/argv.txt")"
+  return 0
+}
+
+test_a_real_pull_with_rebase_that_replays_a_local_commit_still_runs_the_hook() {
+  # git fires only post-rewrite for this case, never post-merge. The same file is installed
+  # as both, and the range is what the upstream side brought in, not the local commit.
+  local default
+  fx_new
+  make_capturing_claude "$FX_BIN"
+  default=$(git -C "$FX_REPO" symbolic-ref --short HEAD)
+  cp "$HOOK_SCRIPT" "$FX_REPO/.git/hooks/post-rewrite"; chmod +x "$FX_REPO/.git/hooks/post-rewrite"
+  commit_files "$FX_REPO" local-only.md
+  git -C "$FX_REPO" branch upstream-side HEAD~1
+  git -C "$FX_REPO" checkout -q upstream-side
+  commit_files "$FX_REPO" from-upstream.md
+  git -C "$FX_REPO" checkout -q "$default"
+  ( cd "$FX_REPO" && env PATH="$FX_BIN:$PATH" VAULT_ROOT="$FX_VAULT" HOOK_LOG_DIR="$FX_LOG" git rebase -q upstream-side >/dev/null 2>&1 )
+  wait_for_file "$FX_BIN/argv.txt"
+  assert_eq "the rebase ran the hook" "yes" "$([[ -s "$FX_BIN/argv.txt" ]] && echo yes || echo no)"
+  assert_eq "the upstream file is in the range" "yes" "$(has_text '"from-upstream.md"' "$FX_BIN/argv.txt")"
+  assert_eq "the replayed local commit's file is not" "no" "$(has_text '"local-only.md"' "$FX_BIN/argv.txt")"
+  return 0
 }
 
 test_noise_and_secret_shaped_files_never_reach_the_prompt
@@ -1168,6 +1315,14 @@ test_the_repo_is_named_after_its_folder_not_its_remote
 test_a_repo_with_no_origin_is_named_after_its_folder
 test_the_repo_name_is_lowercased_by_default_and_kept_with_repo_name_case_keep
 test_the_global_kill_switch_stops_the_hook_in_every_repo
+test_the_range_starts_at_orig_head_and_falls_back_to_the_reflog
+test_called_as_post_rewrite_it_acts_on_a_rebase_and_ignores_an_amend
+test_after_a_rebase_the_range_comes_from_the_rewrite_list_not_a_stale_orig_head
+test_a_stale_orig_head_that_is_not_an_ancestor_falls_back_to_the_reflog
+test_a_real_pull_with_rebase_that_replays_a_local_commit_still_runs_the_hook
+test_a_claude_that_rejects_restricted_is_reported_as_such_with_its_version
+test_an_ordinary_failure_does_not_claim_restricted_was_rejected
+test_the_installed_claude_cli_still_lists_restricted
 
 echo "--- $PASS passed, $FAIL failed ---"
 [ "$FAIL" -eq 0 ]

@@ -45,10 +45,19 @@ set -u
 # OTHER repos. Falls back to cwd-derivation only as a convenience for
 # testing this script directly from within the vault checkout.
 VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
-VAULT_BRANCH="main"
 NUDGE_COOLDOWN_SECONDS=3600
 STATE_DIR="$HOME/.claude/hook-logs"
 LAST_CHECK_FILE="$STATE_DIR/.vault-nudge-last-check"
+
+# Shared helpers (default branch, unpushed commits). Missing means no reminder, never an error.
+vault_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/vault-lib"
+[[ -f "$vault_lib" ]] || vault_lib="$HOME/.claude/hook-templates/vault-lib"
+if [[ ! -f "$vault_lib" ]]; then
+    echo "session-start-vault-check: vault-lib not found next to this hook or in ~/.claude/hook-templates, so the unpushed-vault-commits reminder is skipped. Run tools/install-claude-config.sh to install it." >&2
+    exit 0
+fi
+# shellcheck source=vault-lib
+. "$vault_lib"
 
 # Fail open on missing/malformed stdin or a missing jq - skip only the
 # one case known to be pure waste (recompacting mid-session), never skip
@@ -63,6 +72,11 @@ source_field=""
 if command -v jq >/dev/null 2>&1; then
     event=$(printf '%s' "$input" | jq -r '.hook_event_name // empty' 2>/dev/null)
     source_field=$(printf '%s' "$input" | jq -r '.source // empty' 2>/dev/null)
+else
+    # No jq: read the two string fields with sed. The input is one flat JSON object. Without
+    # this, every PostToolUse looked like a session start and the reminder repeated on each tool call.
+    event=$(printf '%s' "$input" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p' | head -n 1)
+    source_field=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p' | head -n 1)
 fi
 if [ "$source_field" = "compact" ]; then
     exit 0
@@ -81,14 +95,13 @@ if [ "$event" = "PostToolUse" ]; then
 fi
 
 [ -z "$VAULT_ROOT" ] && exit 0
-git -C "$VAULT_ROOT" rev-parse --verify "$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
-git -C "$VAULT_ROOT" rev-parse --verify "origin/$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
+VAULT_BRANCH=$(vault_branch "$VAULT_ROOT")
 
 # Commit subjects are attacker-influenceable the same way filenames are
 # (anyone who can commit to the vault picks the message) - shown context
 # only needs the count and short hashes to be actionable, so the message
 # text itself is deliberately never embedded here.
-pending_hashes=$(git -C "$VAULT_ROOT" log "origin/${VAULT_BRANCH}..${VAULT_BRANCH}" --format='%h' 2>/dev/null)
+pending_hashes=$(vault_unpushed_hashes "$VAULT_ROOT" "$VAULT_BRANCH") || exit 0
 
 # Record that a check actually happened, regardless of the outcome, so
 # the PostToolUse throttle above measures from the last real check.

@@ -209,6 +209,38 @@ test_silent_and_exit_0_when_the_vault_is_not_a_git_repo() {
   return $?
 }
 
+test_reminds_for_a_vault_whose_default_branch_is_not_main() {
+  new_workdir
+  init_repo "$VAULT" trunk
+  git init -q --bare "$WORK/origin.git"
+  git -C "$VAULT" remote add origin "$WORK/origin.git"
+  git -C "$VAULT" push -q origin trunk
+  git -C "$VAULT" remote set-head origin trunk >/dev/null 2>&1
+  printf 'x\n' >> "$VAULT/f.md"; git -C "$VAULT" commit -qam "pending on trunk"
+  run_hook "$VAULT" "$START"
+  assert_eq "default branch trunk: exit 0" "0" "$STATUS"
+  assert_has "default branch trunk: reminds" "$OUT" "$ONE_PENDING"
+  assert_has "default branch trunk: names the branch" "$OUT" "on trunk"
+  drop_workdir
+  return $?
+}
+
+test_without_the_helper_it_says_so_and_stays_out_of_the_way() {
+  local lone
+  new_workdir
+  vault_ahead 1
+  lone="$WORK/lone"; mkdir -p "$lone"
+  cp "$HOOK_SCRIPT" "$lone/session-start-vault-check"
+  : > "$OUT"; : > "$ERR"
+  ( cd "$WORK" && printf '%s' "$START" | env HOME="$FAKE_HOME" VAULT_ROOT="$VAULT" bash "$lone/session-start-vault-check" ) > "$OUT" 2> "$ERR"
+  STATUS=$?
+  assert_eq "no helper: exit 0" "0" "$STATUS"
+  assert_silent "no helper: nothing on stdout, so nothing reaches the model" "$OUT"
+  assert_has "no helper: stderr says why" "$ERR" "vault-lib not found"
+  drop_workdir
+  return $?
+}
+
 test_silent_when_vault_has_no_main_branch() {
   new_workdir
   init_repo "$VAULT" trunk
@@ -436,22 +468,32 @@ test_throttled_post_tool_use_still_reminds_at_next_session_start() {
 
 # --- fail open ------------------------------------------------------------------
 
-test_without_jq_it_still_checks_and_never_throttles() {
+test_without_jq_a_post_tool_use_is_still_throttled() {
   new_workdir
   vault_ahead 1
   make_marker 5
   run_hook "$VAULT" "$POST" "$(path_without_jq)"
   assert_eq "no jq: exit 0" "0" "$STATUS"
-  assert_has "no jq: event unknown, treated as session start, so it reminds even inside the cooldown" "$OUT" "$ONE_PENDING"
+  assert_lacks "no jq: a PostToolUse inside the cooldown stays quiet" "$OUT" "$UNPUSHED_TEXT"
   drop_workdir
   return $?
 }
 
-test_without_jq_compact_cannot_be_detected_so_it_still_checks() {
+test_without_jq_a_session_start_still_reminds_inside_the_cooldown() {
+  new_workdir
+  vault_ahead 1
+  make_marker 5
+  run_hook "$VAULT" "$START" "$(path_without_jq)"
+  assert_has "no jq: a SessionStart is never throttled" "$OUT" "$ONE_PENDING"
+  drop_workdir
+  return $?
+}
+
+test_without_jq_compact_is_still_skipped() {
   new_workdir
   vault_ahead 1
   run_hook "$VAULT" '{"source":"compact"}' "$(path_without_jq)"
-  assert_has "no jq + compact: the skip needs jq, so the safe direction is to check" "$OUT" "$UNPUSHED_TEXT"
+  assert_lacks "no jq + compact: skipped, as with jq" "$OUT" "$UNPUSHED_TEXT"
   drop_workdir
   return $?
 }
@@ -489,6 +531,8 @@ test_json_without_an_event_name_is_treated_as_unthrottled() {
 test_silent_and_exit_0_when_vault_root_cannot_be_derived
 test_silent_and_exit_0_when_the_vault_is_not_a_git_repo
 test_silent_when_vault_has_no_main_branch
+test_without_the_helper_it_says_so_and_stays_out_of_the_way
+test_reminds_for_a_vault_whose_default_branch_is_not_main
 test_silent_when_vault_has_no_origin
 test_in_sync_is_silent_but_records_that_a_check_ran
 test_silent_when_vault_is_only_behind_origin
@@ -506,8 +550,9 @@ test_post_tool_use_after_cooldown_reminds_and_refreshes_marker
 test_cooldown_boundary_just_inside_is_throttled
 test_cooldown_boundary_just_outside_reminds
 test_throttled_post_tool_use_still_reminds_at_next_session_start
-test_without_jq_it_still_checks_and_never_throttles
-test_without_jq_compact_cannot_be_detected_so_it_still_checks
+test_without_jq_a_post_tool_use_is_still_throttled
+test_without_jq_a_session_start_still_reminds_inside_the_cooldown
+test_without_jq_compact_is_still_skipped
 test_malformed_stdin_still_checks
 test_empty_stdin_still_checks
 test_json_without_an_event_name_is_treated_as_unthrottled
