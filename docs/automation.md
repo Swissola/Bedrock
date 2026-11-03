@@ -386,7 +386,7 @@ Because this repository is public and a pull request is untrusted text, it is bu
 - It starts only from `workflow_dispatch`, runs only on `main` for the owner, and fetches the diff as a file without checking out or running the branch.
 - The step that holds the token has read-only permissions and only the `Read` tool, with the runner's credential and config folders denied by path.
 - A second job, which never sees the token, has `pull-requests: write` and posts the comment.
-- The diff is cut at 200 KB and the comment at 6000 characters.
+- The diff is cut at 400 KB and the comment at 6000 characters. The model is told to read the diff in chunks to its last line and to say if it could not. A very large pull request can still go unreviewed in part, so keep them small or split them.
 
 Treat the review like any other model output: it can miss things and it can be wrong. `tools/testing/test-structure.sh` checks that these properties still hold.
 
