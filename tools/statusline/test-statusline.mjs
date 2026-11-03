@@ -181,7 +181,8 @@ for (const [desc, input] of [
   check('0% spend is shown and does not fall through to the cost', zero.line2.includes('spend ░░░░░░░░░░ 0%') && !zero.line2.includes('💰'), zero.line2);
   check('spend without amounts or a reset shows only the bar', !zero.line2.includes('$') && !zero.line2.includes('(') , zero.line2);
 
-  for (const [label, fields] of [['used only', { used_usd: 5 }], ['limit only', { limit_usd: 50 }]]) {
+  const partialSpends = [{ label: 'used only', fields: { used_usd: 5 } }, { label: 'limit only', fields: { limit_usd: 50 } }];
+  for (const { label, fields } of partialSpends) {
     const partial = run({ rate_limits: { spend_limit: { used_percentage: 10, ...fields } } });
     check(`spend amounts are shown only when both are supplied (${label})`, partial.status === 0 && partial.line2.includes('spend ▓░░░░░░░░░ 10%') && !partial.line2.includes('$'), partial.line2);
   }

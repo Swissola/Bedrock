@@ -13,7 +13,8 @@ import { spawnSync } from 'node:child_process';
 const stub = path.join(path.dirname(fileURLToPath(import.meta.url)), 'stub-rest-api-mcp.mjs');
 let pass = 0, fail = 0;
 const check = (desc, ok, extra = '') => {
-  if (ok) { pass++; console.log(`PASS: ${desc}`); } else { fail++; console.log(`FAIL: ${desc}${extra ? ` (${extra})` : ''}`); }
+  const detail = extra ? ` (${extra})` : '';
+  if (ok) { pass++; console.log(`PASS: ${desc}`); } else { fail++; console.log(`FAIL: ${desc}${detail}`); }
 };
 
 // Sends the requests to a fresh stub over stdin and returns the responses by id.

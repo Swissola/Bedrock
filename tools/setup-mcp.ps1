@@ -74,7 +74,7 @@ if ($dataRaw -match '"insecurePort":\s*(\d+)') {
 }
 
 # --- Step 4: register the MCP server (remove-then-add, so re-running fixes a bad prior registration) ---
-try { claude mcp remove obsidian --scope user 2>$null | Out-Null } catch {}
+try { claude mcp remove obsidian --scope user 2>$null | Out-Null } catch { Write-Verbose "No earlier obsidian registration to remove: $($_.Exception.Message)" }
 claude mcp add --transport http obsidian "http://localhost:$port/mcp/" --header "Authorization: Bearer $apiKey" --scope user
 Write-Host "[Step 4] OK - registered. Restart your Claude Code session to pick this up."
 
