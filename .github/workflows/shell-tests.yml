@@ -23,12 +23,14 @@ jobs:
           # macOS's own /bin/bash is 3.2, what a user's Terminal runs. Putting /bin first
           # makes the `bash` the hooks and tests launch resolve to it too.
           - name: macos (system bash 3.2)
-            os: macos-latest
+            os: macos-15
             bash: /bin/bash
             path_prefix: "/bin:"
-          # GNU timeout from coreutils is installed as `gtimeout`.
+          # GNU timeout from coreutils is installed as `gtimeout`. Runs on the Intel image: GitHub's
+          # arm64 macOS pool is often short of capacity and cancels jobs it cannot place, and the
+          # Intel pool is separate, so the two variants no longer compete for the same runners.
           - name: macos (gtimeout)
-            os: macos-latest
+            os: macos-15-intel
             bash: bash
             path_prefix: ""
             brew: coreutils
