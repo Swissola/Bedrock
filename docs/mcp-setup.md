@@ -1,61 +1,44 @@
 # Connecting Claude Code to this vault
 
-> **Scope:** for anyone setting up a machine to use the vault. It is a one-time, per-machine setup that lets Claude Code read and write the vault directly, through an **MCP server** named `obsidian`. (MCP, the Model Context Protocol, is how Claude Code talks to outside tools.) The server is backed by the Obsidian **Local REST API** community plugin. Nothing here is specific to this team or this vault's content: the same steps work for any Obsidian vault.
+> **Scope:** a one-time, per-machine setup that lets Claude Code read and write this vault directly, via an MCP server named `obsidian` backed by the Obsidian **Local REST API** community plugin. Not specific to this team or this vault's content — the same steps work for any Obsidian vault.
 >
-> **Hosting:** this pattern assumes each person has their own local clone, kept in sync through this repo's git history. A centrally hosted, multi-user server is a different (harder, more InfoSec-sensitive) setup and isn't covered here.
->
-> **Another backend:** MCPVault is an alternative that needs no Obsidian plugin. See [Backends](vault-config.md#backends). This page covers the Local REST API route.
+> **Hosting:** this pattern assumes each person has their own local clone, kept in sync via this repo's own git history. A centrally-hosted, multi-user server is a different (harder, more InfoSec-sensitive) setup and isn't covered here.
 
-## The steps at a glance
+## Step 0 — Clone first, then install and open Obsidian
 
-| Step | What | Scriptable? |
-|---|---|---|
-| 0 | Clone the repo, install Obsidian, open the clone as a vault | No |
-| 1 | Confirm `claude` works | Checked by the script |
-| 2 | Install and enable the Local REST API plugin | No (it is clicking through Obsidian), checked by the script |
-| 3 | Switch on the plugin's plain-HTTP server | Yes |
-| 4 | Register the `obsidian` MCP server with Claude Code | Yes |
-| 5 | Verify | Yes |
-
-Do steps 0 to 2 by hand, then either run the [setup script](#quick-path-run-the-setup-script-for-steps-3-to-5) or follow steps 3 to 5 manually.
-
-## Prerequisites
-
-- Node.js and npm installed.
-- Claude Code installed (`npm install -g @anthropic-ai/claude-code`).
-- Obsidian installed, and this repo cloned and opened as your vault (Step 0).
-
-> **Warning, before running any command below:** replace every placeholder (`<your-vault-path>`, `<latest-tag>`, `<api-key>`, `<your-repo-url>`) with your own real value first. A placeholder left in place typically fails silently (creates empty folders, downloads nothing) rather than erroring loudly. If you're not sure what a placeholder should be, ask before running it.
-
-## Step 0: Clone first, then install and open Obsidian
-
-**Clone this repo before installing or opening Obsidian at all.** Doing it in this order means there's nothing else for Obsidian's first-launch prompt to tempt you into by mistake.
+**Clone this repo before installing or opening Obsidian at all.** Doing it in this order means there's nothing else for Obsidian's first-launch prompt to tempt you into by mistake:
 
 ```bash
 git clone <your-repo-url>
 ```
 
-Don't have Obsidian yet? Download the installer for your OS from [obsidian.md](https://obsidian.md). No admin rights are needed on any platform, it installs per-user like most desktop apps.
+Don't have Obsidian installed yet? Download the installer for your OS from [obsidian.md](https://obsidian.md) — no admin rights needed on any platform, it installs per-user like most desktop apps.
 
-Open Obsidian. If it offers a choice, pick **"Open folder as vault"** and select the folder you just cloned, **not "Create new vault"**, which starts an empty, unrelated vault instead of this one. The cloned repo *is* the vault, so there's nothing separate to create. This is also why cloning first matters: if Obsidian's first launch happens before the clone exists, "Create new vault" becomes the tempting wrong answer (see [Known Gotchas](#known-gotchas)).
+Open Obsidian. If it offers a choice, pick **"Open folder as vault"** and select the folder you just cloned — **not "Create new vault"**, which starts an empty, unrelated vault instead of this one. The cloned repo *is* the vault; there's nothing separate to create. (This is also why cloning first matters: if Obsidian's first launch happens before the clone exists, "Create new vault" becomes the tempting wrong answer — see [Known Gotchas](#known-gotchas).)
 
-You are done when the vault's folders (`runbooks/`, `docs/` and so on) show in Obsidian's file list.
+## Prerequisites
 
-## Step 1: Confirm the `claude` command works
+> ⚠️ **Before running any command below:** replace every placeholder — `<your-vault-path>`, `<latest-tag>`, `<api-key>`, `<your-repo-url>` — with your own real value first. A placeholder left in place typically fails silently (creates empty folders, downloads nothing) rather than erroring loudly. If you're not sure what a placeholder should be, ask before running it.
+
+- Node.js + npm installed
+- Claude Code installed (`npm install -g @anthropic-ai/claude-code`)
+- Obsidian installed, this repo cloned and opened as your vault (Step 0 above)
+
+## Step 1 — Confirm the `claude` command works
 
 ```bash
 claude --version
 ```
 
-You are done when it prints a version number.
+> ⚠️ **Stale PATH shim gotcha (Windows, common with nvm-for-windows):** if an old Node-version-manager shim sits first on `PATH` but its `claude.exe` was renamed or removed by an updater, bare `claude` fails while the real install lives elsewhere (typically `%APPDATA%\npm`). Remove the dead shim and reopen the terminal.
 
-> **Stale PATH shim (Windows, common with nvm-for-windows):** if an old Node-version-manager shim sits first on `PATH` but its `claude.exe` was renamed or removed by an updater, bare `claude` fails while the real install lives elsewhere (typically `%APPDATA%\npm`). Remove the dead shim and reopen the terminal.
+## Step 2 — Install the Local REST API plugin
 
-## Step 2: Install the Local REST API plugin
+**Try this first, it's almost always available:** in Obsidian, go to **Settings → Community plugins → Browse**, search "Local REST API", then **Install → Enable**.
 
-**Try this first, it's almost always available.** In Obsidian, go to **Settings → Community plugins → Browse**, search "Local REST API", then **Install → Enable**.
+> ⚠️ **Only use the fallback below if Browse is genuinely unavailable** (restricted/locked-down install) — it needs a real vault path and a real release tag substituted in, or it fails silently rather than erroring clearly.
 
-**Only use the fallback below if Browse is genuinely unavailable** (a restricted or locked-down install). It needs a real vault path and a real release tag substituted in, or it fails silently rather than erroring clearly. Ask your AI assistant to do it, so it can look up the actual current release tag instead of you guessing.
+If Browse really is unavailable, drop the plugin files in directly (ask your AI assistant to do this, so it can look up the actual current release tag instead of you guessing):
 
 ```bash
 vault="<your-vault-path>"   # ← e.g. "/Users/you/Projects/your-vault-repo"
@@ -70,44 +53,36 @@ done
 echo '["obsidian-local-rest-api"]' > "$vault/.obsidian/community-plugins.json"
 ```
 
-(Windows PowerShell equivalent: the same idea with `New-Item` and `Invoke-WebRequest` in place of `mkdir` and `curl`.)
+(Windows/PowerShell equivalent: same idea with `New-Item`/`Invoke-WebRequest` in place of `mkdir`/`curl`.)
 
-Then fully close and reopen Obsidian on the vault, accepting "Turn on community plugins / Trust author" if prompted.
+Then fully close and reopen Obsidian on the vault, accepting "Turn on community plugins / Trust author" if prompted. On first load the plugin generates its API key and self-signed certificate into `.obsidian/plugins/obsidian-local-rest-api/data.json`.
 
-You are done when `.obsidian/plugins/obsidian-local-rest-api/data.json` exists. On first load the plugin writes its API key and self-signed certificate into that file.
+## Quick path: run the setup script for everything remaining
 
-## Quick path: run the setup script for steps 3 to 5
+Steps 1 and 2 above are the only parts that genuinely can't be scripted — clicking through Obsidian's own UI has to happen by hand, once. Everything from here — Steps 3 through 5 — can be done for you in one go:
 
-Steps 1 and 2 are the only parts that can't be scripted, because clicking through Obsidian's own UI has to happen by hand, once. The script re-checks both itself, stops with a specific error if either isn't done yet, and then does steps 3 to 5. It detects your vault path from its own location and reads the API key straight out of the plugin's config, so there is nothing to copy and paste. It is safe to re-run at any point, including to fix a bad earlier MCP registration.
+- **Windows:** open an **Administrator** `pwsh` (PowerShell 7+) prompt — not a non-elevated one, and not legacy `powershell.exe` — then:
 
-**Windows.** Open `pwsh` (PowerShell 7 or later, not the legacy `powershell.exe`), then:
+  ```powershell
+  cd <path-to-your-clone>
+  .\tools\setup-mcp.ps1
+  ```
 
-```powershell
-cd <path-to-your-clone>
-.\tools\setup-mcp.ps1
-```
+- **macOS/Linux:**
 
-**macOS and Linux:**
+  ```bash
+  cd <path-to-your-clone>
+  chmod +x tools/setup-mcp.sh
+  ./tools/setup-mcp.sh
+  ```
 
-```bash
-cd <path-to-your-clone>
-chmod +x tools/setup-mcp.sh
-./tools/setup-mcp.sh
-```
+It re-checks Steps 1 and 2 itself first, and stops with a clear, specific error if either isn't actually done yet rather than failing confusingly later on. Once past that, it auto-detects your vault path from its own location, reads the API key straight out of the plugin's config (nothing to copy-paste), and is safe to re-run at any point — including to fix a bad prior MCP registration.
 
-What to expect:
+The manual version of Steps 3–5 below is still here for understanding what the script does and for troubleshooting if it errors. The automation in [`docs/automation.md`](automation.md) (the reminder hooks, and the local commands/skills) is a separate, additional one-time install of its own — this script doesn't touch it.
 
-1. **The first run usually stops part-way.** If the plugin's plain-HTTP server is off, the script switches it on and prints `[Step 3] Enabled HTTP server. Restart Obsidian now, then re-run this script to continue.` Restart Obsidian and run the script again.
-2. **The second run finishes.** It prints `[Step 4] OK - registered`, then `[Step 5] OK - vault endpoint responded HTTP 200`, then `Done.`
-3. **Restart your Claude Code session**, then ask it to read `index.md`. That confirms the whole chain.
+## Step 3 — Enable the HTTP server
 
-If it errors, the message names the step that failed, and the manual steps below show what each step does. If `claude` is not found but works in your normal terminal, see [Known Gotchas](#known-gotchas).
-
-This script doesn't touch the automation in [`automation.md`](automation.md) (the slash commands and hooks), which is a separate, optional install.
-
-## Step 3: Enable the HTTP server
-
-By default the plugin only enables HTTPS on port `27124`, with a self-signed certificate, which causes certificate-validation trouble for MCP clients. Turn on plain HTTP instead:
+By default the plugin only enables HTTPS on port `27124`, which uses a self-signed certificate — that causes certificate-validation pain for MCP clients. Turn on plain HTTP instead:
 
 ```bash
 vault="<your-vault-path>"   # ← same one as Step 2; this doesn't carry over between terminal sessions
@@ -115,21 +90,21 @@ f="$vault/.obsidian/plugins/obsidian-local-rest-api/data.json"
 sed -i.bak 's/"enableInsecureServer": false/"enableInsecureServer": true/' "$f"
 ```
 
-Restart Obsidian so the plugin binds port `27123`. Then copy the `apiKey` value from `data.json` for the next step.
+Restart Obsidian so the plugin binds port `27123`. Grab the `apiKey` value from `data.json` for the next step.
 
-## Step 4: Register the MCP server
+## Step 4 — Register the MCP server
 
 ```bash
 claude mcp add --transport http obsidian "http://localhost:27123/mcp/" --header "Authorization: Bearer <api-key>" --scope user
 ```
 
-- `--scope user` makes it available in every Claude Code session on this machine, not just one project.
-- Obsidian must be open, because the MCP server runs inside the app.
-- Restart your Claude Code session after adding, so the connection is picked up.
+- `--scope user` → available across all Claude Code sessions/projects on this machine, not just one
+- Obsidian must be open — the MCP server runs inside the app
+- Restart your Claude Code session after adding, for the connection to pick up
 
-If your organisation runs Claude Code under an enterprise policy that restricts which MCP server URLs can be registered, `localhost` may not satisfy an allowlist pattern that expects a hostname. See [Enterprise MCP allowlists](#enterprise-mcp-allowlists-optional).
+> If your organization runs Claude Code under an enterprise policy that restricts which MCP server URLs can be registered, `localhost` may not satisfy an allowlist pattern that expects a hostname. See [Enterprise MCP allowlists](#enterprise-mcp-allowlists-optional) below.
 
-## Step 5: Verify
+## Step 5 — Verify
 
 ```bash
 curl -s -H "Authorization: Bearer <api-key>" http://localhost:27123/vault/
@@ -137,7 +112,7 @@ curl -s -H "Authorization: Bearer <api-key>" http://localhost:27123/vault/
 claude mcp list
 ```
 
-You are done when `curl` returns a JSON list of the vault's files and `claude mcp list` shows `obsidian` as connected rather than `Failed to connect`. Then ask your AI assistant to read a known file (for example `index.md`) to confirm it works end to end.
+Ask your AI assistant to read a known file (e.g. `index.md`) to confirm it works end-to-end.
 
 ## Using more than one vault on one machine (optional)
 
@@ -161,39 +136,38 @@ If you would rather keep separate keys, the alternative is one registration per 
 
 ## Enterprise MCP allowlists (optional)
 
-Some enterprise Claude Code deployments restrict `claude mcp add` to an explicit allowlist of URL patterns, and reject anything else, including `localhost`, with an error like `not allowed by enterprise policy`. If that's your situation, one working pattern:
+Some enterprise Claude Code deployments restrict `claude mcp add` to an explicit allowlist of URL patterns, and reject anything else — including `localhost` — with an error like `not allowed by enterprise policy`. If that's your situation, one working pattern:
 
-1. Ask whoever administers your Claude Code policy to allowlist a pattern like `http://obsidian.mcp.internal:27123/*`. Any hostname works, as long as it isn't a raw IP or `localhost` if those are specifically excluded.
+1. Ask whoever administers your Claude Code policy to allowlist a pattern like `http://obsidian.mcp.internal:27123/*` (any hostname works — it just needs to not be a raw IP or `localhost` if those are specifically excluded).
 2. Map that hostname to your own machine in your hosts file, so it actually resolves:
    - **Windows** (`C:\Windows\System32\drivers\etc\hosts`, edit as Administrator): `127.0.0.1 obsidian.mcp.internal`
-   - **macOS and Linux** (`/etc/hosts`, edit with `sudo`): `127.0.0.1 obsidian.mcp.internal`
-3. Register against that hostname instead of `localhost` in Step 4.
+   - **macOS/Linux** (`/etc/hosts`, edit with `sudo`): `127.0.0.1 obsidian.mcp.internal`
+3. Register against that hostname instead of `localhost` in Step 4 above.
 
-This only affects your own machine's name resolution. It isn't a real DNS entry and doesn't need to be. If you're rolling this out as guidance for others, loop in whoever owns that policy first: an allowlist entry approved for one person isn't automatically approved as a repeatable process for a whole team.
+This only affects your own machine's local name resolution — it isn't a real DNS entry and doesn't need to be. If you're rolling this out as documented guidance for others to follow (rather than just your own setup), loop in whoever owns that policy first — an allowlist entry approved for one person's use isn't automatically approved as a repeatable process for a whole team.
 
 ## Known Gotchas
 
 | Issue | Fix |
 |---|---|
-| Obsidian prompted "Create new vault?" on first open | Choose **"Open folder as vault"** instead and select your clone of this repo. "Create new vault" starts an empty, unrelated vault elsewhere. See Step 0 |
-| Ran a command with a placeholder (`<your-vault-path>`, `<api-key>`, etc.) left in literally | Fails silently rather than erroring: it creates empty junk folders at the literal path, downloads nothing, or registers a connection that fails later. Always substitute real values first |
-| Ran a later step in a new terminal and an earlier step's shell variable is no longer set | Shell variables don't persist between terminal sessions. Re-declare `$vault` (or `$vault` and `$f` in PowerShell) in each new session |
-| Registered the MCP server with `<api-key>` left in literally | `claude mcp add` succeeds either way (it doesn't validate the header at registration time), but the connection then fails with HTTP 401 and `claude mcp list` shows `obsidian: ... Failed to connect`. Fix: `claude mcp remove obsidian --scope user`, then re-add with the real key from `data.json` |
-| Setup script says `claude` not found, but it works in your normal terminal | On Windows, run it in `pwsh` (PowerShell 7+), not a spawned legacy `powershell.exe`. The two can resolve `PATH` differently |
-| Community plugins Browse missing or locked | Install the plugin files manually (the Step 2 fallback) |
-| Certificate errors on port 27124 | Use plain HTTP on 27123 instead (`"enableInsecureServer": true`), Step 3 |
-| `claude mcp add` fails with "not allowed by enterprise policy" | Your org's allowlist likely does a literal string match, port included. See [Enterprise MCP allowlists](#enterprise-mcp-allowlists-optional) |
-| Obsidian must be open | The MCP server runs inside the app. With no Obsidian running there is no MCP connection, whatever `claude mcp list` says |
+| Obsidian prompted "Create new vault?" on first open | Choose **"Open folder as vault"** instead and select your clone of this repo — "Create new vault" starts an empty, unrelated vault elsewhere. See Step 0 |
+| Ran a command with a placeholder (`<your-vault-path>`, `<api-key>`, etc.) left in literally | Fails silently rather than erroring — creates empty junk folders at the literal path, downloads nothing, or registers a connection that will fail later. Always substitute real values first |
+| Ran a later step in a new terminal, an earlier step's shell variable no longer set | Shell variables don't persist between terminal sessions — re-declare `$vault` (or `$vault`/`$f` in PowerShell) in each new session rather than assuming it's still set |
+| Registered the MCP server with `<api-key>` left in literally | `claude mcp add` succeeds either way (it doesn't validate the header at registration time) but the connection then fails with HTTP 401 — `claude mcp list` shows `obsidian: ... Failed to connect`. Fix: `claude mcp remove obsidian --scope user`, then re-add with the real key from `data.json` |
+| Setup script says `claude` not found, but it works in your normal terminal | On Windows, run it in `pwsh` (PowerShell 7+), not a spawned legacy `powershell.exe` — the two can resolve `PATH` differently |
+| Community plugins Browse missing/locked | Install plugin files manually (Step 2 fallback) |
+| Certificate errors on port 27124 | Use plain HTTP on 27123 instead (`"enableInsecureServer": true`) — Step 3 |
+| `claude mcp add` fails with "not allowed by enterprise policy" | Your org's allowlist likely does a literal string match, port included — see [Enterprise MCP allowlists](#enterprise-mcp-allowlists-optional) |
+| Obsidian must be open | The MCP server runs inside the app — no Obsidian running means no MCP connection, regardless of what `claude mcp list` says |
 | After switching the open vault, the HTTP server does not start | Flip the plugin's "Non-encrypted (HTTP) Server" toggle off and on by hand, even when `enableInsecureServer` is already `true` in `data.json`. Seen more than once after switching vaults |
 | API key exposed in a shell history or chat | Regenerate it in the plugin settings, then re-run the registration step with the new key |
-| `.obsidian/plugins/*/data.json` committed to git | It contains the live API key and certificate. Confirm it's in `.gitignore` **before** your first commit, not after |
-| A note was cut down to its heading after an edit made with the surgical edit tool (`vault_patch`) | That tool is unreliable on some versions of the plugin. Read the whole note and write the whole note back instead, as the vault's `CLAUDE.md` says, until you have confirmed the tool is safe on your version |
-| Wrote a file into a dot-prefixed folder (for example `.claude/`) inside the vault through the MCP write tool | It reports success, but the file is then invisible to every other vault tool (not listed, not readable, not deletable), because Obsidian's plugin API treats dot-folders as hidden or plugin-config space, not indexed vault content. Use a plain folder name instead |
-| A folder in `tools/` looks empty in Obsidian's file explorer, even though the files exist on disk | Obsidian's **Settings → Files and Links → "Detect all file extensions"** is off by default, which hides files with an unrecognised or missing extension (for example this repo's extensionless hook templates). Turn it on to see everything the repo contains |
+| `.obsidian/plugins/*/data.json` committed to git | Contains the live API key and certificate — confirm it's in `.gitignore` **before** your first commit, not after |
+| Wrote a file into a dot-prefixed folder (e.g. `.claude/`) inside the vault via the MCP write tool | Reports success, but the file is then invisible to every other vault tool afterward (not listed, not readable, not deletable) — Obsidian's plugin API treats dot-folders as hidden/plugin-config space, not indexed vault content. Use a plain folder name instead |
+| A folder in `tools/` looks empty in Obsidian's file explorer, even though the files exist on disk | Obsidian's **Settings → Files and Links → "Detect all file extensions"** is off by default, which hides files with an unrecognised or missing extension (e.g. this repo's extensionless hook templates) from the explorer entirely. Turn that setting on to see everything the repo actually contains |
 
 ## Related
 
-- [`mcp-tools-reference.md`](mcp-tools-reference.md): everything the vault connection can actually do
-- [`automation.md`](automation.md): optional git hooks and Claude Code commands built on top of this connection
-- [`../runbooks/using-the-vault.md`](../runbooks/using-the-vault.md): what to do with the vault once this is working
-- Central hosting (a shared, network-reachable server rather than per-person local clones) is a real option for larger teams, but it reopens network and security questions that are out of scope here.
+- [`docs/mcp-tools-reference.md`](mcp-tools-reference.md) — everything the vault connection can actually do
+- [`docs/automation.md`](automation.md) — optional git hooks and Claude Code commands/skills built on top of this connection
+- [`runbooks/using-the-vault.md`](../runbooks/using-the-vault.md) — what to actually do with the vault once this is working
+- Central hosting (a shared, network-reachable server rather than per-person local clones) is a real option for larger teams but reopens network/security questions that are out of scope for this guide.

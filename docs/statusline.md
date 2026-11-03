@@ -1,6 +1,6 @@
 # Claude Code status line (optional)
 
-> **Scope:** for anyone who wants Claude Code's status line (the strip of text under the prompt) to show the model, branch, context use and usage limits. It is a single Node script, [`tools/statusline/statusline.mjs`](../tools/statusline/statusline.mjs), with no dependencies, that works the same on Windows, macOS and Linux. It reads the JSON Claude Code sends it and prints two lines. Nothing in the vault depends on it, so install it only if you want it.
+> **Scope:** a small, dependency-free status line for Claude Code that works the same on Windows, macOS and Linux. It is a single Node script, [`tools/statusline/statusline.mjs`](../tools/statusline/statusline.mjs), that reads the JSON Claude Code sends it and prints two lines. Nothing in the vault depends on it; install it only if you want it.
 
 ## What it shows
 
@@ -36,7 +36,7 @@ From a clone of this repo:
 bash tools/install-claude-config.sh --statusline
 ```
 
-Add `--dry-run` first to see what it would do, and `--check` afterwards to see whether the installed copy is current. It is opt-in: without `--statusline` the installer does not touch any of this, and it can be combined with the other options (`--vault`, `--backend`). Start a new Claude Code session afterwards. You are done when two status lines show under the prompt.
+Add `--dry-run` first to see what it would do, and `--check` afterwards to see whether the installed copy is current. It is opt-in: without `--statusline` the installer does not touch any of this, and it can be combined with the other options (`--vault`, `--backend`, `--no-skills`).
 
 - It copies the script to `~/.claude/statusline.mjs` (or `<prefix>/statusline.mjs` with `--prefix`).
 - It sets `statusLine` in `settings.json` only if none is set, writing `node` followed by the **absolute path** with forward slashes, so it does not depend on how the shell expands `~`. A path with anything unusual in it (a space, say) is wrapped in single quotes, and one containing a single quote or a line break is refused rather than quoted unsafely.
@@ -47,7 +47,7 @@ Add `--dry-run` first to see what it would do, and `--check` afterwards to see w
 
 ## Installing by hand
 
-Copy `tools/statusline/statusline.mjs` somewhere stable, for example `~/.claude/statusline.mjs`, and add this to `~/.claude/settings.json`:
+Copy the script somewhere stable, for example `~/.claude/statusline.mjs`, and add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -55,7 +55,7 @@ Copy `tools/statusline/statusline.mjs` somewhere stable, for example `~/.claude/
 }
 ```
 
-Start a new Claude Code session to pick it up. You are done when two status lines show under the prompt.
+Start a new Claude Code session to pick it up.
 
 **On Windows, check how the command is launched.** Claude Code runs status line commands through Git Bash when Git for Windows is installed, and through PowerShell otherwise. Bash expands `~`; PowerShell does not expand it for native programs, so `node ~/.claude/statusline.mjs` may receive a literal `~`. If the status line is blank on a machine without Git for Windows, use an absolute path with forward slashes instead, for example `node C:/Users/jane-doe/.claude/statusline.mjs`.
 

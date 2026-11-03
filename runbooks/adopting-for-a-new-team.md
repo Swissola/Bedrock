@@ -5,48 +5,35 @@ tags: [runbook, onboarding, multi-team]
 
 # Adopting this template for your own team
 
-> **Scope:** for whoever turns this template into a team's own vault, whether that is the first team to use it or someone setting up a *second*, separate vault from the same template. You've used this repo as a template (or forked or cloned it) to set up the Obsidian and MCP pattern for your own team. This checklist is what to change before anyone else relies on it. Do it before treating the new vault as ready.
+> **Scope:** you've used this repo as a template (or forked/cloned it) to set up this same Obsidian + MCP pattern for your own team. This checklist is what to change before treating it as ready for anyone else to use — not a one-time-only concern, since it's also exactly what someone spinning up a *second*, separate team vault from this same template needs to do.
 
-## Why there is a checklist
+## Why this is worth a checklist at all
 
-Most of the value here isn't specific to whichever team first wrote it up. The MCP setup steps, `tools/setup-mcp.ps1` and `tools/setup-mcp.sh`, the vault folder conventions, the hooks (`tools/hook-templates/`) and the slash commands (`tools/command-templates/`) all apply to any team, and none of them hardcode a team name: they derive it from the repo they're installed in. Using this as a template saves re-deriving all that, and re-hitting the gotchas the [Known Gotchas](../docs/mcp-setup.md#known-gotchas) table already paid for.
+Most of the value here isn't specific to whichever team originally wrote it up: the MCP setup steps, `tools/setup-mcp.ps1`/`tools/setup-mcp.sh`, the vault folder conventions, the reminder hooks (`tools/hook-templates/`), and the local commands/skills (`tools/command-templates/`, `tools/skill-templates/`) all apply to any team doing this, and none of them hardcode a team name — they derive it from the repo they're actually installed in. Using this as a template saves re-deriving all of that, and re-hitting the gotchas the [Known Gotchas](../docs/mcp-setup.md#known-gotchas) table already paid for.
 
-The checklist below is deliberately small. It covers only the *content* and *identity* items that can't be derived automatically: the repo's own name and remote, and its example content. Everything else needs no editing after the rename.
+**Deliberately kept small**: the checklist below is genuinely only the *content* and *identity* items that can't be auto-derived — the repo's own name/remote and its example content. Everything else — the setup scripts, the hooks, the local commands/skills — needs no editing at all after the rename.
 
-**Don't skip it.** A naive copy carries the previous team's specifics over silently rather than erroring, which is the failure shape the rest of this setup is hardened against.
+## The catch — don't skip this
+
+A naive copy carries the previous team's specifics over silently rather than erroring, which is exactly the failure shape this whole setup is otherwise hardened against. **Do this checklist before treating a new vault as ready for anyone else to use.**
 
 ## Checklist
 
-- [ ] **Rename the repo** (e.g. `bedrock-<your-team>`) and re-point the git remote - don't just leave it as a clone of this template.
-- [ ] **Reset `index.md`** - replace the placeholder title and Systems/Repos table with your own team's name and your own systems.
-- [ ] **Clear out `daily-notes/`** - the example folder here (`daily-notes/example-person/`) is a placeholder, not template content to keep. Delete it once you have your own.
-- [ ] **Decide on the note naming.** The default is one daily note per repo, `daily-notes/<author>/YYYY-MM-DD-<repo>-<topic>.md`, with `repo:` frontmatter and open-item tracking (`staleOpenItemDays`, 30 by default). To change that, set `filenamePattern`, `appendRule` or `staleOpenItemDays` in [`vault-config.md`](../docs/vault-config.md). If your team has older notes in the previous naming, do nothing: the session-start hook shows the newest one until a repo has notes of its own, and `/vault-log` offers its open items for adoption once.
-- [ ] **Read `CLAUDE.md` at the repo root.** It is the short set of conventions Claude Code loads when it runs in the vault (layout, daily-note rules, open-item markers, what never to write). Change anything that does not match how your team will work, and keep it short, because it is loaded into every session.
-- [ ] **Clear out `repos/`** - remove any example repo docs (`repos/<name>/index.md`) that came with the template. Your team builds up its own from scratch (see [`using-the-vault.md`](using-the-vault.md#3-bootstrapping-a-repo-doc-reposname)).
-- [ ] **If you set up the optional [wiki-publishing appendix](../docs/publishing-to-a-wiki.md)**, update its config with your own space/site identifiers - don't leave a previous team's target in place, or a publish could overwrite the wrong page.
+- [ ] **Rename the repo** (e.g. `bedrock-<your-team>`) and re-point the git remote — don't just leave it as a clone of this template.
+- [ ] **Reset `index.md`** — replace the placeholder title and Systems/Repos table with your own team's name and your own systems.
+- [ ] **Clear out `daily-notes/`** — the example folder here (`daily-notes/example-person/`) is a placeholder, not template content to keep. Delete it once you have your own.
+- [ ] **Decide on the note naming.** The default is one note per repo, `daily-notes/<author>/YYYY-MM-DD-<repo>-<topic>.md`, with `repo:` frontmatter and open-item tracking (`staleOpenItemDays`, 30 by default). A team with older notes in the previous naming needs to do nothing: the session-start hook shows the newest one until a repo has notes of its own, and `/vault-log` offers its open items for adoption once. Set `filenamePattern`, `appendRule` or `staleOpenItemDays` in [`vault-config.md`](../docs/vault-config.md) only to change that.
+- [ ] **Clear out `repos/`** — remove any example `repos/<name>/index.md` docs that came with the template; your team builds up its own from scratch (see [`runbooks/using-the-vault.md`](using-the-vault.md)).
+- [ ] **If you set up the optional [wiki-publishing appendix](../docs/publishing-to-a-wiki.md)**, update its config with your own space/site identifiers — don't leave a previous team's target in place, or a publish could overwrite the wrong page.
 - [ ] **If you use a CI pipeline for anything repo-specific** (e.g. the optional wiki publish job), check any branch-name assumptions in it match this repo's actual default branch.
-- [ ] **If you keep a local scratch file** for in-progress setup notes (for example `TASK-HANDOVER.md`), it is already gitignored in this template and does not carry over through a clone or fork. If you copied a working directory instead of doing a fresh `git clone`, delete it by hand.
+- [ ] **No change needed:** `tools/setup-mcp.ps1` / `tools/setup-mcp.sh` (auto-detect the vault path from their own location), the MCP setup steps and Known Gotchas table in `docs/mcp-setup.md`, `.gitignore` and `.gitattributes`, `tools/hook-templates/post-merge` (derives its repo name and doc target from its own git remote — correct automatically for any fork), `tools/hook-templates/session-start-vault-check`, `tools/hook-templates/session-start-vault-context`, and `tools/hook-templates/pre-push` (all already derive `VAULT_ROOT` from wherever they're installed, or take it as an explicit override), `tools/hook-templates/pre-commit` (names no particular team or repo, it's a generic secret scan), `tools/hook-templates/test-post-merge.sh` and `tools/hook-templates/test-pre-commit.sh` (both build their own throwaway git fixtures, neither touches this repo's real content), `tools/command-templates/` and `tools/skill-templates/` (none of these name any particular team).
+- [ ] If you keep a local scratch file for in-progress setup notes (e.g. `TASK-HANDOVER.md`), it's already gitignored in this template — but if you're literally copying a working directory rather than doing a fresh `git clone`, delete it by hand too; it won't carry over via a proper clone/fork either way.
 
-### What needs no change
+## A note on multiple teams sharing one vault vs. separate vaults per team
 
-Leave these alone. None names a particular team, or each derives what it needs from where it is installed:
-
-- `tools/setup-mcp.ps1` and `tools/setup-mcp.sh`: they detect the vault path from their own location.
-- The MCP setup steps and Known Gotchas table in `docs/mcp-setup.md`.
-- `.gitignore` and `.gitattributes`.
-- `tools/hook-templates/post-merge`: it derives its repo name and doc target from the folder it is installed in, so it is correct for any fork.
-- `tools/hook-templates/session-start-vault-check`, `session-start-vault-context` and `pre-push`: none of them names a team. `session-start-vault-check` and `session-start-vault-context` need `VAULT_ROOT` passed in (the installer's wrapper reads it from `~/.claude/hook-configs/vault-root`), and `pre-push` falls back to the repo being pushed, so set `VAULT_ROOT` when you install it in a repo other than the vault.
-- `tools/hook-templates/pre-commit`: a generic secret scan.
-- `tools/hook-templates/test-post-merge.sh` and `test-pre-commit.sh`: they build their own throwaway git fixtures and never touch this repo's content.
-- `tools/command-templates/`.
-
-## One vault per team, or one shared vault
-
-This template assumes **one vault per team** (or per closely related group of teams), each its own repo. If you're tempted to add a second team's docs to *this same* vault instead of forking a new one, think it through first. Cross-linking works cleanly within one repo, but two teams with different push policies, reviewers and content-sensitivity needs, sharing one git history and one `index.md`, tends to get contentious fast.
-
-Forking per team keeps each team's governance independent. The cost is that you can't cross-link between vaults with a plain `[[wikilink]]`. A plain URL link between the two repos' hosted views works instead, if both are hosted somewhere browsable.
+This template assumes **one vault per team** (or per closely-related group of teams), each its own repo. If you're tempted to add a second team's docs into *this same* vault instead of forking a new one, think it through first: cross-linking works cleanly within one repo, but two teams with different push policies, different reviewers, and different content-sensitivity needs sharing one git history and one `index.md` tends to get contentious fast. Forking per team keeps each team's governance independent, at the cost of not being able to cross-link between vaults with a plain `[[wikilink]]` (a plain URL link between the two repos' hosted views works fine instead, if both are hosted somewhere browsable).
 
 ## Related
 
-- [`using-the-vault.md`](using-the-vault.md): this template's own conventions, once you've adopted it
-- [`../docs/mcp-setup.md`](../docs/mcp-setup.md): connecting Claude Code to the vault
+- [`using-the-vault.md`](using-the-vault.md) — this template's own conventions, once you've adopted it
+- [`../docs/mcp-setup.md`](../docs/mcp-setup.md)

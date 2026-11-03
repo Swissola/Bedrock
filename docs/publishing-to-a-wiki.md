@@ -1,12 +1,10 @@
 # Publishing selected docs to a team wiki (optional)
 
-> **Scope:** for a team whose organisation already has a separate documentation platform (Confluence, Notion, SharePoint and so on) that other teams read without ever touching git or Obsidian, and who want a *subset* of this vault's docs mirrored there. The mirror is read-only: generated from the vault, not edited independently on both sides. This is entirely optional and unrelated to the vault working on its own. Most teams should skip it (see [Why this is worth doing deliberately](#why-this-is-worth-doing-deliberately-not-by-default)).
+> **Scope:** if your organization already has a separate documentation platform (Confluence, Notion, SharePoint, etc.) that other teams read without ever touching git or Obsidian, you may want a *subset* of this vault's docs mirrored out there — read-only, generated from the vault, not edited independently on both sides. This is entirely optional and unrelated to the vault working on its own.
 
 ## The pattern
 
-There are four parts: the vault as source, a manifest, a prepare script, and a CI job.
-
-1. **The vault stays the source of truth.** Nobody edits the wiki copy directly. Every wiki page is generated from a specific `.md` file in this repo.
+1. **The vault stays the source of truth.** Nobody edits the wiki copy directly — every wiki page is generated from a specific `.md` file in this repo.
 2. **A small manifest lists which files get published, and under what title.** `tools/wiki/wiki-publish.example.json` is a starting point:
 
    ```json
@@ -26,15 +24,9 @@ There are four parts: the vault as source, a manifest, a prepare script, and a C
    }
    ```
 
-   From the repo root, copy it to `wiki-publish.json` (the name the script looks for by default), point each `source` at a file you want mirrored, and set `space` to your real space or site key.
+   Copy it to `wiki-publish.json`, point `source` at whichever files you actually want mirrored, and set `space` to your real space/site key.
 
-3. **A prepare script turns each source file into wiki-ready output.** `tools/wiki/prepare-wiki-docs.ps1` reads the manifest, strips the leading `# Title` heading (the wiki page title already carries that), and stages the result into `.wiki-stage/` (already in `.gitignore`). Run it from the repo root to see what would be published:
-
-   ```powershell
-   pwsh tools/wiki/prepare-wiki-docs.ps1
-   ```
-
-   It is a PowerShell script. It deletes and recreates `.wiki-stage/` on every run, and the `-ConfigFile` and `-OutputDir` parameters change the two paths. It only prepares files and never talks to a wiki, so you can run it freely. Open a staged file to check it reads correctly.
+3. **A prepare script turns each source file into wiki-ready output.** `tools/wiki/prepare-wiki-docs.ps1` reads the manifest, strips the leading `# Title` heading (the wiki page title already carries that), and stages the result into `.wiki-stage/` (already in `.gitignore`).
 4. **A CI job runs the prepare script and pushes the result to your wiki**, on a schedule or on every merge to your default branch, however your CI platform does that. Two minimal examples:
 
    **GitHub Actions** (`.github/workflows/publish-docs.yml`):
@@ -53,7 +45,7 @@ There are four parts: the vault as source, a manifest, a prepare script, and a C
            run: ./tools/wiki/prepare-wiki-docs.ps1
          - name: Publish
            run: |
-             # Replace with your actual wiki's publish step/action -
+             # Replace with your actual wiki's publish step/action —
              # this is intentionally left as a placeholder since it
              # depends entirely on which platform you're publishing to.
              echo "Publish .wiki-stage/ contents to your wiki here"
@@ -80,15 +72,15 @@ There are four parts: the vault as source, a manifest, a prepare script, and a C
 
 ## Why this is worth doing deliberately, not by default
 
-Most teams don't need this. If everyone who needs these docs already has Obsidian and git, mirroring adds a second copy to keep honest for no real benefit. It earns its keep when there's a real audience who won't install Obsidian or touch git, but already lives in your existing wiki platform day to day.
+Most teams don't need this — if everyone who needs these docs already has Obsidian and git, mirroring adds a second copy to keep honest for no real benefit. It earns its keep specifically when there's a real audience who won't install Obsidian or touch git, but already lives in your existing wiki platform day to day.
 
 ## Gotchas worth knowing before you build this out
 
-- **Markdown-to-wiki conversion can be lossy in ways that are easy to miss.** If your wiki's importer round-trips markdown through its own escaping, literal backslash-containing text (a Windows path, a regex) is a common casualty - verify a converted page actually reads correctly, don't assume a clean-looking diff means a clean result.
-- **Always fetch the page back after publishing to confirm the write landed as intended** - don't trust a publish call's success response alone.
-- **Check the live wiki page for content the vault doesn't have, before overwriting it**, if there's any chance someone edited the wiki copy directly (which defeats the "vault is the source of truth" premise, but happens). Pull anything newer back into the source `.md` file first, or a publish silently destroys it - including a title changed directly on the wiki, if your publish step also overwrites titles.
-- **Only include `parent` in the manifest when you actually want to (re)parent a page** - omitting it for a page that already exists under a different parent avoids accidentally moving it.
+- **Markdown-to-wiki conversion can be lossy in ways that are easy to miss.** If your wiki's importer round-trips markdown through its own escaping, literal backslash-containing text (a Windows path, a regex) is a common casualty — verify a converted page actually reads correctly, don't assume a clean-looking diff means a clean result.
+- **Always fetch the page back after publishing to confirm the write landed as intended** — don't trust a publish call's success response alone.
+- **Check the live wiki page for content the vault doesn't have, before overwriting it**, if there's any chance someone edited the wiki copy directly (which defeats the "vault is the source of truth" premise, but happens). Pull anything newer back into the source `.md` file first, or a publish silently destroys it — including a title changed directly on the wiki, if your publish step also overwrites titles.
+- **Only include `parent` in the manifest when you actually want to (re)parent a page** — omitting it for a page that already exists under a different parent avoids accidentally moving it.
 
 ## Related
 
-- [`../runbooks/adopting-for-a-new-team.md`](../runbooks/adopting-for-a-new-team.md): remember to update `wiki-publish.json` with your own space or site key if you adopt this, not a previous team's
+- [`../runbooks/adopting-for-a-new-team.md`](../runbooks/adopting-for-a-new-team.md) — remember to update `wiki-publish.json` with your own space/site key if you adopt this, not a previous team's
