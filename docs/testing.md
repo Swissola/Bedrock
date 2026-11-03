@@ -412,6 +412,7 @@ Checks that no single suite can make:
 - the installer's hook list matches the hooks that exist;
 - every suite is in `run-all-tests.sh`, in a CI workflow and in this page;
 - every shell script parses, has LF endings, is tracked as executable and has `eol=lf` in `.gitattributes`; JavaScript (including the status line files) and PowerShell files parse; the example wiki config is valid;
+- the bot review workflow stays locked down: manual trigger only, the `Read` tool only, the token present only in the review job, write permission only on the posting job, every action pinned, each of the specific read denies present (and `/home` as a whole not denied, because that hides the checkout), and `persist-credentials: false`;
 - every command template carries a version stamp;
 - the test scripts use nothing that the macOS system bash (3.2) lacks, and none of the GNU-only commands (`touch -d`, `readlink -f`, `date -d` without a fallback, `sed -i` without a suffix) that would fail there;
 - every suite cleans up from an exit trap;

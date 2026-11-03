@@ -312,7 +312,15 @@ test_the_bot_review_workflow_stays_locked_down() {
   assert_eq "write permission exists only on the posting job" "1" "$(grep -cE '^[[:space:]]+pull-requests: write$' "$wf")"
   assert_eq "it refuses to run off main or for another actor" "yes" "$(grep -qF "github.ref == 'refs/heads/main' && github.actor == 'Swissola'" "$wf" && echo yes || echo no)"
   assert_eq "every action is pinned to a commit" "" "$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$wf" | grep -vE '@[0-9a-f]{40}( |$)' || true)"
-  assert_eq "the model step denies every other tool, and Read outside the checkout" "yes" "$(grep -qF 'Bash Write Edit' "$wf" && grep -qF "'Read(//proc/**)'" "$wf" && echo yes || echo no)"
+  assert_eq "the model step denies every other tool" "yes" "$(grep -qF 'Bash Write Edit NotebookEdit WebFetch WebSearch Task' "$wf" && echo yes || echo no)"
+  local deny
+  for deny in '//proc/**' '//etc/**' '//root/**' '//run/**' '//tmp/**' '//var/**' '//opt/**' '//home/runner/.ssh/**' '//home/runner/.claude/**' '//home/runner/.config/**' '//home/runner/.npm/**' '//home/runner/work/_temp/**' '//home/runner/.*' '//home/runner/.*/**' '//home/runner/runners/**'; do
+    assert_eq "the model step denies Read($deny)" "yes" "$(grep -qF -- "'Read($deny)'" "$wf" && echo yes || echo no)"
+  done
+  # The checkout, and so the diff file, lives under /home/runner/work. A deny rule beats an allow,
+  # so denying all of /home would stop the bot reading the diff it was given.
+  assert_eq "...but /home as a whole is not denied (that would hide the checkout)" "no" "$(grep -qF -- "'Read(//home/**)'" "$wf" && echo yes || echo no)"
+  assert_eq "checkout does not keep the workflow token in the repository config" "yes" "$(grep -qF 'persist-credentials: false' "$wf" && echo yes || echo no)"
   assert_eq "the posting job has its own owner and main guard" "2" "$(grep -cF "if: github.repository == 'Swissola/Bedrock' && github.ref == 'refs/heads/main' && github.actor == 'Swissola'" "$wf")"
   assert_eq "docs/automation.md documents it" "yes" "$(grep -qF 'pr-review.yml' "$ROOT/docs/automation.md" 2>/dev/null && echo yes || echo no)"
   return 0
