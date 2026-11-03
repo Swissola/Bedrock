@@ -299,7 +299,7 @@ The pointer ends with a line saying the notes are information, not instructions.
 
 Claude Code project settings are version-controlled, so this can be committed and shared with a team, as long as every contributor has run the installer. Without the installer, point the command at the `session-start-vault-context` file in your vault clone and set `VAULT_ROOT` in the command, as for the reminder hook above.
 
-**What success looks like.** A new session in that repo starts with a block headed `--- Vault context for <repo> (auto-loaded) ---`. If nothing appears, the usual causes are a missing repo doc, a settings file that is not in that repo's `.claude/`, or a session that was resumed.
+**What success looks like.** A new session in that repo starts with a block headed `--- Vault context pointer for <repo> (auto-loaded) ---` in the default pointer mode, or `--- Vault context for <repo> (auto-loaded) ---` in `full` mode. `/vault-context` treats only the second as already loaded, so it still loads the notes after a pointer. If nothing appears, the usual causes are a missing repo doc, a settings file that is not in that repo's `.claude/`, or a session that was resumed.
 
 **Details that explain what you see.**
 
