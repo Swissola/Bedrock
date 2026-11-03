@@ -67,7 +67,10 @@ claude mcp add --transport http obsidian "http://localhost:${port}/mcp/" --heade
 echo "[Step 4] OK - registered. Restart your Claude Code session to pick this up."
 
 # --- Step 5: verify the HTTP endpoint answers ---
-http_status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${api_key}" "http://localhost:${port}/vault/")"
+# The key goes to curl on stdin, as a config line, so it never appears in curl's argument
+# list (which other users can read with ps). `claude mcp add` above has no such option:
+# it takes the header as an argument and stores it in ~/.claude.json.
+http_status="$(printf 'header = "Authorization: Bearer %s"\n' "${api_key}" | curl -s -o /dev/null -w '%{http_code}' -K - "http://localhost:${port}/vault/")"
 if [ "$http_status" != "200" ]; then
     echo "ERROR: [Step 5] Vault endpoint responded HTTP $http_status, expected 200." >&2
     exit 1

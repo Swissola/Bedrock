@@ -75,6 +75,29 @@ scan_status=$?
 
 [ "$scan_status" -eq 0 ] && exit 0
 
+# betterleaks exits 1 when it found something. Any other non-zero code means the scan itself
+# failed (bad config, unreadable repo, a crash), so nothing was checked. Say that plainly
+# instead of calling it a finding, and block only in strict mode, where an unchecked commit is
+# not acceptable.
+if [ "$scan_status" -ne 1 ]; then
+    {
+        echo ""
+        echo "=========================================================="
+        echo " pre-commit secret scan: the scanner failed (exit $scan_status)"
+        echo " Nothing was checked, so this is not a finding."
+        echo "=========================================================="
+        echo "$findings"
+        echo ""
+        echo "Fix the scanner (see the output above), or commit anyway with --no-verify."
+        echo "=========================================================="
+        echo ""
+    } >&2
+    if [ "$STRICT" = "1" ] || [ "$STRICT" = "true" ]; then
+        exit 1
+    fi
+    exit 0
+fi
+
 {
     echo ""
     echo "=========================================================="

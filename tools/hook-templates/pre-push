@@ -27,10 +27,16 @@
 set -u
 
 VAULT_ROOT="${VAULT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
-VAULT_BRANCH="main"
 WARN_COOLDOWN_SECONDS=600
 STATE_DIR="$HOME/.claude/hook-logs"
 LAST_WARN_FILE="$STATE_DIR/.vault-prepush-last-warn"
+
+# Shared helpers (default branch, unpushed commits). Missing means no reminder, never an error.
+vault_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/vault-lib"
+[ -f "$vault_lib" ] || vault_lib="$HOME/.claude/hook-templates/vault-lib"
+[ -f "$vault_lib" ] || exit 0
+# shellcheck source=vault-lib
+. "$vault_lib"
 
 # git passes ref info on stdin for pre-push - not needed for this check,
 # but must be consumed so git doesn't treat a closed pipe as an error.
@@ -46,10 +52,7 @@ if [ -n "$this_repo_root" ] && [ "$this_repo_root" = "$VAULT_ROOT" ]; then
     exit 0
 fi
 
-git -C "$VAULT_ROOT" rev-parse --verify "$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
-git -C "$VAULT_ROOT" rev-parse --verify "origin/$VAULT_BRANCH" >/dev/null 2>&1 || exit 0
-
-pending_hashes=$(git -C "$VAULT_ROOT" log "origin/${VAULT_BRANCH}..${VAULT_BRANCH}" --format='%h' 2>/dev/null)
+pending_hashes=$(vault_unpushed_hashes "$VAULT_ROOT" "$(vault_branch "$VAULT_ROOT")") || exit 0
 [ -z "$pending_hashes" ] && exit 0
 
 # Throttle repeated warnings on rapid successive pushes - a warning noisy

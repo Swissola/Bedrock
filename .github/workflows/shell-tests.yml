@@ -69,6 +69,8 @@ jobs:
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-pre-commit.sh
       - name: pre-push hook
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-pre-push.sh
+      - name: vault-lib helpers
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-vault-lib.sh
       - name: session-start-vault-check hook
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-session-start-vault-check.sh
       - name: session-start-vault-context hook
@@ -114,6 +116,9 @@ jobs:
       - name: pre-push hook
         shell: bash
         run: bash tools/hook-templates/test-pre-push.sh
+      - name: vault-lib helpers
+        shell: bash
+        run: bash tools/hook-templates/test-vault-lib.sh
       - name: session-start-vault-check hook
         shell: bash
         run: bash tools/hook-templates/test-session-start-vault-check.sh

@@ -178,6 +178,23 @@ test_silent_when_vault_has_no_main_branch() {
   return $?
 }
 
+# The vault's default branch is whatever its origin says (origin/HEAD), not always main.
+test_warns_for_a_vault_whose_default_branch_is_not_main() {
+  new_workdir
+  other_repo
+  init_repo "$VAULT" trunk
+  git init -q --bare "$WORK/origin.git"
+  git -C "$VAULT" remote add origin "$WORK/origin.git"
+  git -C "$VAULT" push -q origin trunk
+  git -C "$VAULT" remote set-head origin trunk >/dev/null 2>&1
+  printf 'x\n' >> "$VAULT/f.md"; git -C "$VAULT" commit -qam "pending on trunk"
+  run_hook "$OTHER" "$VAULT"
+  assert_eq "default branch trunk: exit 0" "0" "$STATUS"
+  assert_has "default branch trunk: warns about the unpushed commit" "$ERR" "$UNPUSHED_TEXT"
+  drop_workdir
+  return $?
+}
+
 # A vault that is just a folder (for example one kept in sync by Syncthing) has no commits
 # to be unpushed, so a push from some other repo gets no warning and must not fail.
 test_silent_and_exit_0_when_the_vault_is_not_a_git_repo() {
@@ -420,6 +437,25 @@ test_empty_stdin_still_works() {
 
 # --- through a real `git push` --------------------------------------------------
 
+test_an_installed_copy_without_the_helper_stays_quiet_and_the_push_succeeds() {
+  new_workdir
+  other_repo
+  vault_ahead 2
+  git init -q --bare "$WORK/other-origin.git"
+  git -C "$OTHER" remote add origin "$WORK/other-origin.git"
+  cp "$HOOK_SCRIPT" "$OTHER/.git/hooks/pre-push"
+  chmod +x "$OTHER/.git/hooks/pre-push"
+  printf 'change\n' >> "$OTHER/g.md"
+  git -C "$OTHER" add -A
+  git -C "$OTHER" commit -qm "work in the other repo"
+  ( cd "$OTHER" && env HOME="$FAKE_HOME" VAULT_ROOT="$VAULT" git push -q origin main ) > "$OUT" 2> "$ERR"
+  STATUS=$?
+  assert_eq "no helper installed: the push still succeeds" "0" "$STATUS"
+  assert_silent "no helper installed: no warning, no error" "$ERR"
+  drop_workdir
+  return $?
+}
+
 test_installed_as_a_real_hook_warns_but_the_push_succeeds() {
   new_workdir
   other_repo
@@ -428,6 +464,9 @@ test_installed_as_a_real_hook_warns_but_the_push_succeeds() {
   git -C "$OTHER" remote add origin "$WORK/other-origin.git"
   cp "$HOOK_SCRIPT" "$OTHER/.git/hooks/pre-push"
   chmod +x "$OTHER/.git/hooks/pre-push"
+  # An installed copy has no neighbour, so it finds the helper where the installer puts it.
+  mkdir -p "$FAKE_HOME/.claude/hook-templates"
+  cp "$(dirname "$HOOK_SCRIPT")/vault-lib" "$FAKE_HOME/.claude/hook-templates/vault-lib"
   printf 'change\n' >> "$OTHER/g.md"
   git -C "$OTHER" add -A
   git -C "$OTHER" commit -qm "work in the other repo"
@@ -443,6 +482,7 @@ test_installed_as_a_real_hook_warns_but_the_push_succeeds() {
 test_silent_and_exit_0_when_vault_root_cannot_be_derived
 test_silent_when_the_repo_being_pushed_is_the_vault_itself
 test_silent_when_vault_has_no_main_branch
+test_warns_for_a_vault_whose_default_branch_is_not_main
 test_silent_and_exit_0_when_the_vault_is_not_a_git_repo
 test_silent_when_vault_has_no_origin
 test_silent_when_vault_is_in_sync_with_origin
@@ -461,6 +501,7 @@ test_cooldown_boundary_just_outside_warns
 test_multi_ref_stdin_is_consumed_without_hanging
 test_empty_stdin_still_works
 test_installed_as_a_real_hook_warns_but_the_push_succeeds
+test_an_installed_copy_without_the_helper_stays_quiet_and_the_push_succeeds
 
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]

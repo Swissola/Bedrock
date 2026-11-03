@@ -38,6 +38,7 @@ done
 SUITES=(
   "bash|hook-templates/test-pre-commit.sh"
   "bash|hook-templates/test-pre-push.sh"
+  "bash|hook-templates/test-vault-lib.sh"
   "bash|hook-templates/test-post-merge.sh"
   "bash|hook-templates/test-session-start-vault-check.sh"
   "bash|hook-templates/test-session-start-vault-context.sh"
@@ -68,14 +69,14 @@ trap 'rm -rf "$OUT_DIR"' EXIT
 run_suite() {
   local n="$1" kind="${2%%|*}" path="$TOOLS_DIR/${2#*|}" ps
   case "$kind" in
-    bash) bash "$path" > "$OUT_DIR/$n.out" 2>&1; [[ $? -eq 0 ]] && echo pass > "$OUT_DIR/$n.status" || echo fail > "$OUT_DIR/$n.status" ;;
+    bash) if bash "$path" > "$OUT_DIR/$n.out" 2>&1; then echo pass > "$OUT_DIR/$n.status"; else echo fail > "$OUT_DIR/$n.status"; fi ;;
     node)
       if ! command -v node >/dev/null 2>&1; then echo "skip: node is not installed" > "$OUT_DIR/$n.status"; return 0; fi
-      node "$path" > "$OUT_DIR/$n.out" 2>&1; [[ $? -eq 0 ]] && echo pass > "$OUT_DIR/$n.status" || echo fail > "$OUT_DIR/$n.status" ;;
+      if node "$path" > "$OUT_DIR/$n.out" 2>&1; then echo pass > "$OUT_DIR/$n.status"; else echo fail > "$OUT_DIR/$n.status"; fi ;;
     pwsh)
       ps=$(command -v pwsh 2>/dev/null || command -v powershell 2>/dev/null || true)
       if [[ -z "$ps" ]]; then echo "skip: PowerShell is not installed" > "$OUT_DIR/$n.status"; return 0; fi
-      "$ps" -NoProfile -File "$path" > "$OUT_DIR/$n.out" 2>&1; [[ $? -eq 0 ]] && echo pass > "$OUT_DIR/$n.status" || echo fail > "$OUT_DIR/$n.status" ;;
+      if "$ps" -NoProfile -File "$path" > "$OUT_DIR/$n.out" 2>&1; then echo pass > "$OUT_DIR/$n.status"; else echo fail > "$OUT_DIR/$n.status"; fi ;;
     *) echo "unknown suite kind: $kind" > "$OUT_DIR/$n.out"; echo fail > "$OUT_DIR/$n.status" ;;
   esac
   return 0

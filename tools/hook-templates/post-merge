@@ -12,13 +12,14 @@
 # Exit codes in the log (not the hook's own exit, which is always 0 so
 # git pull is never blocked): 0 = doc updated normally; 2 = ran but the
 # vault was unreachable; 3 = the run wrote to a vault path other than
-# DOC_TARGET (cleaned up automatically - doesn't trust the model's own
-# report of what it touched, diffs the vault's actual working tree
-# before/after instead. A brand-new untracked file is removed with `rm`;
-# an unexpected modification to an already-tracked file is reverted with
-# `git checkout --`, which only works on tracked content, confirmed
-# empirically that it silently fails and leaves an untracked file in
-# place otherwise).
+# DOC_TARGET (flagged, never undone: it doesn't trust the model's own
+# report of what it touched, it diffs the vault's actual working tree
+# before/after instead. The hook cannot tell the model's write from a note
+# you or another session wrote in the same minutes, and a background job that
+# deleted or reverted by guesswork would destroy real work, so it only lists
+# the paths in the log and FAILURES.log and leaves them as they are. Only
+# DOC_TARGET is ever committed, so a stray write stays uncommitted for you to
+# look at).
 #
 # A successful (exit 0) doc update is auto-committed locally in the vault
 # repo - never pushed. Push stays a manual, human-reviewed step at end of
@@ -26,9 +27,14 @@
 # overwritten before someone gets to that push.
 #
 # If the vault is NOT a git repo of its own (no .git at its root, e.g. a
-# Syncthing-synced folder) none of the git-based protection above is possible:
-# unexpected writes are flagged in the log (exit 3) but never reverted or
-# removed, and nothing is committed. See docs/vault-config.md, Hooks.
+# Syncthing-synced folder) the check works from file modification times instead,
+# and nothing is committed. See docs/vault-config.md, Hooks.
+#
+# Install this same file as BOTH .git/hooks/post-merge and .git/hooks/post-rewrite. A plain
+# `git pull` (and a fast-forward `pull --rebase`) fires post-merge. A `pull --rebase` that has
+# local commits to replay fires only post-rewrite, with the argument "rebase" and the rewritten
+# commits on stdin, so without the second copy the hook silently never runs for people who pull
+# with rebase. post-rewrite also fires for `commit --amend`, which is ignored here.
 #
 # That auto-commit only gets secret-scanned if tools/hook-templates/pre-commit
 # is ALSO installed in this vault repo's .git/hooks/pre-commit - a plain
@@ -39,6 +45,13 @@
 # WHAT'S in it. Install both together (see docs/automation.md).
 
 set -u
+
+# Called as post-rewrite: only a rebase counts, and its list of rewritten commits on stdin is
+# not needed (the range comes from ORIG_HEAD below).
+case "${1:-}" in
+    amend) exit 0 ;;
+    rebase) cat >/dev/null 2>&1 ;;
+esac
 
 # GNU `timeout` is not on macOS by default (coreutils provides `gtimeout`). Use whichever
 # exists, then perl's alarm, and only then run with no time limit rather than not at all.
@@ -196,10 +209,10 @@ else
 fi
 
 # Is the vault a git repo of its own (a .git entry at its root)? If so the
-# output validation below can revert unexpected writes and the update is
-# auto-committed. If not (e.g. a Syncthing-synced folder) there is no safe way
-# to undo a write, so unexpected writes are only flagged, never reverted or
-# deleted, and nothing is committed.
+# output validation below compares `git status` before and after, and the update
+# is auto-committed. If not (e.g. a Syncthing-synced folder) it compares file
+# modification times, and nothing is committed. Either way unexpected writes are
+# only flagged, never reverted or deleted.
 VAULT_IS_GIT=0
 [ -n "$VAULT_ROOT" ] && [ -e "$VAULT_ROOT/.git" ] && VAULT_IS_GIT=1
 RETRY_DELAY="${RETRY_DELAY:-15}"
@@ -268,7 +281,12 @@ fi
 # Terraform backup file like foo.tfstate.backup, and it misses anything
 # living inside a .cache/ directory entirely (.cache/some-file.json doesn't
 # end in ".cache"). Found and fixed against exactly this gap.
-changed=$(git diff "HEAD@{1}" HEAD --name-only 2>/dev/null \
+# The commit HEAD was at before the pull. ORIG_HEAD is set by merge and by rebase, so it is
+# right for both, and does not depend on the reflog (which can be off, or expired). HEAD@{1}
+# is only the fallback.
+old_ref=$(git rev-parse --verify -q ORIG_HEAD 2>/dev/null) || old_ref=$(git rev-parse --verify -q "HEAD@{1}" 2>/dev/null) || old_ref=""
+[ -z "$old_ref" ] && exit 0
+changed=$(git diff "$old_ref" HEAD --name-only 2>/dev/null \
     | grep -Ev '\.(lock|log|tmp)$' \
     | grep -Ev '\.tfstate($|\.)' \
     | grep -Ev '(^|/)\.cache(/|$)' \
@@ -278,13 +296,15 @@ changed=$(git diff "HEAD@{1}" HEAD --name-only 2>/dev/null \
     | grep -Ev '\.pem$|\.key$|\.pfx$|\.p12$' \
     | grep -Ev '(^|/)settings\.local\.json$' \
     | grep -Ev '(^|/)credentials\.json$' \
-    | grep -Ev '(^|/)id_(rsa|ed25519|ecdsa|dsa)$')
+    | grep -Ev '(^|/)id_(rsa|ed25519|ecdsa|dsa)$' \
+    | grep -Ev '\.(tfvars|kdbx|jks|keystore|p8|ppk|gpg|asc)$' \
+    | grep -Ev '(^|/)(\.npmrc|\.netrc|\.pgpass|\.htpasswd|\.pypirc|kubeconfig|secrets?\.(ya?ml|json|toml|env))$')
 
 if [ -z "$changed" ]; then
     exit 0
 fi
 
-old_sha=$(git rev-parse --short "HEAD@{1}" 2>/dev/null)
+old_sha=$(git rev-parse --short "$old_ref" 2>/dev/null)
 new_sha=$(git rev-parse --short HEAD 2>/dev/null)
 
 # Step 4: background immediately so `git pull` returns right away.
@@ -385,42 +405,17 @@ EOF
     unexpected_paths=""
     if [ "$VAULT_IS_GIT" = "1" ]; then
         post_state=$(git -C "$VAULT_ROOT" status --porcelain 2>/dev/null)
-        # Keep the porcelain status code (XY) attached to each path this
-        # time, rather than stripping it - `git checkout -- <path>` only
-        # restores a TRACKED file to its last-committed content, it does
-        # nothing for a brand-new file that was never tracked (`??` in
-        # porcelain output). Confirmed empirically: against an untracked
-        # path it errors "pathspec did not match any file(s) known to git"
-        # and leaves the file sitting there, the `2>/dev/null` on the old
-        # version of this line silently swallowed that error, so the file
-        # was never actually reverted despite the log claiming it was. An
-        # untracked path needs `rm`, a tracked-but-modified one still needs
-        # `git checkout --`.
+        # Lines that are new in `git status` since before the run, other than the doc.
+        # They are reported, not undone: see the exit-code note at the top.
         unexpected_lines=$(diff <(printf '%s\n' "$pre_state") <(printf '%s\n' "$post_state") \
             | grep '^>' | sed -E 's/^> //' | grep -vF "$DOC_TARGET")
         if [ -n "$unexpected_lines" ]; then
-            echo "$unexpected_lines" | while IFS= read -r line; do
-                [ -z "$line" ] && continue
-                code="${line:0:2}"
-                p="${line:3}"
-                if [ "$code" = "??" ]; then
-                    # -rf, not -f: an untracked NEW DIRECTORY (not just a
-                    # file) collapses into one porcelain line ending in
-                    # "/", e.g. "?? repos/other-thing/", `rm -f` on a
-                    # directory path silently no-ops without -r, found by
-                    # this suite's own test against exactly that case.
-                    rm -rf "${VAULT_ROOT:?}/$p" 2>/dev/null
-                else
-                    git -C "$VAULT_ROOT" checkout -- "$p" 2>/dev/null
-                fi
-            done
             unexpected_paths=$(printf '%s\n' "$unexpected_lines" | sed -E 's/^.. //')
             exit_code=3
         fi
     elif [ -n "$run_marker" ]; then
         # Non-git vault: anything written since the run started, other than
-        # DOC_TARGET. Flag only, nothing is reverted or removed, since without
-        # git there is no way to prove a deletion or restore is safe. Dot
+        # DOC_TARGET. Flag only, as with a git vault. Dot
         # folders and files (.obsidian, .stversions, ...) are skipped: Obsidian
         # and sync tools rewrite those all the time and they are not the run's
         # writes. A sync tool bringing in another device's notes mid-run can
@@ -465,9 +460,9 @@ EOF
         echo "$changed"
         if [ -n "$unexpected_paths" ]; then
             if [ "$VAULT_IS_GIT" = "1" ]; then
-                echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; new files removed, modified tracked files reverted) ---"
+                echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; flagged only, nothing was reverted or removed. They may be the run's writes or your own work during the run; check with: git -C \"$VAULT_ROOT\" status) ---"
             else
-                echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; vault is not a git repo, flagged only, not reverted or removed) ---"
+                echo "--- UNEXPECTED VAULT WRITES (outside $DOC_TARGET; vault is not a git repo; flagged only, not reverted or removed. They may be the run's writes or your own work during the run) ---"
             fi
             echo "$unexpected_paths"
         fi
@@ -482,6 +477,16 @@ EOF
 
     if [ "$exit_code" -ne 0 ]; then
         echo "$(date -Iseconds) $REPO_NAME exit=$exit_code see $REPO_LOG" >> "$FAILURES_LOG"
+        # --restricted is listed in `claude --help` (checked on 2.1.317): no code-running tools,
+        # file tools confined to the working directories, user, project and local settings
+        # ignored. The hook's safety rests on it, so if a release ever drops or renames it, say
+        # so plainly, with the version, rather than leaving an "unknown option" line buried in a
+        # log. The version is asked for only here, on a failure that looks like this, so a
+        # normal run makes no extra call.
+        if grep -qiE "(unknown|unrecognized|unrecognised|invalid).*(option|flag|argument).*restricted|restricted.*(unknown|unrecognized|unrecognised|invalid|not a valid)" "$run_output" 2>/dev/null; then
+            claude_version=$(with_timeout 10 "$claude_bin" --version 2>/dev/null | head -n 1)
+            echo "$(date -Iseconds) $REPO_NAME: this claude CLI (${claude_version:-version unknown}) rejected --restricted, which post-merge relies on. The hook needs updating for this release; until then the doc update does not run." | tee -a "$FAILURES_LOG" >> "$REPO_LOG"
+        fi
     fi
 
     rm -f "$run_output"

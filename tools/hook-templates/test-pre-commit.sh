@@ -381,7 +381,7 @@ test_strict_without_a_scanner_warns_but_cannot_block() {
   return $?
 }
 
-test_any_nonzero_scanner_exit_is_treated_as_a_finding() {
+test_exit_1_is_a_finding_and_any_other_nonzero_exit_is_a_scanner_failure() {
   local code
   new_case
   stage_file "$CASE_REPO" a.md
@@ -392,6 +392,14 @@ test_any_nonzero_scanner_exit_is_treated_as_a_finding() {
     run_extended "$UNSET_STRICT" "$CASE_BIN"
     assert_eq "scanner exit $code, default: warns, does not block" "0" "$STATUS"
     assert_has "scanner exit $code: scanner's own message is shown" "$OUT" "scanner said code $code"
+    if [[ "$code" = "1" ]]; then
+      assert_has "scanner exit 1 is a finding: the finding banner" "$OUT" "$BANNER_TEXT"
+      assert_lacks "scanner exit 1 is a finding, not a scanner failure" "$OUT" "the scanner failed"
+    else
+      assert_has "scanner exit $code is a failure: says the scanner failed" "$OUT" "the scanner failed (exit $code)"
+      assert_has "scanner exit $code: says nothing was checked" "$OUT" "Nothing was checked"
+      assert_lacks "scanner exit $code is not reported as a secret" "$OUT" "$BANNER_TEXT"
+    fi
   done
   return $?
 }
@@ -553,7 +561,7 @@ test_first_commit_in_an_empty_repo_is_scanned
 test_strict_accepts_1_and_true_only
 test_strict_with_a_clean_scan_still_passes
 test_strict_without_a_scanner_warns_but_cannot_block
-test_any_nonzero_scanner_exit_is_treated_as_a_finding
+test_exit_1_is_a_finding_and_any_other_nonzero_exit_is_a_scanner_failure
 test_scanner_output_on_both_streams_reaches_the_banner
 test_banner_tells_the_user_what_to_do
 test_clean_scan_prints_nothing
