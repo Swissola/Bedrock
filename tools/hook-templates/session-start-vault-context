@@ -629,7 +629,9 @@ print_open_items() {
 # Pointer mode: where things are, not what is in them. The model reads a file when it needs it.
 print_pointer() {
   local ndate _m path who rel label items total stale_n age stale owner text flag
-  echo "--- Vault context for $REPO_NAME (auto-loaded) ---"
+  # A different header from the full output, so /vault-context does not mistake the pointer for
+  # context that is already loaded.
+  echo "--- Vault context pointer for $REPO_NAME (auto-loaded) ---"
   echo "$FRAMING"
   echo "Vault: $VAULT_ROOT"
   echo "Repo doc: $INDEX_REL"

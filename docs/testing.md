@@ -467,6 +467,6 @@ bash tools/testing/run-mutation-tests.sh --check-applies        # fast: does eve
 - **Since then.** Two mutants were added (`pc5` reworked and `pc7` new, for the `git --staged --redact` invocation and the 1.x-only `-v`). The `pre-commit` group was re-run on GitHub (Ubuntu, run 37666004118 on commit `c35126f`): all 7 killed, none survived, none broken, no baseline failed.
 - **A fix the runs forced.** Running the `post-merge` group exposed two timing-based checks in its suite that failed whenever the machine was busy, which stopped the group at its baseline. Both now use no clock: the hung-run check uses a stub that would hang for two minutes and prints a marker if it ever finishes, and the slow-`claude` check uses a stub that waits for a release file.
 
-The list has grown since (107 mutants across all groups when last counted). Which mutants are killed changes whenever a suite does, so treat the result of a run, not this section, as the current answer.
+The list has grown since (122 mutants across all groups when last counted). Which mutants are killed changes whenever a suite does, so treat the result of a run, not this section, as the current answer.
 
 Stryker is not used: it supports C#, JavaScript/TypeScript and Scala, and these scripts are bash and PowerShell, which it cannot mutate.
