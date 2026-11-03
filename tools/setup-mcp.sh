@@ -34,7 +34,7 @@ echo "[Step 1] OK - Claude Code $claude_version"
 plugin_dir="$VAULT_PATH/.obsidian/plugins/obsidian-local-rest-api"
 data_file="$plugin_dir/data.json"
 
-if [ ! -f "$data_file" ]; then
+if [[ ! -f "$data_file" ]]; then
     echo "ERROR: Local REST API plugin not found at $data_file. Install it via Obsidian first: Settings -> Community plugins -> Browse -> 'Local REST API' -> Install + Enable. Then re-run this script." >&2
     exit 1
 fi
@@ -53,7 +53,7 @@ else
 fi
 
 api_key="$(grep -o '"apiKey": *"[^"]*"' "$data_file" | sed -E 's/.*"apiKey": *"([^"]*)".*/\1/')"
-if [ -z "$api_key" ]; then
+if [[ -z "$api_key" ]]; then
     echo "ERROR: Could not find 'apiKey' in $data_file. Open Obsidian with the plugin enabled at least once first." >&2
     exit 1
 fi
@@ -73,7 +73,7 @@ echo "[Step 4] OK - registered. Restart your Claude Code session to pick this up
 # Backslash and double quote are escaped, as curl's config syntax requires inside quotes.
 curl_key="$(printf '%s' "${api_key}" | sed 's/[\\"]/\\&/g')"
 http_status="$(printf 'header = "Authorization: Bearer %s"\n' "${curl_key}" | curl -s -o /dev/null -w '%{http_code}' -K - "http://localhost:${port}/vault/")"
-if [ "$http_status" != "200" ]; then
+if [[ "$http_status" != "200" ]]; then
     echo "ERROR: [Step 5] Vault endpoint responded HTTP $http_status, expected 200." >&2
     exit 1
 fi

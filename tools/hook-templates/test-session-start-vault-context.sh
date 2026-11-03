@@ -19,6 +19,7 @@ FAIL=0
 EXIT_ZERO="EXIT=0"
 # literals the tests repeat many times
 DOC_MARKER="REPODOC-MARKER"
+NO_NOTES_TEXT="(No daily notes yet for this repo.)"
 STARTUP_EVENT='{"source":"startup"}'
 # The loading logic is tested in full mode; the pointer default has its own tests below.
 export CONTEXT_MODE=full
@@ -163,7 +164,7 @@ test_no_daily_notes_says_so() {
   local repo vault out; repo=$(make_code_repo widget); vault=$(mktemp -d)
   mkdir -p "$vault/repos/widget"; echo "doc" > "$vault/repos/widget/index.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
-  assert_contains "no daily notes: says so (the default pattern names the repo)" "(No daily notes yet for this repo.)" "$out"
+  assert_contains "no daily notes: says so (the default pattern names the repo)" "$NO_NOTES_TEXT" "$out"
   printf -- '---\nfilenamePattern: "{date}-{topic}"\n---\n' > "$vault/vault-config.md"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_contains "no daily notes, pattern without a repo: the vault-wide message" "(No daily notes in the vault yet.)" "$out"
@@ -407,7 +408,7 @@ test_pointer_with_no_notes_says_so() {
   repo=$(fx_repo widget); vault=$(fx_vault)
   out=$(run_default_mode "$repo" "$vault")
   assert_contains "still names the repo doc" "Repo doc: repos/widget/index.md" "$out"
-  assert_contains "says there are no notes yet" "(No daily notes yet for this repo.)" "$out"
+  assert_contains "says there are no notes yet" "$NO_NOTES_TEXT" "$out"
   return 0
 }
 
@@ -471,7 +472,8 @@ fx_vault() {
 
 # A code repo named $1 (via its origin), registered for cleanup.
 fx_repo() {
-  local r; r=$(make_code_repo "$1"); CLEANUP_DIRS+=("$(dirname "$r")"); echo "$r"
+  local name="$1" r
+  r=$(make_code_repo "$name"); CLEANUP_DIRS+=("$(dirname "$r")"); echo "$r"
   return 0
 }
 
@@ -612,7 +614,7 @@ test_an_empty_daily_notes_folder_says_there_are_no_notes() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault); mkdir -p "$vault/daily-notes/alice"
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
-  assert_contains "daily-notes exists but holds no notes: says so" "(No daily notes yet for this repo.)" "$out"
+  assert_contains "daily-notes exists but holds no notes: says so" "$NO_NOTES_TEXT" "$out"
   assert_contains "…and still loads the repo doc" "$DOC_MARKER" "$out"
   return 0
 }
@@ -850,7 +852,7 @@ test_a_repo_with_no_notes_says_so_even_when_others_have_some() {
   mkdir -p "$vault/Projects/gadget"; echo "GADGET-DOC" > "$vault/Projects/gadget/index.md"  # gadget is a known repo, so its notes are not older notes
   fx_note "$vault/Inbox/daily-notes/2026-10-10-gadget-other.md" GADGET 202610101500
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
-  assert_contains "no note for this repo: says so" "(No daily notes yet for this repo.)" "$out"
+  assert_contains "no note for this repo: says so" "$NO_NOTES_TEXT" "$out"
   assert_not_contains "...and loads nothing from another repo" "CONTEXT-GADGET" "$out"
   assert_contains "...but the repo doc is still loaded" "$DOC_MARKER" "$out"
   return 0
@@ -1044,7 +1046,8 @@ test_the_personal_vault_layout_end_to_end
 
 # A note named <date>-<repo>-<topic> in an author's folder, with its mtime set.
 fx_named_note() {  # args: vault author date repo topic marker mtime
-  fx_note "$1/daily-notes/$2/$3-$4-$5.md" "$6" "$7"
+  local vault="$1" author="$2" date="$3" repo="$4" topic="$5" marker="$6" mtime="$7"
+  fx_note "$vault/daily-notes/$author/$date-$repo-$topic.md" "$marker" "$mtime"
   return 0
 }
 
@@ -1304,10 +1307,11 @@ test_the_tag_line_is_shown_for_each_loaded_note
 # A note holding a context section and an Open Questions section whose lines come
 # from stdin: args vault author date repo topic mtime.
 fx_open_note() {
-  local f="$1/daily-notes/$2/$3-$4-$5.md"
+  local vault="$1" author="$2" date="$3" repo="$4" topic="$5" mtime="$6"
+  local f="$vault/daily-notes/$author/$date-$repo-$topic.md"
   mkdir -p "$(dirname "$f")"
-  { printf '## Context for Future Sessions\nctx-%s\n\n## Open Questions / Next Steps\n' "$2"; cat; } > "$f"
-  touch -t "$6" "$f"
+  { printf '## Context for Future Sessions\nctx-%s\n\n## Open Questions / Next Steps\n' "$author"; cat; } > "$f"
+  touch -t "$mtime" "$f"
   return 0
 }
 
@@ -1436,11 +1440,12 @@ test_closed_items_are_not_listed
 
 # A note whose context section holds a marker plus 600 filler characters.
 fx_padded_note() {  # args: vault author date repo marker mtime
-  local f="$1/daily-notes/$2/$3-$4-$5.md" pad
+  local vault="$1" author="$2" date="$3" repo="$4" marker="$5" mtime="$6"
+  local f="$vault/daily-notes/$author/$date-$repo-$marker.md" pad
   pad=$(head -c 600 /dev/zero | tr '\0' x)
   mkdir -p "$(dirname "$f")"
-  printf '## Context for Future Sessions\nCONTEXT-%s %s\n' "$5" "$pad" > "$f"
-  touch -t "$6" "$f"
+  printf '## Context for Future Sessions\nCONTEXT-%s %s\n' "$marker" "$pad" > "$f"
+  touch -t "$mtime" "$f"
   return 0
 }
 
@@ -1510,10 +1515,11 @@ test_a_bad_budget_value_falls_back_to_the_default
 # A note with an optional frontmatter repo: args vault author date topic repo marker mtime
 # (the filename is <date>-<topic>.md, so a topic that holds no repo name makes an older note).
 fx_fm_note() {
-  local f="$1/daily-notes/$2/$3-$4.md"
+  local vault="$1" author="$2" date="$3" topic="$4" repo="$5" marker="$6" mtime="$7"
+  local f="$vault/daily-notes/$author/$date-$topic.md"
   mkdir -p "$(dirname "$f")"
-  { printf -- '---\ntitle: x\n'; [[ -n "$5" ]] && printf 'repo: %s\n' "$5"; printf -- '---\n## Context for Future Sessions\nCONTEXT-%s\n' "$6"; } > "$f"
-  touch -t "$7" "$f"
+  { printf -- '---\ntitle: x\n'; [[ -n "$repo" ]] && printf 'repo: %s\n' "$repo"; printf -- '---\n## Context for Future Sessions\nCONTEXT-%s\n' "$marker"; } > "$f"
+  touch -t "$mtime" "$f"
   return 0
 }
 
@@ -1560,7 +1566,7 @@ test_at_most_five_older_notes_are_opened() {
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_not_contains "a note beyond the five newest is never opened, even one naming this repo" "CONTEXT-DEEP" "$out"
   assert_not_contains "...and none of gadget's is loaded" "CONTEXT-OTHER" "$out"
-  assert_contains "...so the repo is reported as having no notes" "(No daily notes yet for this repo.)" "$out"
+  assert_contains "...so the repo is reported as having no notes" "$NO_NOTES_TEXT" "$out"
   return 0
 }
 
@@ -1571,7 +1577,7 @@ test_at_most_five_older_notes_are_opened_even_when_they_share_a_date() {
   for i in 1 2 3 4 5 6; do fx_fm_note "$vault" alice 2026-10-08 "t$i" gadget "OTHER$i" "20261008090$i"; done
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
   assert_not_contains "a sixth note from the same day is never opened, even one naming this repo" "CONTEXT-TIEDEEP" "$out"
-  assert_contains "...so the repo is reported as having no notes" "(No daily notes yet for this repo.)" "$out"
+  assert_contains "...so the repo is reported as having no notes" "$NO_NOTES_TEXT" "$out"
   return 0
 }
 

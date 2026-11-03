@@ -35,7 +35,7 @@ make_test_repo() {
 make_stub_betterleaks() {
   local bindir="$1" mode="$2"
   mkdir -p "$bindir"
-  if [ "$mode" = "dirty" ]; then
+  if [[ "$mode" = "dirty" ]]; then
     cat > "$bindir/betterleaks" <<'EOF'
 #!/bin/bash
 echo "stub finding: fake-secret-detected"
@@ -52,7 +52,7 @@ EOF
 
 assert_eq() {
   local desc="$1" expected="$2" actual="$3"
-  if [ "$expected" = "$actual" ]; then
+  if [[ "$expected" = "$actual" ]]; then
     echo "PASS: $desc"
     PASS=$((PASS + 1))
   else
@@ -573,4 +573,4 @@ test_real_betterleaks_flags_a_staged_secret_in_strict_mode
 test_real_betterleaks_passes_a_clean_staged_file
 
 echo "--- $PASS passed, $FAIL failed, $KNOWN_DEFECTS known defect(s) ---"
-[ "$FAIL" -eq 0 ]
+[[ "$FAIL" -eq 0 ]]

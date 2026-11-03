@@ -185,7 +185,10 @@ function seeded(marker, sc) {
 const TODAY = new Date().toISOString().slice(0, 10);
 const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 // A daily note: a context section marker and Open Questions lines.
-const dnote = (marker, items = '', fmRepo = '') => `---\ntitle: ${marker}\n${fmRepo ? `repo: ${fmRepo}\n` : ''}---\n\n## Context for Future Sessions\nCTX-${marker}\n\n## Open Questions / Next Steps\n${items}`;
+const dnote = (marker, items = '', fmRepo = '') => {
+  const repoLine = fmRepo ? `repo: ${fmRepo}\n` : '';
+  return `---\ntitle: ${marker}\n${repoLine}---\n\n## Context for Future Sessions\nCTX-${marker}\n\n## Open Questions / Next Steps\n${items}`;
+};
 const readPaths = (r) => r.calls.filter((c) => c.op === 'read').map((c) => c.path);
 const DOCS = { 'repos/widget/index.md': '# widget\n', 'repos/gadget/index.md': '# gadget\n', 'repos/gizmo/index.md': '# gizmo\n' };
 
@@ -380,7 +383,7 @@ const scenarios = [
     const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB });
     const r = runCommand({ vault, repo, template: 'vault-log', args: 'hooks-config', system: threeRepoSession(g.repo, z.repo) });
     const notes = notesOf(r);
-    const by = Object.fromEntries(['widget', 'gadget', 'gizmo'].map((n) => [n, notes.find((f) => new RegExp(`^daily-notes/test-user/\\d{4}-\\d\\d-\\d\\d-${n}-`).test(f))]));
+    const by = Object.fromEntries(['widget', 'gadget', 'gizmo'].map((n) => [n, notes.find((f) => new RegExp(String.raw`^daily-notes/test-user/\d{4}-\d\d-\d\d-${n}-`).test(f))]));
     check('one note per repo, named for it', Object.values(by).every(Boolean), notes.join(', '));
     const marker = { widget: 'WIDGET-WORK-1', gadget: 'GADGET-WORK-2', gizmo: 'GIZMO-WORK-3' };
     const tagSets = [];
@@ -437,7 +440,7 @@ const scenarios = [
     check('untouched item marked carried', /^- \[>\] UNTOUCHED-ITEM/m.test(old), old);
     const fresh = notesOf(r).find((f) => f !== prev && f.includes('-widget-'));
     const t = fresh ? read(vault, fresh) : '';
-    check('the new note carries it open, with its original opened date', new RegExp(`^- \\[ \\] UNTOUCHED-ITEM.*opened ${daysAgo(10)}`, 'm').test(t), t.slice(-300));
+    check('the new note carries it open, with its original opened date', new RegExp(String.raw`^- \[ \] UNTOUCHED-ITEM.*opened ${daysAgo(10)}`, 'm').test(t), t.slice(-300));
     check('...and where it came from', /^- \[ \] UNTOUCHED-ITEM.*from \[\[/m.test(t), t.slice(-300));
   } },
   { name: 'log: another authors items are only closed with evidence, and only those lines change', run() {
@@ -449,7 +452,7 @@ const scenarios = [
     check('the finished item is ticked', /^- \[x\] BOB-DONE/m.test(after), after);
     check('the untouched item is left open', /^- \[ \] BOB-UNTOUCHED/m.test(after), after);
     const changed = after.split('\n').filter((l, i) => l !== seed.split('\n')[i]);
-    check('only checkbox lines changed', changed.every((l) => /^- \[/.test(l)), changed.join(' | '));
+    check('only checkbox lines changed', changed.every((l) => l.startsWith('- [')), changed.join(' | '));
   } },
   { name: 'log: partly touched and stale items are put to the user in the report', run() {
     const { repo } = mkRepo('widget'); const prev = `daily-notes/test-user/${daysAgo(3)}-widget-prev.md`;
