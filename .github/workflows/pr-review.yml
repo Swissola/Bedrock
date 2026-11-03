@@ -94,7 +94,7 @@ jobs:
         run: |
           set -u
           f="$RUNNER_TEMP/review/review.md"
-          if grep -qF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$f" || grep -qE 'sk-ant-|oat01|eyJ[A-Za-z0-9_-]{20,}|[A-Za-z0-9+/_-]{40,}' "$f"; then
+          if grep -qF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$f" || grep -qE 'sk-ant-|oat01|eyJ[A-Za-z0-9_-]{20,}' "$f" || grep -qP '(?=[A-Za-z0-9+/_-]*[A-Z])(?=[A-Za-z0-9+/_-]*[a-z])(?=[A-Za-z0-9+/_-]*[0-9])[A-Za-z0-9+/_-]{40,}' "$f"; then
             echo "review.md looks like it contains a credential or a long opaque string; not publishing it"
             exit 1
           fi

@@ -206,6 +206,21 @@ test_vault_command_templates_stay_under_their_line_ceilings() {
   return 0
 }
 
+test_the_bot_review_credential_guard_ignores_long_paths_but_catches_secrets() {
+  # The guard that stops a review being published must not trip on a long file path (a review
+  # names files, and tools/hook-templates/test-session-start-vault-context.sh is over 40 characters
+  # of path characters), yet must still catch a long mixed-case opaque string and the token prefixes.
+  local wf="$ROOT/.github/workflows/pr-review.yml" pat
+  pat=$(grep -oE "grep -qP '[^']+'" "$wf" | head -n1 | sed -E "s/^grep -qP '(.*)'$/\1/")
+  assert_eq "the guard has a mixed-case opaque-string pattern" "yes" "$([[ -n "$pat" ]] && echo yes || echo no)"
+  assert_eq "a long file path is not flagged" "no" "$(printf '%s\n' 'see tools/hook-templates/test-session-start-vault-context.sh:366' | grep -qP "$pat" && echo yes || echo no)"
+  assert_eq "a long path with digits is not flagged" "no" "$(printf '%s\n' 'tools/hook-templates/session-start-vault-context-v4-notes2.md' | grep -qP "$pat" && echo yes || echo no)"
+  assert_eq "a 40 character mixed-case alphanumeric string is flagged" "yes" "$(printf '%s\n' 'key aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1fG3hJ5kL7m' | grep -qP "$pat" && echo yes || echo no)"
+  assert_eq "a long base64 string is flagged" "yes" "$(printf '%s\n' 'Zm9vYmFyQmF6MTIzNDU2Nzg5MEFiY2RlZmdoaWprbG1ub3A=' | grep -qP "$pat" && echo yes || echo no)"
+  assert_eq "the token prefixes are still checked on their own" "yes" "$(grep -qF "grep -qE 'sk-ant-|oat01|eyJ[A-Za-z0-9_-]{20,}'" "$wf" && echo yes || echo no)"
+  return 0
+}
+
 test_every_command_template_carries_a_version_stamp() {
   local f
   for f in "$TOOLS_DIR"/command-templates/*.md; do
@@ -335,6 +350,7 @@ test_every_suite_cleans_up_after_itself_with_a_trap
 test_mutation_config_is_well_formed_and_every_mutant_applies
 test_the_manual_workflow_offers_exactly_the_mutation_groups
 test_the_bot_review_workflow_stays_locked_down
+test_the_bot_review_credential_guard_ignores_long_paths_but_catches_secrets
 test_shellcheck_reports_no_warnings
 
 echo "--- $PASS passed, $FAIL failed, $SKIPS skipped ---"
