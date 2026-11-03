@@ -2,7 +2,7 @@
 description: Catch up on the vault — read the hub note and recent daily notes
 argument-hint: [optional topic or person to focus on]
 ---
-<!-- bedrock-template: vault-context, version 4 -->
+<!-- bedrock-template: vault-context, version 5 -->
 
 See `runbooks/using-the-vault.md` in the vault, section 1, for the manual version of this workflow and its rationale — this command just automates it. Per-vault differences are optional and live in a `vault-config.md` note at the vault root; see `docs/vault-config.md`. With no `vault-config.md`, every setting below takes its default and this behaves exactly as it always has.
 
@@ -34,7 +34,7 @@ If you have neither set of tools, stop and say so.
 ## Steps
 
 1. **Who and where.** The repo name is the name of the main checkout's folder (`git rev-parse --path-format=absolute --git-common-dir` ends in the main checkout's `.git`; take the folder above it, so a linked worktree gets its main repo's name), lowercased unless `repoNameCase` is `keep`. Your author name is `git config user.name`, lowercased with spaces turned to hyphens; with no `user.name`, no note counts as yours.
-2. **Do not reload what is already here.** If this conversation already holds the `session-start-vault-context` hook's output for this repo (a block starting `--- Vault context for <repo> (auto-loaded) ---`), say so, use its notes and open-item list as they are, and load only what it lacks, such as a topic search or a note it left out for size.
+2. **Do not reload what is already here.** If this conversation already holds the `session-start-vault-context` hook's output for this repo (a block starting `--- Vault context for <repo> (auto-loaded) ---`; a block starting `--- Vault context pointer for` only names files and does not count, so load as below), say so, use its notes and open-item list as they are, and load only what it lacks, such as a topic search or a note it left out for size.
 3. If `hubNote` isn't `none`, read it. If `contextReadsRepoDoc` is `true` and the repo doc exists, read that too.
 4. **With an argument** ("$ARGUMENTS", a topic or person): search the whole vault, the one case where crossing repos is wanted. Return at most 5 notes, most recent first, each trimmed to its `Context for Future Sessions` section, and say how many more matched. Then go to step 9.
 5. **Otherwise find this repo's notes by listing folders, without reading any note.** A note belongs to the repo if its filename, after the date, starts with the repo name and a hyphen, taking the longest match among the repos documented under `reposPath` (so `widget` does not claim `widget-ui`'s notes). Take your own latest note for this repo, always, plus the latest note for this repo from each of up to three other contributors, most recent first (newest filename date, then modification time if the backend reports it). A solo vault therefore loads one note.

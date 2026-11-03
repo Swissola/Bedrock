@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Shared helpers for the hooks that look at the vault's own git state:
+# pre-push and session-start-vault-check. Sourced, never run.
+#
+# Where a hook finds this file: next to itself (the repo, or ~/.claude/hook-templates),
+# otherwise in ~/.claude/hook-templates. An installed copy under .git/hooks has no
+# neighbour, so it uses the second place. A hook that cannot find it exits quietly:
+# these are reminders, and a missing helper must never get in the way of a push or a session.
+
+# vault_branch <vault root>: the branch the vault's origin treats as default
+# (origin/HEAD), else main.
+vault_branch() {
+    local root="$1" ref
+    ref=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+    ref="${ref#origin/}"
+    printf '%s\n' "${ref:-main}"
+    return 0
+}
+
+# vault_unpushed_hashes <vault root> <branch>: short hashes of commits on the branch that
+# are not on origin, one per line. Returns 1 (and prints nothing) if the vault has no such
+# local branch or no origin copy of it, so there is nothing to compare.
+# Only hashes are printed: commit subjects are chosen by whoever can commit to the vault,
+# so no hook echoes them.
+vault_unpushed_hashes() {
+    local root="$1" branch="$2"
+    git -C "$root" rev-parse --verify "$branch" >/dev/null 2>&1 || return 1
+    git -C "$root" rev-parse --verify "origin/$branch" >/dev/null 2>&1 || return 1
+    git -C "$root" log "origin/${branch}..${branch}" --format='%h' 2>/dev/null
+    return 0
+}

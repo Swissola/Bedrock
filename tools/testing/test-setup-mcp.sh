@@ -63,11 +63,11 @@ new_vault() {
   OUT="$WORK/stdout.log"
   ERR="$WORK/stderr.log"
   CLAUDE_LOG="$WORK/claude-calls.log"
-  CURL_LOG="$WORK/curl-calls.log"
+  CURL_LOG="$WORK/curl-calls.log"; CURL_STDIN_LOG="$WORK/curl-stdin.log"
   DATA="$VAULT/.obsidian/plugins/obsidian-local-rest-api/data.json"
   mkdir -p "$VAULT/tools" "$BIN" "$(dirname "$DATA")"
   cp "$SRC_SCRIPT" "$VAULT/tools/setup-mcp.sh"
-  : > "$CLAUDE_LOG"; : > "$CURL_LOG"
+  : > "$CLAUDE_LOG"; : > "$CURL_LOG"; : > "$CURL_STDIN_LOG"
   return $?
 }
 
@@ -108,6 +108,7 @@ make_stub_curl() {
   cat > "$BIN/curl" <<EOF
 #!/bin/bash
 echo "\$*" >> "$CURL_LOG"
+[ -t 0 ] || cat >> "$CURL_STDIN_LOG"
 printf '%s' "\${STUB_HTTP_STATUS:-200}"
 exit 0
 EOF
@@ -345,6 +346,17 @@ test_running_twice_re_registers_each_time() {
 
 # --- step 5: probe the endpoint ---------------------------------------------------
 
+test_a_key_with_a_backslash_is_escaped_in_curls_config() {
+  new_vault
+  write_data true '  "insecurePort": 27123,' '  "apiKey": "ab\cd",'
+  make_stub_claude; make_stub_curl
+  run_script STUB_HTTP_STATUS=200
+  assert_eq "backslash key: exit 0" "0" "$STATUS"
+  assert_has "backslash key: the config line escapes it for curl" "$CURL_STDIN_LOG" 'Bearer ab\\cd'
+  drop_vault
+  return $?
+}
+
 test_succeeds_when_the_endpoint_answers_200() {
   new_vault
   write_data true
@@ -353,7 +365,8 @@ test_succeeds_when_the_endpoint_answers_200() {
   assert_eq "endpoint 200: exit 0" "0" "$STATUS"
   assert_has "endpoint 200: step 5 reports it" "$OUT" "[Step 5] OK - vault endpoint responded HTTP 200"
   assert_has "endpoint 200: ends with the next-step hint" "$OUT" "ask it to read 'index.md'"
-  assert_has "probe sends the bearer key" "$CURL_LOG" "Authorization: Bearer $API_KEY"
+  assert_has "probe sends the bearer key (on stdin)" "$CURL_STDIN_LOG" "Authorization: Bearer $API_KEY"
+  assert_eq "the key is not in curl's argument list" "0" "$(grep -c -F -- "$API_KEY" "$CURL_LOG")"
   drop_vault
   return $?
 }
@@ -389,6 +402,7 @@ test_api_key_is_read_from_compact_json_formatting
 test_removes_then_adds_the_registration_with_the_key_and_user_scope
 test_a_failing_remove_does_not_stop_registration
 test_running_twice_re_registers_each_time
+test_a_key_with_a_backslash_is_escaped_in_curls_config
 test_succeeds_when_the_endpoint_answers_200
 test_fails_when_the_endpoint_answers_anything_but_200
 

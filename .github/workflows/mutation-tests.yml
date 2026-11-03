@@ -20,6 +20,7 @@ on:
           - post-merge
           - session-start-vault-check
           - session-start-vault-context
+          - vault-lib
           - install-claude-config
           - setup-mcp
           - statusline

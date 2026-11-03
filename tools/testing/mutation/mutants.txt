@@ -33,7 +33,7 @@ pre-commit@@pc7@@tools/hook-templates/pre-commit@@s/^\[ "\$bl_major" = "1" \] \&
 pre-push@@pp1@@tools/hook-templates/pre-push@@s/WARN_COOLDOWN_SECONDS=600/WARN_COOLDOWN_SECONDS=6000/@@the warning cooldown is ten times too long
 pre-push@@pp2@@tools/hook-templates/pre-push@@s/\[ "\$this_repo_root" = "\$VAULT_ROOT" \]/false/@@pushing the vault itself still warns about its own commits
 pre-push@@pp3@@tools/hook-templates/pre-push@@$s/exit 0/exit 1/@@the hook blocks the push after warning
-pre-push@@pp4@@tools/hook-templates/pre-push@@s/--format='%h'/--format='%h %s'/;s/worth bundling that too:"/worth bundling that too: $pending_hashes"/@@commit subjects leak into the warning
+pre-push@@pp4@@tools/hook-templates/pre-push@@s/worth bundling that too:"/worth bundling that too: $(git -C "$VAULT_ROOT" log -1 --format=%s)"/@@commit subjects leak into the warning
 pre-push@@pp5@@tools/hook-templates/pre-push@@s/^touch "\$LAST_WARN_FILE".*$/:/@@the throttle marker is never written, so every push warns
 pre-push@@pp6@@tools/hook-templates/pre-push@@s/^} >&2$/}/@@the warning goes to stdout instead of stderr
 
@@ -41,7 +41,7 @@ pre-push@@pp6@@tools/hook-templates/pre-push@@s/^} >&2$/}/@@the warning goes to 
 session-start-vault-check@@ss1@@tools/hook-templates/session-start-vault-check@@s/if \[ "\$source_field" = "compact" \]; then/if false; then/@@a /compact is no longer skipped
 session-start-vault-check@@ss2@@tools/hook-templates/session-start-vault-check@@s/if \[ "\$event" = "PostToolUse" \]; then/if true; then/@@session starts are throttled as well as tool calls
 session-start-vault-check@@ss3@@tools/hook-templates/session-start-vault-check@@s/^touch "\$LAST_CHECK_FILE".*$/:/@@the check marker is never written, so tool calls are never throttled
-session-start-vault-check@@ss4@@tools/hook-templates/session-start-vault-check@@s/--format='%h'/--format='%h %s'/@@commit subjects leak into the reminder
+session-start-vault-check@@ss4@@tools/hook-templates/vault-lib@@s/--format='%h'/--format='%h %s'/@@commit subjects leak into the reminder
 session-start-vault-check@@ss5@@tools/hook-templates/session-start-vault-check@@s/NUDGE_COOLDOWN_SECONDS=3600/NUDGE_COOLDOWN_SECONDS=36000/@@the reminder cooldown is ten times too long
 
 # ---- post-merge ---------------------------------------------------------------------------
@@ -146,3 +146,20 @@ configure-settings@@cs11@@tools/statusline/configure-settings.mjs@@s|if (\[...fi
 configure-settings@@cs12@@tools/statusline/configure-settings.mjs@@s|!trimmed.startsWith('node ')|false|@@any command ending in statusline.mjs counts as installed, whatever program it runs
 configure-settings@@cs13@@tools/statusline/configure-settings.mjs@@s|let mode = 0o600;|let mode = 0o644;|@@a settings.json the helper creates is readable by other users@@not-observable-on-windows
 configure-settings@@cs14@@tools/statusline/configure-settings.mjs@@s|mode = fs.statSync(settingsPath).mode \& 0o777;|mode = 0o644;|@@an existing settings.json loses its permissions when it is rewritten@@not-observable-on-windows
+
+# --- added with the ORIG_HEAD guard, post-rewrite, the scanner-failure split, the pointer and vault-lib
+post-merge@@pm20@@tools/hook-templates/post-merge@@s/\&\& ! git merge-base --is-ancestor/\&\& git merge-base --is-ancestor/@@a stale ORIG_HEAD that is not an ancestor of HEAD is trusted, so unrelated history is sent to the model
+post-merge@@pm21@@tools/hook-templates/post-merge@@s/\$2 == h {/$1 == h {/@@after a rebase the old tip is looked up on the wrong side of the rewrite list
+post-merge@@pm22@@tools/hook-templates/post-merge@@s/amend|1) exit 0 ;;/1) exit 0 ;;/@@a post-rewrite caused by commit --amend runs the documentation update
+post-merge@@pm23@@tools/hook-templates/post-merge@@s/amend|1) exit 0 ;;/amend) exit 0 ;;/@@a squash merge, which commits nothing, runs the documentation update
+post-merge@@pm24@@tools/hook-templates/post-merge@@s/rejected --restricted, which post-merge relies on/rejected the flag, which post-merge relies on/@@a claude that rejects --restricted is no longer reported as such
+post-merge@@pm25@@tools/hook-templates/post-merge@@s/(tfvars|kdbx|jks/(kdbx|jks/@@.tfvars files reach the model
+post-merge@@pm26@@tools/hook-templates/post-merge@@s/npmrc|//@@.npmrc files reach the model
+pre-commit@@pc8@@tools/hook-templates/pre-commit@@s/-ne 1 \]\]/-ne 99 ]]/@@a real finding (exit 1) is reported as a scanner failure
+pre-commit@@pc9@@tools/hook-templates/pre-commit@@s/^        exit 1$/        exit 0/@@strict mode no longer blocks when the scanner itself failed
+session-start-vault-context@@cx31@@tools/hook-templates/session-start-vault-context@@s/POINTER_MAX_ITEMS:-3/POINTER_MAX_ITEMS:-9/@@the pointer lists nine open items, not three
+session-start-vault-context@@cx32@@tools/hook-templates/session-start-vault-context@@s/Vault context pointer for/Vault context for/@@the pointer carries the full-output header, so /vault-context treats it as already loaded
+vault-lib@@vl1@@tools/hook-templates/vault-lib@@s/\${ref:-main}/${ref:-master}/@@a vault with no origin/HEAD falls back to master instead of main
+vault-lib@@vl2@@tools/hook-templates/vault-lib@@s/ref="\${ref#origin\/}"/:/@@the default branch is reported as origin/trunk, not trunk
+vault-lib@@vl3@@tools/hook-templates/vault-lib@@s/--format='%h'/--format='%h %s'/@@commit subjects are listed with the unpushed hashes
+setup-mcp@@sm5@@tools/setup-mcp.sh@@s/"${curl_key}" | curl/"${api_key}" | curl/@@the key is passed to curl unescaped, so a backslash in it breaks the config line

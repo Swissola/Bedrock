@@ -185,11 +185,12 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
 }
 
 # The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
-test_vault_command_templates_are_at_version_4() {
-  local n v
-  for n in vault-log vault-context vault-populate; do
+test_vault_command_templates_carry_the_expected_versions() {
+  local pair n want v
+  for pair in vault-log:5 vault-context:5 vault-populate:4; do
+    n="${pair%%:*}"; want="${pair##*:}"
     v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
-    assert_eq "$n.md is at version 4" "4" "$v"
+    assert_eq "$n.md is at version $want" "$want" "$v"
   done
   return 0
 }
@@ -203,6 +204,54 @@ test_vault_command_templates_stay_under_their_line_ceilings() {
     lines="$(wc -l < "$TOOLS_DIR/command-templates/$n.md" | tr -d ' ')"
     assert_eq "$n.md is within $max lines (it has $lines)" "yes" "$([[ "$lines" -le "$max" ]] && echo yes || echo no)"
   done
+  return 0
+}
+
+test_the_bot_review_credential_guard_ignores_long_paths_but_catches_secrets() {
+  # The guard that stops a review being published must not trip on a long file path (a review
+  # names files, and tools/hook-templates/test-session-start-vault-context.sh is over 40 characters
+  # of path characters), yet must still catch a long mixed-case opaque string and the token prefixes.
+  # The workflow runs on Ubuntu with GNU grep -P. macOS's grep has no -P, so the pattern is applied
+  # with perl here, which reads the same lookaheads.
+  local wf="$ROOT/.github/workflows/pr-review.yml" pat
+  pat=$(grep -oE "grep -qP '[^']+'" "$wf" | head -n1 | sed -E "s/^grep -qP '(.*)'$/\1/")
+  assert_eq "the guard has a mixed-case opaque-string pattern" "yes" "$([[ -n "$pat" ]] && echo yes || echo no)"
+  if ! command -v perl >/dev/null 2>&1; then
+    skip "perl not installed, cannot apply the guard's pattern to sample strings"
+  else
+    flagged() { local text="$1"; printf '%s\n' "$text" | PAT="$pat" perl -e 'undef $/; my $t = <STDIN>; exit(($t =~ /$ENV{PAT}/) ? 0 : 1)' && echo yes || echo no; return 0; }
+    assert_eq "a long file path is not flagged" "no" "$(flagged 'see tools/hook-templates/test-session-start-vault-context.sh:366')"
+    assert_eq "a long path with digits is not flagged" "no" "$(flagged 'tools/hook-templates/session-start-vault-context-v4-notes2.md')"
+    assert_eq "a 40 character mixed-case alphanumeric string is flagged" "yes" "$(flagged 'key aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1fG3hJ5kL7m')"
+    assert_eq "a long base64 string is flagged" "yes" "$(flagged 'Zm9vYmFyQmF6MTIzNDU2Nzg5MEFiY2RlZmdoaWprbG1ub3A=')"
+  fi
+  assert_eq "the token prefixes are still checked on their own" "yes" "$(grep -qF "grep -qE 'sk-ant-|oat01|eyJ[A-Za-z0-9_-]{20,}'" "$wf" && echo yes || echo no)"
+  return 0
+}
+
+test_the_bot_review_marks_a_diff_it_had_to_cut() {
+  # Runs the workflow's own fetch snippet with a stub `gh`, at each side of the 400000 byte limit.
+  local wf="$ROOT/.github/workflows/pr-review.yml" snippet work size got marked
+  snippet=$(awk '/gh pr diff/ { on = 1 } on { print } on && /^          fi$/ { exit }' "$wf" | sed -E 's/^          //')
+  assert_eq "the fetch snippet is found in the workflow" "yes" "$([[ -n "$snippet" ]] && echo yes || echo no)"
+  work=$(mktemp -d)
+  mkdir -p "$work/bin" "$work/tmp/review" "$work/repo/.review-input"
+  printf '#!/bin/bash\ncat "$STUB_DIFF"\n' > "$work/bin/gh"; chmod +x "$work/bin/gh"
+  for size in 399999 400000 400001; do
+    head -c "$size" /dev/zero | tr '\0' 'a' > "$work/in.diff"
+    ( cd "$work/repo" && env PATH="$work/bin:$PATH" STUB_DIFF="$work/in.diff" PR=1 GITHUB_REPOSITORY=o/r RUNNER_TEMP="$work/tmp" bash -c "$snippet" ) >/dev/null 2>&1
+    got=$(wc -c < "$work/repo/.review-input/pr.diff" | tr -d ' ')
+    marked=$(grep -qF 'diff truncated' "$work/repo/.review-input/pr.diff" && echo yes || echo no)
+    if [[ "$size" -le 400000 ]]; then
+      assert_eq "a $size byte diff is passed on whole" "$size" "$got"
+      assert_eq "...with no truncation notice" "no" "$marked"
+    else
+      assert_eq "a $size byte diff is cut to 400000 bytes plus the notice" "yes" "$([[ "$got" -gt 400000 && "$got" -lt 400200 ]] && echo yes || echo no)"
+      assert_eq "...and the notice is in the file the model reads" "yes" "$marked"
+      assert_eq "...and the first 400000 bytes are the diff itself" "400000" "$(head -c 400000 "$work/repo/.review-input/pr.diff" | tr -cd 'a' | wc -c | tr -d ' ')"
+    fi
+  done
+  rm -rf "$work"
   return 0
 }
 
@@ -312,14 +361,23 @@ test_the_bot_review_workflow_stays_locked_down() {
   assert_eq "write permission exists only on the posting job" "1" "$(grep -cE '^[[:space:]]+pull-requests: write$' "$wf")"
   assert_eq "it refuses to run off main or for another actor" "yes" "$(grep -qF "github.ref == 'refs/heads/main' && github.actor == 'Swissola'" "$wf" && echo yes || echo no)"
   assert_eq "every action is pinned to a commit" "" "$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$wf" | grep -vE '@[0-9a-f]{40}( |$)' || true)"
-  assert_eq "the model step denies every other tool, and Read outside the checkout" "yes" "$(grep -qF 'Bash Write Edit' "$wf" && grep -qF "'Read(//proc/**)'" "$wf" && echo yes || echo no)"
+  assert_eq "the model step denies every other tool" "yes" "$(grep -qF 'Bash Write Edit NotebookEdit WebFetch WebSearch Task' "$wf" && echo yes || echo no)"
+  local deny
+  for deny in '//proc/**' '//etc/**' '//root/**' '//run/**' '//tmp/**' '//var/**' '//opt/**' '//home/runner/.ssh/**' '//home/runner/.claude/**' '//home/runner/.config/**' '//home/runner/.npm/**' '//home/runner/work/_temp/**' '//home/runner/.*' '//home/runner/.*/**' '//home/runner/runners/**'; do
+    assert_eq "the model step denies Read($deny)" "yes" "$(grep -qF -- "'Read($deny)'" "$wf" && echo yes || echo no)"
+  done
+  # The checkout, and so the diff file, lives under /home/runner/work. A deny rule beats an allow,
+  # so denying all of /home would stop the bot reading the diff it was given.
+  assert_eq "...but /home as a whole is not denied (that would hide the checkout)" "no" "$(grep -qF -- "'Read(//home/**)'" "$wf" && echo yes || echo no)"
+  assert_eq "checkout does not keep the workflow token in the repository config" "yes" "$(grep -qF 'persist-credentials: false' "$wf" && echo yes || echo no)"
   assert_eq "the posting job has its own owner and main guard" "2" "$(grep -cF "if: github.repository == 'Swissola/Bedrock' && github.ref == 'refs/heads/main' && github.actor == 'Swissola'" "$wf")"
+  assert_eq "a diff that is cut says so inside the file the model reads" "yes" "$(grep -qF '[diff truncated at 400000 bytes' "$wf" && echo yes || echo no)"
   assert_eq "docs/automation.md documents it" "yes" "$(grep -qF 'pr-review.yml' "$ROOT/docs/automation.md" 2>/dev/null && echo yes || echo no)"
   return 0
 }
 
 test_every_command_template_carries_a_version_stamp
-test_vault_command_templates_are_at_version_4
+test_vault_command_templates_carry_the_expected_versions
 test_vault_command_templates_stay_under_their_line_ceilings
 test_test_scripts_avoid_bash_4_only_features
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback
@@ -327,6 +385,8 @@ test_every_suite_cleans_up_after_itself_with_a_trap
 test_mutation_config_is_well_formed_and_every_mutant_applies
 test_the_manual_workflow_offers_exactly_the_mutation_groups
 test_the_bot_review_workflow_stays_locked_down
+test_the_bot_review_credential_guard_ignores_long_paths_but_catches_secrets
+test_the_bot_review_marks_a_diff_it_had_to_cut
 test_shellcheck_reports_no_warnings
 
 echo "--- $PASS passed, $FAIL failed, $SKIPS skipped ---"

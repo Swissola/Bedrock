@@ -1,8 +1,12 @@
 # Testing the tools
 
-> **Scope:** everything under `tools/` that does something (the five git and session hooks, the installer, the MCP setup scripts, the wiki staging script and the test stub) has an isolated test suite, and this page says what each one checks, in plain English. It also lists what is deliberately not tested, the defects the suites found and how they were fixed, and the one rule that keeps the whole set honest: a hook with no suite, or a suite nobody runs, fails a check.
+> **Scope:** for anyone who changes something under `tools/`, or who wants to know how far to trust it. Every part of `tools/` that does something (the git and session hooks and their shared helper, the installer, the MCP setup scripts, the wiki staging script and the test stub) has its own isolated test suite. This page says how to run them, what each one checks in plain English, and what is deliberately not tested. It also records the defects the suites found, and the one rule that keeps the set honest: a hook with no suite, or a suite nobody runs, fails a check.
+
+A **suite** is one test script. A **check** is one `PASS:` or `FAIL:` line inside it. The **hooks** are the scripts described in [`automation.md`](automation.md).
 
 ## Running them
+
+From the root of a clone of this repo:
 
 ```bash
 bash tools/testing/run-all-tests.sh              # everything, one suite after another
@@ -11,11 +15,16 @@ bash tools/testing/run-all-tests.sh --only hook  # just the suites whose name co
 bash tools/testing/run-all-tests.sh --list       # what there is
 ```
 
-Or run any suite on its own, for example `bash tools/hook-templates/test-pre-push.sh`. Each prints one `PASS:` or `FAIL:` line per check and ends with a summary; the exit status is 0 only if nothing failed.
+Or run any suite on its own, for example `bash tools/hook-templates/test-pre-push.sh`. Each prints one `PASS:` or `FAIL:` line per check and ends with a summary. The exit status is 0 only if nothing failed.
 
-On Windows the suites run under Git for Windows' bash, and the PowerShell suite runs with `pwsh tools/testing/test-powershell-scripts.ps1` (and, because most Windows users start scripts with the built-in one, `powershell -File tools/testing/test-powershell-scripts.ps1`). The `post-merge` suite is slow on Windows, about seven minutes, because every check starts several git processes. `--parallel` brings the whole set to roughly that.
+Platform notes:
 
-Nothing here touches a real vault, a real `~/.claude`, a real `claude` or a real network. Hooks run against throwaway git repos under `mktemp`, with `HOME` pointed at a temp folder where a hook keeps state, and `claude`, `curl` and `betterleaks` are stubs on `PATH`. Every suite removes its fixtures from an exit trap, so a failing check does not leave them behind.
+- **Windows.** The suites run under Git for Windows' bash. The PowerShell suite runs with `pwsh tools/testing/test-powershell-scripts.ps1`, and also with `powershell -File tools/testing/test-powershell-scripts.ps1`, because most Windows users start scripts with the built-in one.
+- **Speed on Windows.** The `post-merge` suite takes about seven minutes, because every check starts several git processes. `--parallel` brings the whole set to roughly that.
+
+**What the suites touch.** Nothing real: no vault, no `~/.claude`, no `claude`, no network. Hooks run against throwaway git repos under `mktemp`, with `HOME` pointed at a temp folder where a hook keeps state, and `claude`, `curl` and `betterleaks` are stubs on `PATH`. Every suite removes its fixtures from an exit trap, so a failing check does not leave them behind.
+
+In CI, the same suites run on every pull request (Linux, macOS and Windows). The Windows job skips `test-post-merge.sh` and `test-session-start-vault-context.sh`, which are slow there.
 
 ## What is deliberately not covered
 
@@ -26,7 +35,7 @@ Nothing here touches a real vault, a real `~/.claude`, a real `claude` or a real
 
 ## Defects the suites found, and how they were fixed
 
-Writing the suites turned up four defects in the tools themselves. Each was found by a check that failed, confirmed by hand, and then fixed with a separate go-ahead. Each fix has a regression test, so it stays fixed.
+Writing the suites turned up four defects in the tools themselves. Each was found by a check that failed, confirmed by hand, and fixed separately, and each fix has a regression test.
 
 | Where | What was wrong | Fix |
 |---|---|---|
@@ -37,7 +46,7 @@ Writing the suites turned up four defects in the tools themselves. Each was foun
 
 The suites can also record a confirmed, not-yet-fixed defect as an expected failure (`expect_defect` in the bash suites, `Expect-Defect` in the PowerShell one). It prints `KNOWN DEFECT:` without turning the run red, `run-all-tests.sh` repeats the line in its summary, and the check turns into a real failure the moment the tool is fixed, which is the prompt to make it a plain assertion. None is open at the moment.
 
-Two behaviours are pinned as they are rather than as defects, but are worth knowing: in strict mode `pre-commit` still lets a commit through when `betterleaks` is not installed (there is nothing to enforce with, so it warns), and any non-zero exit from the scanner, including a crash, counts as a finding.
+One behaviour is pinned as it is rather than as a defect, but is worth knowing: in strict mode `pre-commit` still lets a commit through when `betterleaks` is not installed (there is nothing to enforce with, so it warns). A scanner that runs and fails (any exit code other than 1) is reported as a scanner failure, not as a finding, and strict mode blocks on it.
 
 ## Skipped checks
 
@@ -47,12 +56,24 @@ A skip is printed as `SKIP:` and is never counted as a pass.
 |---|---|---|
 | `post-merge`, perl timeout, hung-run | Running under Git Bash on Windows | MSYS perl loses the alarm across `exec`; Windows always has a real `timeout` so the branch is not used there. No ticket: it cannot be tested on that platform. |
 | `post-merge`, `gtimeout` | `gtimeout` not installed | The macOS CI job installs it. |
+| `post-merge`, the CLI still lists `--restricted` | `claude` not installed | Needs the real CLI. It is skipped on CI runners without one. |
 | `pre-commit`, real `betterleaks` | `betterleaks` not installed | Needs the real binary. CI installs a pinned, checksum-verified copy (v1.9.0) on the Ubuntu job only, so they run there and skip on macOS and Windows. |
 | Installer, backslash vault path | No `cygpath` (not Windows) | Only meaningful with a Windows path. |
 | Installer, double quote in vault path | The filesystem cannot create such a folder | Windows. |
 | Structure, `shellcheck` | Not installed | Advisory locally. CI turns it into a gate on the Ubuntu job (see below). |
 
 ## The suites, test by test
+
+### `tools/hook-templates/test-vault-lib.sh`: the shared vault helpers
+
+`vault-lib` holds the two functions `pre-push` and `session-start-vault-check` share: which branch is the vault's default, and which commits on it are not yet on origin.
+
+| Test | What it checks |
+|---|---|
+| `the_default_branch_comes_from_origin_head` | A vault whose origin names `trunk` as default gets `trunk`, one with `main` gets `main`. |
+| `without_origin_head_it_falls_back_to_main` | No `origin/HEAD`, or not a repo at all: `main`. |
+| `unpushed_commits_are_listed_as_short_hashes_only` | Nothing unpushed prints nothing; two commits print two hashes and never a commit subject. |
+| `a_missing_branch_or_origin_copy_is_not_an_error_to_print` | A missing branch, a branch with no origin copy or a non-repo returns 1 and prints nothing. |
 
 ### `tools/hook-templates/test-pre-push.sh`: the `pre-push` hook
 
@@ -62,7 +83,8 @@ The hook warns, never blocks, when the vault has commits not yet on origin at th
 |---|---|
 | `silent_and_exit_0_when_vault_root_cannot_be_derived` | Outside any repo, with no `VAULT_ROOT`, it says nothing and exits 0. |
 | `silent_when_the_repo_being_pushed_is_the_vault_itself` | Pushing the vault itself gives no warning (its commits are what is being sent) and writes no throttle marker. |
-| `silent_when_vault_has_no_main_branch` | A vault on a branch called something other than `main` is left alone. |
+| `silent_when_vault_has_no_main_branch` | A vault whose only branch is not `main`, with no `origin/HEAD` to say otherwise, is left alone. |
+| `warns_for_a_vault_whose_default_branch_is_not_main` | When the vault's `origin/HEAD` names `trunk`, unpushed commits on `trunk` are reported. |
 | `silent_when_vault_has_no_origin` | A vault with no `origin` remote is left alone. |
 | `silent_when_vault_is_in_sync_with_origin` | Nothing unpushed: silence, no marker. |
 | `silent_when_vault_is_only_behind_origin` | Origin ahead of the vault is not "unpushed commits". |
@@ -78,7 +100,8 @@ The hook warns, never blocks, when the vault has commits not yet on origin at th
 | `cooldown_boundary_just_inside_is_throttled` / `..._just_outside_warns` | 570 seconds is still quiet, 630 seconds warns. |
 | `multi_ref_stdin_is_consumed_without_hanging` | The several lines git sends on stdin do not hang or break it. |
 | `empty_stdin_still_works` | Nothing on stdin still works. |
-| `installed_as_a_real_hook_warns_but_the_push_succeeds` | Installed as `.git/hooks/pre-push`, a real `git push` succeeds, the warning reaches the terminal and the other repo's commits arrive. |
+| `installed_as_a_real_hook_warns_but_the_push_succeeds` | Installed as `.git/hooks/pre-push` with `vault-lib` in `~/.claude/hook-templates`, a real `git push` succeeds, the warning reaches the terminal and the other repo's commits arrive. |
+| `an_installed_copy_without_the_helper_stays_quiet_and_the_push_succeeds` | With no `vault-lib` anywhere, the push still succeeds and stderr says the reminder is skipped and why. |
 
 ### `tools/hook-templates/test-session-start-vault-check.sh`: the `session-start-vault-check` hook
 
@@ -102,8 +125,10 @@ The hook reminds you, at session start and (throttled) after tool calls, that th
 | `post_tool_use_after_cooldown_reminds_and_refreshes_marker` | Past the hour: reminds, marker refreshed. |
 | `cooldown_boundary_just_inside_is_throttled` / `..._just_outside_reminds` | 3570 seconds is quiet, 3630 seconds reminds. |
 | `throttled_post_tool_use_still_reminds_at_next_session_start` | Being throttled on tool calls never silences the next session start. |
-| `without_jq_it_still_checks_and_never_throttles` | No `jq`: the event is unknown, so it checks every time. |
-| `without_jq_compact_cannot_be_detected_so_it_still_checks` | No `jq`: it cannot see `compact`, and errs on the side of checking. |
+| `without_jq_a_post_tool_use_is_still_throttled` / `without_jq_a_session_start_still_reminds_inside_the_cooldown` | No `jq`: the event name is read with `sed`, so a periodic check is throttled and a session start never is. |
+| `without_jq_compact_is_still_skipped` | No `jq`: `compact` is still recognised and skipped. |
+| `without_the_helper_it_says_so_and_stays_out_of_the_way` | A copy of the hook with no `vault-lib` next to it or in `~/.claude/hook-templates` exits 0, prints nothing on stdout (so nothing reaches the model) and says why on stderr. |
+| `reminds_for_a_vault_whose_default_branch_is_not_main` | A vault whose `origin/HEAD` names `trunk` gets its unpushed commits reported, naming the branch. |
 | `malformed_stdin_still_checks` / `empty_stdin_still_checks` | Bad or missing input fails open. |
 | `json_without_an_event_name_is_treated_as_unthrottled` | JSON with no `hook_event_name` is treated like a session start. |
 
@@ -129,7 +154,7 @@ The secret scan on staged changes. Warns by default, blocks with `PRECOMMIT_SECR
 | `strict_accepts_1_and_true_only` | `1` and `true` block; `0`, `false`, empty, `yes`, `TRUE` and `on` do not. |
 | `strict_with_a_clean_scan_still_passes` | Strict mode does not block clean commits. |
 | `strict_without_a_scanner_warns_but_cannot_block` | Pins today's behaviour: strict with no scanner warns and exits 0. |
-| `any_nonzero_scanner_exit_is_treated_as_a_finding` | Exit codes 1, 2, 126 and 127: strict blocks, default warns, the scanner's message is shown. |
+| `exit_1_is_a_finding_and_any_other_nonzero_exit_is_a_scanner_failure` | Exit codes 1, 2, 126 and 127: strict blocks, default warns, the scanner's message is shown. Exit 1 gets the "possible secret" banner; the others say "the scanner failed" and "nothing was checked". |
 | `scanner_output_on_both_streams_reaches_the_banner` | Both stdout and stderr from the scanner are shown. |
 | `banner_tells_the_user_what_to_do` | The banner names the unstage command, `--no-verify` and the allowlist file. |
 | `clean_scan_prints_nothing` | The scanner's chatter is swallowed when it finds nothing. |
@@ -144,7 +169,7 @@ The secret scan on staged changes. Warns by default, blocks with `PRECOMMIT_SECR
 
 The hook that, after a pull to the default branch, has an AI assistant update the repo's vault doc, unattended.
 
-The original scenarios are unchanged:
+Core scenarios:
 
 | Test | What it checks |
 |---|---|
@@ -157,14 +182,14 @@ The original scenarios are unchanged:
 | `relevant_change_invokes_claude_and_commits` | A relevant change runs `claude`, updates the doc and commits it locally. |
 | `retries_once_on_exit_127` | Exit 127 (command not found) is retried once. |
 | `mcp_unavailable_marker_downgrades_exit_code` | A "vault unreachable" message turns a reported success into exit 2. |
-| `unexpected_new_file_is_removed_not_reverted` / `unexpected_modification_to_tracked_file_is_reverted` / `no_unexpected_writes_stays_success` | Anything the run wrote outside the doc is undone, and a clean run stays a success. |
+| `unexpected_new_file_is_flagged_not_removed` / `unexpected_modification_to_tracked_file_is_flagged_not_reverted` / `no_unexpected_writes_stays_success` | Anything the run wrote outside the doc is listed in the log and gives exit 3, and is left exactly as it is. A clean run stays a success. |
 | `invocation_security_shape` | `--restricted`, `--mcp-config`, `--strict-mcp-config`, `--model sonnet`, and never `--dangerously-skip-permissions`. |
 | `hostile_filename_is_fenced_not_executed` | A filename that reads like an instruction is passed as quoted data inside a fence. |
 | `non_git_vault_*` (four) | A vault that is a plain folder: updates succeed with no commit, unexpected writes are flagged and not deleted, dot-folder churn is ignored. |
 | `repos_path_*`, `vault_root_*`, `*_backend_*` | The `vault-config.md` doc path (and the unsafe-path fallback), where `VAULT_ROOT` comes from, and the two MCP backends' tool names. |
 | `with_timeout_every_branch` | `timeout`, `gtimeout`, `perl` and no limit each work, and a hung run is cut off. |
 
-Added:
+Further scenarios:
 
 | Test | What it checks |
 |---|---|
@@ -181,14 +206,33 @@ Added:
 | `a_repo_with_no_origin_is_named_after_its_folder` | No remote needed. |
 | `the_repo_name_is_lowercased_by_default_and_kept_with_repo_name_case_keep` | Default and `lower` lowercase the log name and the doc path, `keep` uses the folder's case. |
 | `the_global_kill_switch_stops_the_hook_in_every_repo` | `~/.claude/hook-templates/DISABLED` (or `VAULT_HOOK_DISABLED_FILE`) stops the run before it starts, and removing it lets the hook run again. |
+| `the_range_starts_at_orig_head_and_falls_back_to_the_reflog` | With `ORIG_HEAD` set, the range starts there; without it, at the reflog's previous position. |
+| `called_as_post_rewrite_it_acts_on_a_rebase_and_ignores_an_amend` | With no argument or `rebase` the hook gets past its argument check; with `amend`, or the squash flag `1` that post-merge passes for a squash merge, it stops at once. It reads a marker the hook writes before going further, not a sleep. |
+| `after_a_rebase_the_range_comes_from_the_rewrite_list_not_a_stale_orig_head` | After a rebase the old tip is the one the `post-rewrite` input names for `HEAD`, whatever `ORIG_HEAD` holds. A list that does not end at `HEAD` gives no range and nothing runs. |
+| `a_stale_orig_head_that_is_not_an_ancestor_falls_back_to_the_reflog` | After a merge, an `ORIG_HEAD` that is not an ancestor of `HEAD` is ignored, and the reflog's previous position is used. |
+| `a_real_pull_with_rebase_that_replays_a_local_commit_still_runs_the_hook` | Installed as `post-rewrite`, a real `git rebase` runs the hook, and the prompt lists the upstream side's file and not the replayed local commit's. |
+| `a_repo_listed_in_the_vault_root_file_is_its_own_vault` / `a_repo_that_only_looks_like_a_vault_does_not_override_the_file` | `VAULT_ROOT` resolution: a repo whose path is listed in `vault-root` documents itself, and one that merely has a vault-shaped layout does not override the file. |
+| `a_claude_that_rejects_restricted_is_reported_as_such_with_its_version` | A `claude` that answers "unknown option '--restricted'" puts a clear message with the CLI version in `FAILURES.log` and the repo log. |
+| `an_ordinary_failure_does_not_claim_restricted_was_rejected` | Any other failure is logged without that message. |
+| `the_installed_claude_cli_still_lists_restricted` | Where a real `claude` is installed, its `--help` still lists `--restricted`. |
 
 ### `tools/hook-templates/test-session-start-vault-context.sh`: the `session-start-vault-context` hook
 
-Loads the repo's vault doc, your own latest note about this repo and the latest note from up to three other contributors (trimmed), and a list of open items across all contributors, at session start. Every hook run in the tests sees an empty global git config, and the fixture repo's `user.name` is `alice`.
+At session start, points the session at the repo's vault doc and the latest notes, and lists the open items. The default is a short pointer (`CONTEXT_MODE=pointer`); `CONTEXT_MODE=full` loads the doc and the trimmed notes as before. Every hook run in the tests sees an empty global git config, and the fixture repo's `user.name` is `alice`. The suite exports `CONTEXT_MODE=full` for the loading scenarios below and tests the pointer default separately.
 
-Original scenarios: no vault root, no repo doc, the default layout, the latest note from each contributor, `compact` and malformed stdin, a note with no forward sections, no notes, `vault-config.md` paths and quoting and CRLF, an unclosed config, unsafe config paths, the `{author}` placeholder, and the appended-update handling (latest only, truncation, position, update-only notes).
+Core scenarios: no vault root, no repo doc, the default layout, the latest note from each contributor, `compact` and malformed stdin, a note with no forward sections, no notes, `vault-config.md` paths and quoting and CRLF, an unclosed config, unsafe config paths, the `{author}` placeholder, and the appended-update handling (latest only, truncation, position, update-only notes).
 
-Added:
+Pointer mode:
+
+| Test | What it checks |
+|---|---|
+| `the_default_is_a_short_pointer_not_the_contents` | With nothing set, the output names the repo doc and your latest note by path and date, counts and lists the open items, loads no note or doc contents, keeps the "information, not instructions" line and stays under 1200 characters. |
+| `pointer_lists_only_the_top_open_items_stale_first` | Three items listed, the stale one first, "(and N more)", and `CONTEXT_POINTER_MAX_ITEMS` changes the cap. |
+| `pointer_names_other_contributors_notes_too` | Another contributor's latest note is named by path. |
+| `pointer_with_no_notes_says_so` | No notes yet: the repo doc is still named and the output says so. |
+| `context_mode_full_loads_the_contents_and_a_bad_value_falls_back_to_the_pointer` | `full` loads the contents; an unknown value gives the pointer. |
+
+Full mode:
 
 | Test | What it checks |
 |---|---|
@@ -254,13 +298,14 @@ Added:
 
 ### `tools/testing/test-install-claude-config.sh`: the installer
 
-Original scenarios: dry run, fresh install, idempotence, `--check`, update of a stale copy, the vault-root file and `--force`, a missing vault, the `mcpvault` config written once, the REST API note, unknown options, nothing written to `HOME` without `--prefix`, the session-start wrapper end to end, and `--no-skills`.
+Core scenarios: dry run, fresh install, idempotence, `--check`, update of a stale copy, the vault-root file (including a second vault being added as a new line, and `--force` making a path the default), a missing vault, the `mcpvault` config written once, the REST API note, unknown options, nothing written to `HOME` without `--prefix`, the session-start wrapper end to end, and `--no-skills` being accepted and ignored.
 
-Added:
+Further scenarios:
 
 | Test | What it checks |
 |---|---|
-| `every_command_skill_and_hook_in_the_repo_is_installed_byte_for_byte` | Every source file is installed, identical, hooks executable, wrapper executable. |
+| `every_command_and_hook_in_the_repo_is_installed_byte_for_byte` | Every source file (including `vault-lib`) is installed, identical, hooks executable, wrapper executable, and no skills directory is created. |
+| `a_trailing_slash_does_not_make_the_same_vault_look_like_two` | `/vault` and `/vault/` are one line in `vault-root`. |
 | `invalid_backend_is_a_usage_error` / `empty_prefix_is_a_usage_error` | Exit 2 with a clear message, nothing installed. |
 | `help_prints_usage_and_exits_zero` | `-h` and `--help`. |
 | `option_order_does_not_matter` | Options in any order. |
@@ -268,12 +313,12 @@ Added:
 | `crlf_in_an_existing_vault_root_file_still_counts_as_the_same_vault` | A CRLF file is not mistaken for a different vault. |
 | `dry_run_with_a_vault_reports_but_writes_nothing` | "would write" for both files, nothing created. |
 | `check_mode_never_writes_anything_even_with_a_vault` | `--check` creates nothing and exits 1 on an empty prefix. |
-| `check_lists_every_missing_item_by_label` | Command, skill, hook and wrapper each named. |
+| `check_lists_every_missing_item_by_label` | Command, hook and wrapper each named. |
 | `installed_copy_newer_than_the_repo_is_reported_as_differs_not_outdated` | A higher installed version is not called outdated. |
 | `outdated_message_gives_both_version_numbers` | "installed version 0, repo has N". |
 | `update_keeps_a_replaced_hook_executable` | A stale, non-executable hook is replaced and made executable. |
 | `unwritable_destination_fails_loudly_with_exit_1` | A prefix under a regular file: "FAILED to write", exit 1. |
-| `no_skills_leaves_already_installed_skills_alone` | `--no-skills` does not remove skills. |
+| `skills_from_an_older_install_are_left_alone_with_a_note` | A skill left by an older install is not deleted; the installer says it is stale, and `--check` does not complain about it. |
 | `mcpvault_without_a_vault_writes_no_config` | No vault, no config. |
 | `mcpvault_config_points_at_the_vault_and_is_exact` | The exact JSON written. |
 | `backslashes_in_a_windows_vault_path_are_normalised` | Windows-style paths are stored with forward slashes. |
@@ -314,7 +359,7 @@ The five steps of the Obsidian MCP setup, with `claude` and `curl` stubbed and a
 | `removes_then_adds_the_registration_with_the_key_and_user_scope` | The exact two `claude mcp` calls, in order. |
 | `a_failing_remove_does_not_stop_registration` | First-time setup, where there is nothing to remove, still works. |
 | `running_twice_re_registers_each_time` | Safe to re-run. |
-| `succeeds_when_the_endpoint_answers_200` | Exit 0, bearer key sent to `/vault/`. |
+| `succeeds_when_the_endpoint_answers_200` | Exit 0, bearer key sent to `/vault/` on `curl`'s standard input, and absent from its argument list (which other users can read). |
 | `fails_when_the_endpoint_answers_anything_but_200` | 401, 404, 500 and 000 each exit 1 and name the status. |
 
 ### `tools/command-templates/test/test-stub-rest-api-mcp.mjs`: the stub MCP server
@@ -370,6 +415,8 @@ Checks that no single suite can make:
 - the installer's hook list matches the hooks that exist;
 - every suite is in `run-all-tests.sh`, in a CI workflow and in this page;
 - every shell script parses, has LF endings, is tracked as executable and has `eol=lf` in `.gitattributes`; JavaScript (including the status line files) and PowerShell files parse; the example wiki config is valid;
+- the bot review marks a diff it had to cut: the workflow's own fetch snippet is run with a stub `gh` at 399999, 400000 and 400001 bytes;
+- the bot review workflow stays locked down: manual trigger only, the `Read` tool only, the token present only in the review job, write permission only on the posting job, every action pinned, each of the specific read denies present (and `/home` as a whole not denied, because that hides the checkout), and `persist-credentials: false`;
 - every command template carries a version stamp;
 - the test scripts use nothing that the macOS system bash (3.2) lacks, and none of the GNU-only commands (`touch -d`, `readlink -f`, `date -d` without a fallback, `sed -i` without a suffix) that would fail there;
 - every suite cleans up from an exit trap;
@@ -387,7 +434,7 @@ New suites follow the shape of the existing ones: a throwaway fixture per test, 
 
 A suite that cannot fail is worth nothing. A mutation check proves each one can: it takes a script, makes one small deliberate break (flip a condition, drop a line, change a number, which is a "mutant"), and runs that script's own suite against the broken copy. The suite should fail. If it still passes, that behaviour is not really being checked, and the mutant is a "survivor".
 
-It is slow on purpose, a full suite run per mutant (minutes each, so hours for everything), so it is **not part of the normal build**.
+It is slow on purpose: a full suite run per mutant, minutes each, so hours for everything. It is therefore **not part of the normal build**.
 
 ```bash
 bash tools/testing/run-mutation-tests.sh --list                 # the groups and how many mutants each has
@@ -414,14 +461,12 @@ bash tools/testing/run-mutation-tests.sh --check-applies        # fast: does eve
 
 ### What has been checked
 
-When this was set up, every mutant was confirmed to apply cleanly (`--check-applies`), and the runner itself was tested end to end: it reports a harmless change as a survivor, a real break as killed, a mutant tagged `not-observable-on-windows` as skipped on Windows, and exits 1 if anything survived. All 32 mutants were then run against their suites on a Windows machine: 31 killed, none survived, and the 32nd (`in2`, installed hooks losing their executable bit) was skipped, because Windows Git Bash reports any file starting with `#!` as executable and the suite cannot see the difference there.
+- **Applying.** Every mutant was confirmed to apply cleanly (`--check-applies`), and the runner itself was tested end to end: it reports a harmless change as a survivor, a real break as killed, a mutant tagged `not-observable-on-windows` as skipped on Windows, and exits 1 if anything survived.
+- **On Windows.** The first 32 mutants were run against their suites: 31 killed, none survived, and the 32nd (`in2`, installed hooks losing their executable bit) was skipped, because Windows Git Bash reports any file starting with `#!` as executable and the suite cannot see the difference there.
+- **On GitHub.** The manual workflow was run for all groups (Ubuntu, run 37660645269 on commit `3abb325`): all 32 mutants were killed, none survived, none were broken and no baseline failed. That includes `in2`, so the Windows-only skip is confirmed to be caught where file modes are real. The whole run took three minutes.
+- **Since then.** Two mutants were added (`pc5` reworked and `pc7` new, for the `git --staged --redact` invocation and the 1.x-only `-v`). The `pre-commit` group was re-run on GitHub (Ubuntu, run 37666004118 on commit `c35126f`): all 7 killed, none survived, none broken, no baseline failed.
+- **A fix the runs forced.** Running the `post-merge` group exposed two timing-based checks in its suite that failed whenever the machine was busy, which stopped the group at its baseline. Both now use no clock: the hung-run check uses a stub that would hang for two minutes and prints a marker if it ever finishes, and the slow-`claude` check uses a stub that waits for a release file.
 
-The manual workflow has since been run for all groups on GitHub (Ubuntu, run 37660645269 on commit `3abb325`): **all 32 mutants were killed, none survived, none were broken and no baseline failed**. That includes `in2`, so the Windows-only skip is confirmed to be caught where file modes are real. The planning job, the group dropdown and the per-group parallel jobs all behaved as designed, and the whole run took three minutes.
-
-Two mutants were added afterwards (`pc5` reworked and `pc7` new, for the `git --staged --redact` invocation and the 1.x-only `-v`), making 33. The `pre-commit` group was re-run on GitHub (Ubuntu, run 37666004118 on commit `c35126f`): all 7 killed, none survived, none broken, no baseline failed, in nine seconds.
-
-Running the `post-merge` group also exposed two timing-based checks in its suite (one pre-existing, one of mine) that failed whenever the machine was busy, which stopped the group at its baseline. Both now use no clock: the hung-run check uses a stub that would hang for two minutes and prints a marker if it ever finishes, and the slow-`claude` check uses a stub that waits for a release file.
-
-Which mutants are killed changes whenever a suite does, so treat the result of a run, not this paragraph, as the current answer.
+The list has grown since (122 mutants across all groups when last counted). Which mutants are killed changes whenever a suite does, so treat the result of a run, not this section, as the current answer.
 
 Stryker is not used: it supports C#, JavaScript/TypeScript and Scala, and these scripts are bash and PowerShell, which it cannot mutate.
