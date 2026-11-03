@@ -362,6 +362,14 @@ const scenarios = [
     check('did not show the other older note', !r.final.includes('CTX-OLDA') && r.final.includes('CTX-OLDB'), r.final.slice(0, 200));
     check('labelled as an older note of unknown repo', /older/i.test(r.final) && /unknown|no repo/i.test(r.final), r.final.slice(0, 300));
   } },
+  { name: 'context: a pointer already in the conversation does not count as loaded', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'daily-notes/test-user/2026-10-05-widget-a.md': dnote('MINE') });
+    const pointer = '--- Vault context pointer for widget (auto-loaded) ---\nVault: the test vault\nRepo doc: repos/widget/index.md\nYour latest note: daily-notes/test-user/2026-10-05-widget-a.md (2026-10-05)\nOpen items: 1 (0 stale, open more than 30 days):\n- test-user (3d): ITEM-IN-POINTER\nRead these when the task needs them, or run /vault-context to load them in full.';
+    const r = runCommand({ vault, repo, template: 'vault-context', system: `The session-start hook has already run, and its output is part of this conversation:\n${pointer}` });
+    check('read the hub note, as it does with nothing loaded', readPaths(r).includes('index.md'), readPaths(r).join(', '));
+    check('read the latest note, which the pointer only names', readPaths(r).some((p) => p.startsWith('daily-notes/test-user/')), readPaths(r).join(', '));
+  } },
   { name: 'context: hook output already in the conversation is not reloaded', run() {
     const { repo } = mkRepo('widget');
     const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'daily-notes/test-user/2026-10-05-widget-a.md': dnote('MINE') });
