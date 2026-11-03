@@ -1,17 +1,30 @@
 ---
-title: Git recovery — undoing mistakes in the vault repo
+title: Git recovery - undoing mistakes in the vault repo
 tags: [runbook, git, recovery]
 ---
 
 # Git recovery
 
-> **Scope:** what to do when something has gone wrong in the vault repo: a secret committed, a bad commit, an unwanted hook commit, a pull that refuses to run, a deleted note, or work that seems to have vanished. The everyday loop (pull, write, commit, push) and merge conflicts are covered in [`daily-workflow.md`](daily-workflow.md). This page covers the unhappy paths.
+> **Scope:** for anyone who has hit a git problem in the vault repo (this repo, the one the notes live in): a secret committed, a bad commit, an unwanted hook commit, a pull that refuses to run, a deleted note, or work that seems to have vanished. The everyday loop (pull, write, commit, push) and merge conflicts are covered in [`daily-workflow.md`](daily-workflow.md). This page covers the unhappy paths.
 >
-> If git terms are new to you, read the "A few terms" section of [`daily-workflow.md`](daily-workflow.md) first. Every section below assumes you have a terminal open **in the vault repo's folder**, not in some other repo.
+> If git terms are new to you, read [A few terms](daily-workflow.md#a-few-terms-if-git-is-still-new-to-you) in `daily-workflow.md` first. Every section below assumes you have a terminal open **in the vault repo's folder**, not in some other repo. The commands name `main` and `origin/main`, because the vault pushes straight to `main`. If your vault's default branch has another name, use that.
+
+Pick your section:
+
+| What happened | Section |
+|---|---|
+| A password, token or personal data was committed | [1](#1-a-secret-or-personal-data-got-committed) |
+| A commit is wrong and not yet pushed | [2](#2-a-bad-commit-that-hasnt-been-pushed) |
+| A commit is wrong and already pushed | [3](#3-a-bad-commit-that-has-already-been-pushed) |
+| A hook made a commit you don't want | [4](#4-a-hook-made-an-automated-commit-you-dont-want) |
+| `git pull` refuses to run | [5](#5-git-pull-refuses-to-run) |
+| A note was deleted | [6](#6-a-note-was-deleted-by-mistake) |
+| Work seems to have vanished | [7](#7-work-seems-to-have-vanished) |
+| `git push` was rejected | [8](#8-push-rejected) |
 
 ## Before you do anything
 
-1. **Stop and look.** Run `git status` (what's changed but not committed) and `git log --oneline origin/main..main` (what's committed but not pushed yet). Both commands only look; they never change anything.
+1. **Stop and look.** Run `git status` (what's changed but not committed) and `git log --oneline origin/main..main` (what's committed but not pushed yet). Both commands only look. They never change anything.
 2. **Work out whether the problem has been pushed.** It's the one question that decides which fix is safe. If the commit shows up in `git log origin/main..main`, it's still only on your machine. If it doesn't, everyone else may already have it.
 3. **Never `git push --force` to `main`.** This vault is shared and pushes straight to `main` (see [`using-the-vault.md`](using-the-vault.md#push-policy-direct-to-main-no-required-pr)), so a force-push silently deletes other people's work. None of the fixes below need one, except the history rewrite in section 1, which is a deliberate, coordinated exception.
 4. **If it was ever committed, it's almost certainly recoverable.** Section 7 explains how.
@@ -75,6 +88,8 @@ git revert <hash>                                                  # undo one cl
 
 Using `revert` here, even though the commit isn't pushed yet, is deliberate. Hook commits are often mixed in with your own, and `git reset` would remove everything after the point you reset to, your commits included. Alternatively, if the hook's update was mostly right, just correct the doc and commit the fix. That's often the better outcome.
 
+The hook only ever commits its one doc. If its log (`~/.claude/hook-logs/<repo>-post-merge.log`) or `FAILURES.log` lists "unexpected vault writes", something else in the vault changed during the run and was left alone, uncommitted. It may be the run's doing or your own work. Look with `git status` and decide: commit it, or discard it with `git restore <file>` (tracked) or by deleting it (new).
+
 ## 5. `git pull` refuses to run
 
 Git says something like *"Your local changes to the following files would be overwritten by merge"*. This usually happens after editing a note directly in the Obsidian app and forgetting to commit it.
@@ -95,7 +110,7 @@ git pull
 git stash pop                  # bring them back on top of the fresh copy
 ```
 
-**If you don't want the edits at all:** `git restore <file>` discards them. ⚠️ This can't be undone, because uncommitted edits aren't in git's history.
+**If you don't want the edits at all:** `git restore <file>` discards them. **Warning:** this can't be undone, because uncommitted edits aren't in git's history.
 
 ## 6. A note was deleted by mistake
 
@@ -135,4 +150,4 @@ Someone else pushed first. This is covered in Example 4 of [`daily-workflow.md`]
 
 - [`daily-workflow.md`](daily-workflow.md): the everyday loop, git terms, and merge conflicts
 - [`using-the-vault.md`](using-the-vault.md): push policy and why the vault doesn't use PRs
-- [`../index.md`](../index.md)
+- [`../index.md`](../index.md): the hub note

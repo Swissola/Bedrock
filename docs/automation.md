@@ -1,105 +1,221 @@
-# Automation layer (optional)
+# Automation: slash commands and hooks (optional)
 
-> **Scope:** once the manual workflow in [`runbooks/using-the-vault.md`](../runbooks/using-the-vault.md) feels natural, this is how to stop having to remember it. Everything here is optional — the vault is fully useful without any of it, and there's no shame in never installing any of this.
+> **Scope:** for anyone who has the manual workflow in [`runbooks/using-the-vault.md`](../runbooks/using-the-vault.md) working and wants to stop having to remember it. Everything here is optional. The vault is fully useful without any of it.
 
-There are two independent layers here. Install either, both, or neither:
+Terms used on this page, in the same sense as everywhere else (see [Terms](../README.md#terms)):
 
-- **Slash commands and skills** (`tools/command-templates/`, `tools/skill-templates/`) — turn the plain-English prompts from the usage guide into named, one-word commands, and load the vault's conventions automatically so your assistant doesn't need reminding. Install once per machine; works from inside *any* repo you `cd` into.
-- **Git hooks** (`tools/hook-templates/`) — a specific, heavier layer for a repo you deliberately want auto-documenting itself in the vault on every pull, unattended, without anyone asking. A real trade-off (a headless AI run kicks off on every pull of that repo), not something to install everywhere just because you can. Most repos should just use the commands/skills above and never need this.
+- A **slash command** is a named prompt you type in Claude Code, such as `/vault-log`.
+- A **git hook** is a script git runs on a git event (a commit, a pull, a push).
+- A **session hook** is a script Claude Code runs when a session starts, or after a tool call.
+- The **repo doc** is the vault's reference page for one codebase, `repos/<name>/index.md`.
+- The **vault** is this repo, the one the notes live in. A **repo** below is any other codebase you work in.
 
-## Slash commands and skills
+## How the pieces fit together
 
-**Easiest: the installer.** From a clone of this repo, on each machine:
+There are two independent layers. Install either, both, or neither. Most repos only need the commands.
+
+| Piece | Runs when | Where it is installed | What it does |
+|---|---|---|---|
+| `/vault-context`, `/vault-log`, `/vault-populate` | You type them, in Claude Code | `~/.claude/commands/`, once per machine | Catch up, log a session, bootstrap a repo doc |
+| `pre-commit` | Git, before each commit | `.git/hooks/` of each repo that wants it | Scans staged changes for secrets |
+| `post-merge` (also installed as `post-rewrite`) | Git, after a pull | `.git/hooks/` of each repo that wants it | Updates that repo's repo doc in the vault, unattended |
+| `pre-push` | Git, before a push | `.git/hooks/` of each repo that wants it | Warns if the vault has unpushed commits |
+| `session-start-vault-check` | Claude Code session start, and periodically during a session, in any repo | Your user-scope Claude Code settings | The same unpushed-commit warning |
+| `session-start-vault-context` | Claude Code session start, in repos that opt in | That repo's `.claude/settings.json` | Points the session at that repo's vault context |
+| `vault-lib` | Never run, only sourced | Beside the hooks | Shared helpers for `pre-push` and `session-start-vault-check` |
+
+The hooks are the heavier layer. `post-merge` starts a headless AI run on every pull of a repo, so installing it is a real trade-off, and it only suits a repo you deliberately want to document itself in the vault.
+
+The vault's conventions reach the assistant through a short [`CLAUDE.md`](../CLAUDE.md) at the vault root, which Claude Code loads itself when it runs there. There are no skills to install.
+
+## Before you start
+
+- A clone of this repo, and its absolute path (the **vault path**).
+- The `obsidian` MCP server registered, if you have not done so already: see [`mcp-setup.md`](mcp-setup.md).
+- `claude` on your `PATH`. `jq` and `timeout` (or `gtimeout`, or `perl`) are needed by `post-merge`. The installer warns about any of these it cannot find.
+
+## Slash commands
+
+### Install with the installer (recommended)
+
+Run this from the root of a clone of this repo, once per machine:
 
 ```bash
 bash tools/install-claude-config.sh --vault <absolute path to your vault>
 ```
 
-It copies the three commands, the two skills and the hook templates into `~/.claude/`, writes `~/.claude/hook-configs/vault-root` so hooks installed in other repos can find the vault, and warns about anything missing (`claude`, `jq`, `timeout`). It is idempotent, so re-run it after pulling this repo; `--check` reports what is current, outdated or missing without changing anything, and `--dry-run` shows what it would do. Pass `--no-skills` for a vault whose layout differs from the team default: the two skills describe the team layout (`daily-notes/<author>/`, `repos/<name>/`) and trigger on any `obsidian` MCP call, so they would contradict a different layout. With `--backend mcpvault` it also writes the hook MCP config. On Windows, `tools\install-claude-config.ps1` takes the same arguments and runs it under Git for Windows' bash (you may need `powershell -ExecutionPolicy Bypass -File ...` on a machine where script execution is restricted). Pass `--statusline` to also install the optional [status line](statusline.md) (it copies the script and sets `statusLine` in `settings.json` if none is set; `--force` replaces a different one, after a backup). Commands and skills load in a **new** Claude Code session, and per-repo hooks (`post-merge`, `pre-commit`) still need copying into that repo's `.git/hooks` as described below. `bash tools/testing/test-install-claude-config.sh` tests the installer against a throwaway directory.
+On success it prints an `installed` line for each file and ends with `Done.` Re-run `bash tools/install-claude-config.sh --check` afterwards: it changes nothing and ends with `Everything is current.` when the installed copies match this repo. Open a **new** Claude Code session, because commands load at session start.
 
-Or by hand, once per machine:
+What it does:
 
+- Copies the three commands to `~/.claude/commands/`.
+- Copies the hook templates, `vault-lib` and a small wrapper, `session-start-vault-context.sh`, to `~/.claude/hook-templates/`. These are copies only. Nothing is enabled until you install a hook into a repo, as described below.
+- Records the vault path in `~/.claude/hook-configs/vault-root`, so hooks installed in other repos can find the vault.
+- Warns about anything missing (`claude`, `jq`, `timeout`).
+
+Options:
+
+| Option | Effect |
+|---|---|
+| `--check` | Reports what is current, outdated or missing, and changes nothing. Exit 1 if anything is not current. |
+| `--dry-run` | Shows what it would do, and changes nothing. |
+| `--backend mcpvault` | Also writes the MCP config the hooks use (`~/.claude/hook-configs/obsidian-mcp-config.json`). See [Backends](vault-config.md#backends). |
+| `--statusline` | Also installs the optional [status line](statusline.md). `--force` replaces a different one, after a backup. |
+| `--force` | Lets a new `--vault` path become the default (see below), and replaces a different status line. |
+| `--no-skills` | Accepted and ignored, so old command lines keep working. Earlier versions installed two skills. The installer leaves them in place, says they are stale, and leaves the deleting to you. |
+| `--prefix <dir>` | Installs into `<dir>` instead of `~/.claude`. Used by the tests. |
+
+The installer is idempotent, so re-run it after pulling this repo.
+
+**One vault path or several.** `~/.claude/hook-configs/vault-root` holds one absolute path per line, and the first line is the default. Running the installer with a second `--vault` adds a line. `--force` makes the new path the default instead. A trailing slash is ignored.
+
+**On Windows**, `tools\install-claude-config.ps1` takes the same arguments and runs the script under Git for Windows' bash. Where script execution is restricted you may need `powershell -ExecutionPolicy Bypass -File ...`.
+
+The installer is tested against a throwaway directory by `bash tools/testing/test-install-claude-config.sh`.
+
+### Install by hand
+
+Once per machine, from the root of a clone of this repo:
 
 ```bash
 cp tools/command-templates/vault-context.md ~/.claude/commands/vault-context.md
 cp tools/command-templates/vault-log.md ~/.claude/commands/vault-log.md
 cp tools/command-templates/vault-populate.md ~/.claude/commands/vault-populate.md
-mkdir -p ~/.claude/skills/obsidian-mcp-setup ~/.claude/skills/obsidian-vault-conventions
-cp tools/skill-templates/obsidian-mcp-setup/SKILL.md ~/.claude/skills/obsidian-mcp-setup/SKILL.md
-cp tools/skill-templates/obsidian-vault-conventions/SKILL.md ~/.claude/skills/obsidian-vault-conventions/SKILL.md
 ```
 
-(Windows/PowerShell: same idea with `Copy-Item`/`New-Item -ItemType Directory` in place of `cp`/`mkdir -p`.)
+(Windows PowerShell: `Copy-Item` in place of `cp`.)
 
-This gives you three commands — `/vault-context` (read the hub note, your latest note for this repo, a short form of up to three other contributors' notes for it, and the open items across them), `/vault-log` (write the session as one daily note per repo worked in, and reconcile open items), and `/vault-populate` (bootstrap a `repos/<name>/` doc for a codebase, keeping its frontmatter and any `## Hand-written notes` section, and skipping the rewrite when the repo has not changed since `source-commit`) — plus two skills that load this vault's conventions and MCP setup facts automatically whenever they're relevant, rather than requiring you to go find them.
+### The three commands
 
-Installed at **user scope** (`~/.claude/commands/`, `~/.claude/skills/`), not this repo's own project-level `.claude/`, since `/vault-populate` in particular needs to work from inside whichever *other* repo you're documenting, not just from within the vault itself. Claude Code doesn't track either folder in git (they live in your home directory, outside any repo), so each clone needs this one-time copy step, and a restart to pick up new commands/skills.
+| Command | What it does |
+|---|---|
+| `/vault-context` | Reads the hub note, your latest daily note for this repo, a short form of up to three other contributors' notes, and the open items across them |
+| `/vault-log` | Writes the session as one daily note per repo worked in, and reconciles open items |
+| `/vault-populate` | Bootstraps a repo doc for a codebase. It keeps the doc's frontmatter and any `## Hand-written notes` section, and skips the rewrite when the repo has not changed since `source-commit` |
 
-These are deliberately condensed pointers back to the runbooks, not a second copy of the full content to keep in sync — if the two ever disagree, the runbooks win.
+An **open item** is a `- [ ]` line in a daily note. One open for longer than `staleOpenItemDays` (30 by default) is **stale**. The full rules are in [`using-the-vault.md`](../runbooks/using-the-vault.md#2-end-of-session-writing-a-daily-note).
 
-`/vault-log` also reads an optional `vault-config.md` at the vault root, for vaults that lay their notes out differently from the defaults in the runbook; see [`vault-config.md`](vault-config.md). With no such file it behaves exactly as described above, and it works with either `obsidian` MCP backend (the Local REST API plugin, or MCPVault). Each template carries a `bedrock-template: <name>, version N` comment so a machine's installed copy can be compared against the one in this repo.
+Things worth knowing about them:
 
-## Git hooks
+- They are installed at **user scope** (`~/.claude/commands/`), not in this repo's `.claude/`, because `/vault-populate` has to work from inside whichever other repo you are documenting. Claude Code does not track that folder in git, so each machine needs the install once and a restart.
+- They are condensed pointers back to the runbooks, not a second copy. If the two disagree, the runbooks win.
+- `/vault-log` also reads an optional `vault-config.md` at the vault root, for vaults laid out differently from the runbook defaults. See [`vault-config.md`](vault-config.md).
+- They work with either `obsidian` MCP backend: the Local REST API plugin, or MCPVault.
+- Each template carries a `bedrock-template: <name>, version N` comment, so an installed copy can be compared with the one in this repo.
 
-Four optional hooks, each independently installable, tracked (as source) under `tools/hook-templates/`. Git never tracks the installed copies themselves (`.git/hooks/` isn't part of a repo's history), so each clone that wants a hook needs this one-time copy step.
+## Installing hooks into a repo
 
-### `pre-commit`: secret scan before it enters history
+A **git hook** must be copied into `.git/hooks/` of each clone that wants it, because git never tracks that folder. Run the `cp` and `chmod` commands below from the root of the repo that should get the hook (not necessarily the vault). The source can be your clone of this repo, or `~/.claude/hook-templates/` once the installer has run.
 
-Scans staged changes for likely secrets (API keys, tokens, private key blocks, connection strings with embedded passwords) before a commit lands, even locally. This is the cheapest point to catch one, since an uncommitted change costs nothing to fix and a pushed one is genuinely harder to walk back (see the "Redact real credentials, tenant IDs, and personal data" line in [`runbooks/using-the-vault.md`](../runbooks/using-the-vault.md)).
+### `pre-commit`: secret scan before a commit
+
+Scans staged changes for likely secrets (API keys, tokens, private key blocks, connection strings with embedded passwords) before a commit lands, even locally. This is the cheapest point to catch one: an uncommitted change costs nothing to fix and a pushed one is much harder to walk back (see "Redact real credentials, tenant IDs, and personal data" in [`using-the-vault.md`](../runbooks/using-the-vault.md#growing-this-as-a-team-vault)).
 
 ```bash
 cp tools/hook-templates/pre-commit .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
-Uses [`betterleaks`](https://betterleaks.com/) only, no other engine. Betterleaks is a newer secrets scanner with substantially better recall than older entropy-based tools (its token-efficiency detection scored around 98.6% versus roughly 70% for plain entropy detection on the CredData benchmark). It is called as `betterleaks git --staged --redact`, the form the project documents for pre-commit hooks, with `-v` added on 1.x only (it adds the per-finding detail there; on 2.x `-v` means live validation of any credential found, so it is never passed). The same call works on the 1.9.0 release and the 2.0 release candidates.
+It needs [`betterleaks`](https://betterleaks.com/) on your `PATH`. It runs `betterleaks git --staged --redact`, the form the project documents for pre-commit hooks, with `-v` added on 1.x only. On 2.x `-v` means live validation of any credential found, so it is never passed there.
 
-**No hand-rolled regex fallback if it isn't installed, deliberately.** A home-grown pattern set would be weaker than a real tool (the whole reason betterleaks is used here is that regex/entropy detection alone has poor recall), while adding real code and test surface of its own, for a false sense of coverage arguably worse than knowing plainly there's none. Instead, no scanner found means no scan at all, just a loud, *unthrottled* reminder every commit to go install it. That's a small enough per-commit cost, and honest about the actual gap, unlike a throttled nag that could let "we're not really checking anything" go unnoticed for a while.
+How it behaves:
 
-**Deliberately scoped to secrets, not general PII.** Names, emails, and phone numbers don't have a regex-tractable shape in prose the way a key or token does, and a general PII scanner here would false-positive on ordinary sentences constantly and still miss creative phrasing, which teaches people to reach for `--no-verify` on every commit. PII redaction stays the documented human-review discipline it already is; this hook only adds a machine-checkable backstop for the narrower, more mechanically-detectable case.
+- **A finding is not a failure.** Betterleaks exits 1 when it finds something. Any other non-zero code means the scan itself failed (bad config, unreadable repo, a crash). The hook reports a finding as "possible secret(s) in staged changes" and a failure as "the scanner failed, nothing was checked", so a broken scanner is never mistaken for a clean or a dirty result.
+- **Non-blocking by default.** Both cases print a loud warning and let the commit through, because a hard block on a false positive trains people to bypass the hook. Set `PRECOMMIT_SECRET_SCAN_STRICT=1` (in your shell profile, or a repo-local `.envrc`) to block on either, which suits a team vault.
+- **Getting past a false positive.** Use `git commit --no-verify`, or allowlist the finding with a `.gitleaksignore` entry or a repo `.gitleaks.toml` (betterleaks reads that file format).
+- **No fallback scanner.** If betterleaks is not installed there is no scan at all, only a reminder on every commit (never throttled) to install it. A home-grown regex set would be weaker than the real tool and would give a false sense of coverage. This holds in strict mode too: with no scanner there is nothing to enforce with, so it warns and lets the commit through.
+- **Secrets only, not general personal data.** Names, emails and phone numbers have no reliable shape in prose, and a scanner for them would flag ordinary sentences until people reached for `--no-verify`. Personal data stays a matter of human review.
 
-**Non-blocking by default**, same philosophy as `pre-push` below. A real finding prints a loud warning but still lets the commit through, because a hard block on a false positive in a personal-notes vault trains people to bypass the hook entirely. Set `PRECOMMIT_SECRET_SCAN_STRICT=1` (shell profile, or a repo-local `.envrc`) to make a real finding block the commit instead, which is worth it for a team vault where "warn and trust everyone to act on it" isn't a strong enough guarantee. A confirmed false positive can still go through with `git commit --no-verify`, or by adding an allowlist rule, a `.gitleaksignore` entry or a repo `.gitleaks.toml` (betterleaks reads that same config file format even though it isn't the gitleaks tool itself), if it's a recurring one.
+To check it is working, stage a file and run `git commit`: with a clean scan it prints nothing, and with no scanner installed it prints the install reminder.
 
-**Testing this hook:** `bash tools/hook-templates/test-pre-commit.sh`. It stubs `betterleaks` on `PATH`, so nothing needs installing, and covers the no-staged-changes and no-scanner cases (and that the install notice is never throttled), warn versus strict (which values of `PRECOMMIT_SECRET_SCAN_STRICT` block), what happens for each scanner exit code, the exact scanner arguments, deletions, first commits and awkward file names, and a real `git commit` being blocked, allowed with a warning, or bypassed with `--no-verify`. If `betterleaks` is installed it also runs two checks against the real scanner. A regression test covers a file renamed and edited in one commit (once missed by the scan). See [`testing.md`](testing.md).
+Test it with `bash tools/hook-templates/test-pre-commit.sh`, which stubs `betterleaks` so nothing needs installing. See [`testing.md`](testing.md).
 
-### `post-merge` — self-documenting repo
+### `post-merge`: a self-documenting repo
 
-After a pull lands on the default branch, this backgrounds a headless AI run that updates `repos/<this-repo-name>/index.md` from the diff — a repo documenting its own tooling changes automatically, with no one having to ask.
+After a pull lands on the repo's default branch, this backgrounds a headless AI run that updates `repos/<this-repo-name>/index.md` (the repo doc) from the diff, so a repo documents its own changes with no one asking. It never creates the doc, so bootstrap it first.
+
+**Prerequisites**
+
+1. The repo doc exists in the vault. Create it once with `/vault-populate`, run from inside the repo. The hook refuses to run until `repos/<that-repo>/index.md` exists (or the doc at the configured `reposPath`).
+2. A standalone `--mcp-config` file naming just the `obsidian` server (not your full Claude Code config) at `~/.claude/hook-configs/obsidian-mcp-config.json`. The installer writes it with `--backend mcpvault`. Otherwise ask your assistant to generate it from your existing MCP registration.
+3. `pre-commit` installed alongside it, as described below.
+
+**Install**
 
 ```bash
 cp tools/hook-templates/post-merge .git/hooks/post-merge
-chmod +x .git/hooks/post-merge
+cp tools/hook-templates/post-merge .git/hooks/post-rewrite
+chmod +x .git/hooks/post-merge .git/hooks/post-rewrite
 ```
 
-It needs a standalone `--mcp-config` file naming just the `obsidian` server (not your full Claude Code config, which may have other servers configured) at `~/.claude/hook-configs/obsidian-mcp-config.json` — ask your assistant to generate this from your existing MCP registration if it doesn't exist yet.
+**Install the same file as `post-rewrite` too.** A plain `git pull`, and a fast-forward `git pull --rebase`, fire `post-merge`. A `pull --rebase` that has local commits to replay fires only `post-rewrite`, with the argument `rebase`. Without the second copy the hook never runs for anyone who pulls with rebase. The script acts on `rebase` and ignores `amend`. The range it documents starts at `ORIG_HEAD`, which git sets for both merges and rebases, so it covers the upstream changes only, never your own replayed commits.
 
-This hook runs with `--restricted` plus an explicit, minimal `--mcp-config`/`--strict-mcp-config` pair — confined to the checkout, with only the vault-write tools it actually needs, never broad unattended access. It also treats every changed filename as untrusted data rather than an instruction (a maliciously-named file shouldn't be able to redirect what the hook does), and verifies after every run — independent of what the run's own output claims — that only the intended doc was actually written. A brand-new unexpected file is removed outright (provably safe, it didn't exist before the run); an unexpected modification to a file that already existed is reverted to its last-committed content via `git checkout --`, which only works on already-tracked content — confirmed by this project's own test suite, see below.
-
-A successful update is **auto-committed locally** (so it can't be silently lost or overwritten before you notice it) but **never auto-pushed** — pushing stays a manual, human-reviewed step (see [`runbooks/daily-workflow.md`](../runbooks/daily-workflow.md)), so nothing reaches the shared vault without someone having looked at `git status` first.
-
-**Install `pre-commit` alongside this hook, not as a separate optional extra.** The auto-commit above is a plain `git commit`, which triggers whatever `pre-commit` hook is installed, same as any commit — but if you've installed `post-merge` without also installing `pre-commit`, that auto-commit has no secret-scanning at all. The output-validation check earlier only confirms *which* file the run touched, never *what's in it*; a real secret written into the doc by an unattended run would sail straight into local history unscanned. Install both in the same pass:
+**Install `pre-commit` alongside it.** The auto-commit is a plain `git commit`, so it triggers whatever `pre-commit` hook is installed. Without one, a secret written into the doc by an unattended run would reach local history unscanned.
 
 ```bash
-cp tools/hook-templates/post-merge .git/hooks/post-merge
 cp tools/hook-templates/pre-commit .git/hooks/pre-commit
-chmod +x .git/hooks/post-merge .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
 ```
 
-**Installing this into a repo other than the vault itself, deliberately:** the repo name and doc target auto-derive from wherever the hook is actually installed (the name of its own folder, lowercased unless `repoNameCase: keep` is set in [`vault-config.md`](vault-config.md); the git remote's name is not used), so copying it unmodified into another repo's `.git/hooks/post-merge` already names and targets that repo correctly. The one thing that never auto-derives is `VAULT_ROOT` at the top of the script — set it as an environment variable (or edit the script's own default) to an explicit absolute path to your vault's own checkout, since the default (deriving from the current repo) would otherwise resolve to that *other* repo, not the vault. `HOOK_LOG_DIR`, `MCP_CONFIG`, `TIMEOUT_SECS`, `RETRY_DELAY`, and `KILL_SWITCH` are all environment-overridable the same way, mainly useful for the test suite below rather than day-to-day use. The hook also refuses to run at all until `repos/<that-repo>/index.md` already exists in the vault — bootstrap it once via `/vault-populate` (or ask your assistant directly) before installing this hook; it refines an existing doc rather than creating one from nothing. That same check is also what catches a forgotten `VAULT_ROOT` edit: it fails safe (logs and exits) rather than silently running against the wrong repo.
+**What success looks like.** After the next pull that changes something relevant, a log appears at `~/.claude/hook-logs/<repo>-post-merge.log`, and for a git vault a local commit titled `Auto-update repos/<repo>/index.md via post-merge hook (<sha>)` shows in `git -C <vault> log`. A run that failed also adds a line to `~/.claude/hook-logs/FAILURES.log`, which the hook shows once at the start of the next run. Nothing is pushed.
 
-**What it writes:** the doc's frontmatter carries `last-populated`, `source-commit` and the tags `repo-doc` and the repo name; the hook keeps those current and never changes the `## Hand-written notes` section.
+**What the run is allowed to do.** The run uses `--restricted`, which `claude --help` describes as removing the code-running tools, confining the file tools to the working directories, and ignoring user, project and local settings files. Combined with an explicit minimal `--mcp-config` and `--strict-mcp-config` pair, the run has only the vault tools it needs. Every changed filename is passed as untrusted data, in a fenced JSON block, rather than as an instruction. Names that look like secrets (`.env`, keys, `credentials.json`, `*.tfvars`, `.npmrc` and similar) are dropped before the model sees the list. If a future `claude` release rejected `--restricted`, the hook logs that fact with the CLI version in `FAILURES.log`.
 
-**Per-vault settings:** `post-merge` also reads the optional [`vault-config.md`](vault-config.md) (`reposPath` for where the doc lives, `repoNameCase` for how the repo is named, `backend` for which MCP tool names the run may use), and finds the vault in this order: the `VAULT_ROOT` environment variable; the repo it is installed in, when that repo's path is listed in `~/.claude/hook-configs/vault-root`; the first line of that file; the repo itself. The file holds one vault path per line. Git runs hooks without `VAULT_ROOT` set, so the order matters: a vault that is listed documents into itself even when the first line names a different vault. The check is against the file, never against what the repo contains, so a pull cannot turn a repo into its own vault by adding a `vault-config.md`. The hook's MCP config (`~/.claude/hook-configs/obsidian-mcp-config.json`) names one Obsidian server, and the Local REST API plugin serves only the vault that Obsidian window has open, so a `post-merge` hook for a vault that is not the open one is expected to fail its write check and leave the doc unchanged. That case has not been run against a real pull. Set `MCP_CONFIG` per repo, pointing at a server for that vault, if you need it. If the vault is **not a git repo** it only flags unexpected writes (never reverts, removes or commits), see [Hooks in `vault-config.md`](vault-config.md#hooks).
+**What it checks afterwards.** Independently of what the run says about itself, the hook compares the vault's `git status` before and after (file modification times, for a vault that is not a git repo).
 
-**Stopping it:** create `~/.claude/hook-templates/DISABLED` (any content) to stop the hook in every repo on the machine at once, or `~/.claude/hook-logs/.<repo>.disabled` to stop it in one.
+- Anything new outside the doc is **flagged, never undone**. The paths go into the log and `FAILURES.log`, and the run is recorded with exit code 3.
+- The hook cannot tell the model's write from a note you or another session wrote in the same minutes, so deleting or reverting by guesswork could destroy real work.
+- Check with `git -C <vault> status`, then commit or discard what you find.
 
-**Testing this hook:** `bash tools/hook-templates/test-post-merge.sh` is a real, isolated test suite covering the branch guard, the diff filter (every kind of noise and secret-shaped file, one by one), the kill switch, the `jq`-fencing requirement, the retry-on-127 behaviour, the prompt and arguments sent to `claude`, the run log, the local-only commit, the failures log, repo-name derivation, and the output-validation logic in detail, including the new-file-vs-modified-file distinction above, plus a vault that is not a git repo, a configurable doc path, `VAULT_ROOT_FILE`, and both MCP backends. It builds its own temp git fixtures and a stub `claude` binary, nothing it does touches this machine's real vault or logs. Worth running after any edit to `post-merge` itself, it caught two real bugs during development (see the `post-merge` script's own comments on the output-validation section for the details) that comments and manual testing alone had missed. It takes several minutes on Windows. See [`testing.md`](testing.md).
+A successful update is **auto-committed locally**, only the doc itself, and never pushed. Pushing stays a manual, human-reviewed step (see [`daily-workflow.md`](../runbooks/daily-workflow.md)). A stray write elsewhere in the vault therefore stays uncommitted for you to look at.
 
-### `session-start-vault-check` — unpushed-commit reminder
+**Installing it in a repo other than the vault.** The repo name and doc target derive from the folder the hook is installed in (lowercased unless `repoNameCase: keep` is set in [`vault-config.md`](vault-config.md); the git remote is never used), so copying the file unchanged into another repo already targets that repo. The vault location does not derive that way. `VAULT_ROOT` is resolved in this order:
 
-The gap this closes: a `post-merge` hook running in some *other* repo can auto-commit a doc update into this vault as a background side effect, on a day you never consciously open this vault at all. Nothing about "I finished working in repo X" naturally surfaces "the vault now has an unpushed commit" — this hook is how you'd still find out. It never pushes anything itself, only reminds.
+1. the `VAULT_ROOT` environment variable;
+2. the repo's own root, if its path is listed in `~/.claude/hook-configs/vault-root` (a repo that is itself one of your vaults documents itself);
+3. the first line of `vault-root`;
+4. the repo's own root.
 
-Because it needs to fire regardless of which repo you're actually in, it can't live in this repo's own project-level settings — it's a one-time, per-machine step in your **user-scope** Claude Code settings (typically `~/.claude/settings.json`), registered twice: once under `SessionStart` (fires at the start of every session, anywhere), and once under `PostToolUse` (fires periodically during a long session that never restarts, throttled so it nags rather than spams):
+Git runs hooks without `VAULT_ROOT` set, so the order matters: a vault that is listed documents into itself even when the first line names a different vault. The check is against the file, never against what the repo contains, so a pull cannot turn a repo into its own vault by adding a `vault-config.md`.
+
+If `VAULT_ROOT` is wrong, the check for the repo doc catches it: the hook logs and exits rather than running against the wrong repo.
+
+**One Obsidian server per hook config.** The hook's MCP config (`~/.claude/hook-configs/obsidian-mcp-config.json`) names one Obsidian server, and the Local REST API plugin serves only the vault that Obsidian window has open. A `post-merge` hook for a vault that is not the open one is therefore expected to fail its write check and leave the doc unchanged. That case has not been run against a real pull. Set `MCP_CONFIG` per repo, pointing at a server for that vault, if you need it.
+
+**What it writes.** The doc's frontmatter carries `last-populated`, `source-commit` and the tags `repo-doc` and the repo name. The hook keeps those current and never changes the `## Hand-written notes` section.
+
+**Per-vault settings.** `reposPath`, `repoNameCase` and `backend` in [`vault-config.md`](vault-config.md) apply here too. For a vault that is not a git repo, see [Hooks in `vault-config.md`](vault-config.md#hooks).
+
+**Overrides.** `HOOK_LOG_DIR`, `MCP_CONFIG`, `TIMEOUT_SECS`, `RETRY_DELAY` and `KILL_SWITCH` can be set as environment variables, mainly for the tests.
+
+**Stopping it.** Create `~/.claude/hook-templates/DISABLED` (any content) to stop the hook in every repo on the machine, or `~/.claude/hook-logs/.<repo>.disabled` to stop it in one.
+
+Test it with `bash tools/hook-templates/test-post-merge.sh`. It builds its own temporary git fixtures and a stub `claude`, so it touches nothing real, and it takes several minutes on Windows. See [`testing.md`](testing.md).
+
+### `pre-push`: a nudge while you are already pushing
+
+A genuine git `pre-push` hook. It warns, never blocks, if the vault has unpushed commits at the moment you push something else, when you are already in a pushing frame of mind.
+
+```bash
+cp tools/hook-templates/pre-push .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+```
+
+- It stays silent if the repo being pushed is the vault, and throttles repeat warnings to one every ten minutes.
+- It reads the vault's default branch from `origin/HEAD` (falling back to `main`).
+- It sources `vault-lib` from next to itself or from `~/.claude/hook-templates/`, where the installer puts it. An installed copy under `.git/hooks` has no neighbour, so run the installer, or copy `vault-lib` into `~/.claude/hook-templates/` by hand. If it cannot find the helper it exits quietly, so a push is never held up.
+
+Test it with `bash tools/hook-templates/test-pre-push.sh`. See [`testing.md`](testing.md).
+
+## Installing session hooks
+
+A **session hook** is registered in a Claude Code settings file instead of being copied into `.git/hooks/`, so there is no `chmod +x`. Settings changes take effect in a new session.
+
+### `session-start-vault-check`: unpushed-commit reminder
+
+A `post-merge` run in some other repo can auto-commit a doc update into the vault on a day you never open the vault. This hook is how you still find out. It only reminds. It never pushes.
+
+It has to fire whatever repo you are in, so it is registered in your **user-scope** Claude Code settings (typically `~/.claude/settings.json`), twice: under `SessionStart`, and under `PostToolUse`, where it is throttled to once an hour so a long session is nudged rather than spammed. A session start is never throttled.
 
 ```json
 {
@@ -129,15 +245,40 @@ Because it needs to fire regardless of which repo you're actually in, it can't l
 }
 ```
 
-Replace both `<path-to-your-vault-clone>` placeholders with your real, absolute vault path — this script can't derive it from the current working directory the way `post-merge` can, since it's designed to fire from sessions in *other* repos. Merge this into your existing settings file rather than overwriting it if you already have other hooks configured there. Requires a restart to take effect.
+Replace both placeholders, in both entries, with your absolute vault path. This script cannot derive it from the working directory, because it is meant to fire from other repos. Merge the entry into your existing settings rather than overwriting them.
 
-**Testing this hook:** `bash tools/hook-templates/test-session-start-vault-check.sh`. It builds a vault with a local bare `origin` so there is a real unpushed gap, and covers the silent cases, the count, hashes and commands in the reminder, that commit subjects are never echoed, that `SessionStart` is never throttled while `PostToolUse` is (including both sides of the cooldown), `compact`, and failing open without `jq` or on bad input. See [`testing.md`](testing.md).
+To check it, leave a commit unpushed in the vault, then start a session in any other repo. The session opens with a note that the vault has unpushed commits, with their short hashes and the push command.
 
-### `session-start-vault-context` — auto-load a repo's own vault context
+It uses the vault's default branch from `origin/HEAD` (falling back to `main`) through `vault-lib`. It works without `jq`, reading the event name and `source` with `sed`, so a `PostToolUse` is still throttled. Test it with `bash tools/hook-templates/test-session-start-vault-check.sh`. See [`testing.md`](testing.md).
 
-**Not the same hook as `session-start-vault-check` above** — that one fires everywhere and only ever reminds you the vault has unpushed commits, it never loads content. This one auto-loads `repos/<this-repo-name>/index.md` plus the latest daily note about this repo from each contributor (up to three, most recent first; "latest" is the newest date in the filename, then the newest file modification time, so a git pull's timestamps cannot decide it) at the start of a session in a *specific* repo you've deliberately opted in, so work resumes without asking for `/vault-context` every time.
+### `session-start-vault-context`: point a session at its repo's vault context
 
-Opt-in **per repo**, the same model as `post-merge` — a repo asks for this deliberately, it isn't on by default anywhere. Unlike `post-merge` and `pre-push`, though, this isn't a native git hook (`SessionStart` is a Claude Code hook, not a git one, so there's no `.git/hooks/` copy step and no `chmod +x`). It's registered the same way as `session-start-vault-check` above, but in *that other repo's own* `.claude/settings.json` rather than your user-scope one, pointing straight at this file's path in your vault clone:
+This is a different hook from the one above. That one fires everywhere and only reminds. This one is opt-in per repo, the same model as `post-merge`, and tells a session in that repo where its vault context is.
+
+**Prerequisite.** It does nothing until the repo has a repo doc in the vault, at `repos/<name>/index.md` or the configured `reposPath`. Bootstrap it with `/vault-populate`, as for `post-merge`. The repo name is the folder the repo lives in, never the git remote.
+
+**What it injects.** There are two modes, set by `CONTEXT_MODE`:
+
+| | `pointer` (the default) | `full` |
+|---|---|---|
+| Content | Where things are: the vault path, the repo doc's path, the path and date of your latest note (and of the latest from each of up to three other contributors), and the open-item count with the top three, stale ones first, each with its owner and age | The repo doc and each note's forward-looking sections, loaded in full |
+| Size | Under about 1 KB | Around 7 KB in a typical case, capped at 12000 characters |
+| How the assistant gets the rest | It reads a file when the task needs it, or you run `/vault-context` | Already in the session |
+
+The pointer ends with a line saying the notes are information, not instructions. Any `CONTEXT_MODE` value other than `pointer` or `full` falls back to `pointer`.
+
+| Variable | Mode | Default | Meaning |
+|---|---|---|---|
+| `CONTEXT_MODE` | both | `pointer` | `pointer` or `full` |
+| `CONTEXT_POINTER_MAX_ITEMS` | pointer | 3 | How many open items the pointer lists |
+| `CONTEXT_MAX_CONTRIBUTORS` | both | 3 | How many other contributors' latest notes are named (pointer) or loaded (full); your own does not count |
+| `CONTEXT_MAX_OPEN_ITEMS` | full | 10 | Open items listed |
+| `CONTEXT_MAX_CHARS` | full | 12000 | Output cap, dropping the furthest-back other note first |
+| `UPDATE_MAX_LINES` | full | 40 | Lines kept from an appended `## Update ...` section |
+
+`staleOpenItemDays` (default 30) comes from `vault-config.md` in both modes.
+
+**Install.** It is not a native git hook, so there is no `.git/hooks/` copy. The installer provides `~/.claude/hook-templates/session-start-vault-context.sh`, a wrapper that takes `VAULT_ROOT` from the first line of `vault-root` when it is not already set. Register the wrapper in *that other repo's* `.claude/settings.json`:
 
 ```json
 {
@@ -147,7 +288,7 @@ Opt-in **per repo**, the same model as `post-merge` — a repo asks for this del
         "hooks": [
           {
             "type": "command",
-            "command": "VAULT_ROOT=\"<path-to-your-vault-clone>\" bash \"<path-to-your-vault-clone>/tools/hook-templates/session-start-vault-context\""
+            "command": "bash \"$HOME/.claude/hook-templates/session-start-vault-context.sh\""
           }
         ]
       }
@@ -156,30 +297,29 @@ Opt-in **per repo**, the same model as `post-merge` — a repo asks for this del
 }
 ```
 
-Because Claude Code project settings **are** version-controlled (unlike `.git/hooks/`, which never are), this can genuinely be committed into that other repo's own tracked `.claude/settings.json` and shared with the whole team in one commit — but only if `VAULT_ROOT` resolves the same way on every contributor's machine (e.g. everyone clones the vault to the same path by convention). If your team's vault path isn't consistent across machines, keep this a manual per-machine step instead, the same as `session-start-vault-check`.
+Claude Code project settings are version-controlled, so this can be committed and shared with a team, as long as every contributor has run the installer. Without the installer, point the command at the `session-start-vault-context` file in your vault clone and set `VAULT_ROOT` in the command, as for the reminder hook above.
 
-Silent no-op until that repo already has a `repos/<name>/index.md` in the vault (or the doc at the vault's configured `reposPath`) — bootstrap it first via `/vault-populate`, same precondition as `post-merge`. Where that doc and the daily notes live, how notes are named and how the repo name is cased can be set per vault in the optional [`vault-config.md`](vault-config.md). The repo name is the folder the repo lives in (not its git remote), and it loads **your** latest note for this repo in full and the latest from each of up to three other contributors in a shorter form (`CONTEXT_MAX_CONTRIBUTORS`, which does not count your own note), then lists the open `- [ ]` items from all of them once, stale ones first, each with its owner (`CONTEXT_MAX_OPEN_ITEMS`, default 10; `staleOpenItemDays`, default 30, from `vault-config.md`). `CONTEXT_MAX_CHARS` (default 12000) bounds the output by dropping the furthest-back other note first. A repo with no notes yet gets the newest older note that has no repo in its filename, labelled as such, so a vault in the old naming keeps working. You still see where the last work on the repo got to even when someone else did it. If a note also has appended `## Update ...` sections (what `/vault-log` adds when a note for the same session already exists), the most recent one is loaded too (capped at 40 lines, override with `UPDATE_MAX_LINES`) with a count of earlier ones left out, since an append can't rewrite the two forward-looking sections. `bash tools/hook-templates/test-session-start-vault-context.sh` tests the defaults, the config keys, the update handling, the open-item list and the size budget. Also silently skips on `resume` and on a mid-session `/compact` (its own summary already carries whatever this injected earlier), and fails open — still injects — on malformed or missing stdin, rather than risk silently going dark on a genuine session start.
+**What success looks like.** A new session in that repo starts with a block headed `--- Vault context for <repo> (auto-loaded) ---`. If nothing appears, the usual causes are a missing repo doc, a settings file that is not in that repo's `.claude/`, or a session that was resumed.
 
-Reads the vault directly off disk, same deliberate MCP-only exception as `session-start-vault-check`: this runs before the model's own tool-calling loop begins.
+**Details that explain what you see.**
 
-### `pre-push` — a nudge at the moment you're already pushing
+- It skips a `resume` and a mid-session `/compact`, whose own summary already carries what it injected earlier. It still injects when its input is malformed or missing, rather than go quiet on a genuine session start.
+- It reads the vault directly off disk, the same deliberate exception to the MCP-only convention as the reminder hook, because it runs before the model's tool loop starts.
+- A repo with no notes yet gets the newest older note that has no repo in its filename, labelled as such, so a vault in the old naming keeps working.
 
-A genuine git `pre-push` hook: warns (never blocks) if the vault has unpushed commits sitting around, at the exact moment you push something else — on the theory that you're already in a "pushing" mindset right then, so the reminder is more likely to actually get acted on.
+Test it with `bash tools/hook-templates/test-session-start-vault-context.sh`. See [`testing.md`](testing.md).
 
-```bash
-cp tools/hook-templates/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-push
-```
+### `vault-lib`: shared helpers
 
-Stays silent if the repo you're actually pushing *is* the vault — its own unpushed commits are exactly what that push is about to send.
+Two functions, sourced by `pre-push` and `session-start-vault-check` so that there is one copy to fix: `vault_branch` (the vault's default branch from `origin/HEAD`, else `main`) and `vault_unpushed_hashes` (short hashes only, never commit subjects, which anyone who can commit chooses). Test it with `bash tools/hook-templates/test-vault-lib.sh`.
 
-**Testing this hook:** `bash tools/hook-templates/test-pre-push.sh`. It checks that the hook always exits 0, speaks only on stderr, stays silent unless there is really something unpushed, throttles repeat warnings (both sides of the cooldown), never echoes commit subjects, and works as a real installed hook during a real `git push`. See [`testing.md`](testing.md).
+## Why there is no auto-push
 
-### Why not just auto-push?
+Deliberately rejected. Having a hook push its own commit would remove the one human-review checkpoint the "no PR gate" model depends on (see [Push policy](../runbooks/using-the-vault.md#push-policy-direct-to-main-no-required-pr)), for AI-generated content going into a shared knowledge base. It would also risk unattended non-fast-forward races between people's machines.
 
-Deliberately rejected. Having a hook push its own commit immediately would remove the one human-review checkpoint the whole "no PR gate" governance model depends on (see [Push policy](../runbooks/using-the-vault.md#push-policy-direct-to-main-no-required-pr)) — specifically for AI-generated content landing in a shared knowledge base — and risks unattended non-fast-forward races between multiple people's machines with nobody there to resolve them. These hooks shrink the window an update can sit unpushed and unseen; they don't close it completely. Someone who goes quiet across every repo for a long stretch is still a blind spot, and that's an accepted, known limitation rather than something solved here.
+The hooks shrink the window in which an update sits unpushed and unseen, and do not close it. Someone who goes quiet across every repo for a long stretch is still a blind spot, and that is an accepted limitation.
 
-### Working across more than one vault
+## Working across more than one vault
 
 If you work in two team vaults, register the vault hooks once per vault, in user-scope `~/.claude/settings.json`, each entry with its own `VAULT_ROOT`:
 
@@ -207,13 +347,9 @@ Add the two `session-start-vault-check` entries under `PostToolUse` as well, as 
 
 The hooks that talk to Obsidian (`post-merge`) and your interactive session reach whichever vault Obsidian has open, through one `obsidian` MCP server. Set up the shared key and port, and open the right vault before you work, as described in [Using more than one vault on one machine](mcp-setup.md#using-more-than-one-vault-on-one-machine-optional).
 
-## Related
+## Running the model-driven test harness from GitHub Actions (optional)
 
-- [`statusline.md`](statusline.md) — an optional status line for Claude Code, separate from the vault commands and hooks
-- [`../runbooks/using-the-vault.md`](../runbooks/using-the-vault.md) — the manual workflows this automates
-- [`../runbooks/daily-workflow.md`](../runbooks/daily-workflow.md) — where hooks fit into an actual session, and the worked example of catching up on unpushed commits
-
-## Running the model-driven harness from GitHub Actions (optional)
+This section is for a repository admin who wants to run the command tests on GitHub. Skip it otherwise.
 
 `tools/command-templates/test/run-command-tests.mjs` makes real `claude -p` calls, so it is not part of the automatic CI checks. `.github/workflows/model-harness.yml` runs it on demand, using a Claude subscription token. This repository is public, so the setup keeps that token away from anything but a deliberate, approved run on `main`.
 
@@ -229,7 +365,15 @@ One-time setup (repository admin):
    A repository-level secret with the same name would also be readable from any branch, which defeats the environment, so delete it if one exists (`gh secret delete CLAUDE_CODE_OAUTH_TOKEN --repo <owner>/<repo>`).
 3. Run it from **Actions → model harness (manual) → Run workflow** on `main`, pick a scenario (start with one), and approve the pending deployment.
 
-What the workflow does and does not allow: it only starts from `workflow_dispatch`; it refuses to run off `main` or for another actor; inputs are fixed choices; permissions are read-only; actions and the `claude` CLI version are pinned; it uses the stub REST API backend only, so nothing is fetched from a package registry at run time; and it has a 30-minute limit and one run at a time. The token is visible to the `claude` process during a run, so only run scenarios you have read. Revoke the token and delete the environment secret if you stop using this.
+What the workflow does and does not allow:
+
+- It only starts from `workflow_dispatch`, and refuses to run off `main` or for another actor.
+- Inputs are fixed choices, and permissions are read-only.
+- Actions and the `claude` CLI version are pinned.
+- It uses the stub REST API backend only, so nothing is fetched from a package registry at run time.
+- It has a 30-minute limit and one run at a time.
+
+The token is visible to the `claude` process during a run, so only run scenarios you have read. Revoke the token and delete the environment secret if you stop using this.
 
 ## Bot reviewer for pull requests (optional)
 
@@ -237,4 +381,18 @@ GitHub does not let you approve your own pull request, and a solo repository has
 
 It reuses the `model-harness` environment and `CLAUDE_CODE_OAUTH_TOKEN` secret from the section above, so there is nothing new to set up. Run it from **Actions → bot review (manual) → Run workflow** on `main`, give the pull request number, and approve the pending deployment.
 
-Because this repository is public and a pull request is untrusted text, it is built to keep the token away from it: it starts only from `workflow_dispatch`, runs only on `main` for the owner, and fetches the diff as a file without checking out or running the branch. The step that holds the token has read-only permissions and only the `Read` tool. A second job, which never sees the token, has `pull-requests: write` and posts the comment. The diff is cut at 200 KB and the comment at 6000 characters. Treat the review like any other model output: it can miss things and it can be wrong. `tools/testing/test-structure.sh` checks that these properties still hold.
+Because this repository is public and a pull request is untrusted text, it is built to keep the token away from it:
+
+- It starts only from `workflow_dispatch`, runs only on `main` for the owner, and fetches the diff as a file without checking out or running the branch.
+- The step that holds the token has read-only permissions and only the `Read` tool, with the runner's credential and config folders denied by path.
+- A second job, which never sees the token, has `pull-requests: write` and posts the comment.
+- The diff is cut at 400 KB and the comment at 6000 characters. The model is told to read the diff in chunks to its last line and to say if it could not. A very large pull request can still go unreviewed in part, so keep them small or split them.
+
+Treat the review like any other model output: it can miss things and it can be wrong. `tools/testing/test-structure.sh` checks that these properties still hold.
+
+## Related
+
+- [`statusline.md`](statusline.md): an optional status line for Claude Code, separate from the vault commands and hooks
+- [`vault-config.md`](vault-config.md): per-vault settings the commands and hooks read
+- [`../runbooks/using-the-vault.md`](../runbooks/using-the-vault.md): the manual workflows this automates
+- [`../runbooks/daily-workflow.md`](../runbooks/daily-workflow.md): where hooks fit into a real session, and the worked example of catching up on unpushed commits
