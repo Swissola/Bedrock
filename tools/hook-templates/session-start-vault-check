@@ -52,7 +52,10 @@ LAST_CHECK_FILE="$STATE_DIR/.vault-nudge-last-check"
 # Shared helpers (default branch, unpushed commits). Missing means no reminder, never an error.
 vault_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/vault-lib"
 [[ -f "$vault_lib" ]] || vault_lib="$HOME/.claude/hook-templates/vault-lib"
-[[ -f "$vault_lib" ]] || exit 0
+if [[ ! -f "$vault_lib" ]]; then
+    echo "session-start-vault-check: vault-lib not found next to this hook or in ~/.claude/hook-templates, so the unpushed-vault-commits reminder is skipped. Run tools/install-claude-config.sh to install it." >&2
+    exit 0
+fi
 # shellcheck source=vault-lib
 . "$vault_lib"
 

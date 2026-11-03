@@ -101,7 +101,7 @@ The hook warns, never blocks, when the vault has commits not yet on origin at th
 | `multi_ref_stdin_is_consumed_without_hanging` | The several lines git sends on stdin do not hang or break it. |
 | `empty_stdin_still_works` | Nothing on stdin still works. |
 | `installed_as_a_real_hook_warns_but_the_push_succeeds` | Installed as `.git/hooks/pre-push` with `vault-lib` in `~/.claude/hook-templates`, a real `git push` succeeds, the warning reaches the terminal and the other repo's commits arrive. |
-| `an_installed_copy_without_the_helper_stays_quiet_and_the_push_succeeds` | With no `vault-lib` anywhere, the push still succeeds and nothing is printed. |
+| `an_installed_copy_without_the_helper_stays_quiet_and_the_push_succeeds` | With no `vault-lib` anywhere, the push still succeeds and stderr says the reminder is skipped and why. |
 
 ### `tools/hook-templates/test-session-start-vault-check.sh`: the `session-start-vault-check` hook
 
@@ -127,6 +127,7 @@ The hook reminds you, at session start and (throttled) after tool calls, that th
 | `throttled_post_tool_use_still_reminds_at_next_session_start` | Being throttled on tool calls never silences the next session start. |
 | `without_jq_a_post_tool_use_is_still_throttled` / `without_jq_a_session_start_still_reminds_inside_the_cooldown` | No `jq`: the event name is read with `sed`, so a periodic check is throttled and a session start never is. |
 | `without_jq_compact_is_still_skipped` | No `jq`: `compact` is still recognised and skipped. |
+| `without_the_helper_it_says_so_and_stays_out_of_the_way` | A copy of the hook with no `vault-lib` next to it or in `~/.claude/hook-templates` exits 0, prints nothing on stdout (so nothing reaches the model) and says why on stderr. |
 | `reminds_for_a_vault_whose_default_branch_is_not_main` | A vault whose `origin/HEAD` names `trunk` gets its unpushed commits reported, naming the branch. |
 | `malformed_stdin_still_checks` / `empty_stdin_still_checks` | Bad or missing input fails open. |
 | `json_without_an_event_name_is_treated_as_unthrottled` | JSON with no `hook_event_name` is treated like a session start. |
@@ -414,6 +415,7 @@ Checks that no single suite can make:
 - the installer's hook list matches the hooks that exist;
 - every suite is in `run-all-tests.sh`, in a CI workflow and in this page;
 - every shell script parses, has LF endings, is tracked as executable and has `eol=lf` in `.gitattributes`; JavaScript (including the status line files) and PowerShell files parse; the example wiki config is valid;
+- the bot review marks a diff it had to cut: the workflow's own fetch snippet is run with a stub `gh` at 399999, 400000 and 400001 bytes;
 - the bot review workflow stays locked down: manual trigger only, the `Read` tool only, the token present only in the review job, write permission only on the posting job, every action pinned, each of the specific read denies present (and `/home` as a whole not denied, because that hides the checkout), and `persist-credentials: false`;
 - every command template carries a version stamp;
 - the test scripts use nothing that the macOS system bash (3.2) lacks, and none of the GNU-only commands (`touch -d`, `readlink -f`, `date -d` without a fallback, `sed -i` without a suffix) that would fail there;

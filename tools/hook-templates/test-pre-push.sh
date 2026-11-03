@@ -451,7 +451,8 @@ test_an_installed_copy_without_the_helper_stays_quiet_and_the_push_succeeds() {
   ( cd "$OTHER" && env HOME="$FAKE_HOME" VAULT_ROOT="$VAULT" git push -q origin main ) > "$OUT" 2> "$ERR"
   STATUS=$?
   assert_eq "no helper installed: the push still succeeds" "0" "$STATUS"
-  assert_silent "no helper installed: no warning, no error" "$ERR"
+  assert_has "no helper installed: says why the reminder is skipped" "$ERR" "vault-lib not found"
+  assert_lacks "no helper installed: and gives no unpushed-commit warning" "$ERR" "$UNPUSHED_TEXT"
   drop_workdir
   return $?
 }

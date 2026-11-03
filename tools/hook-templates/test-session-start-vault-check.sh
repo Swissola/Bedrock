@@ -225,6 +225,22 @@ test_reminds_for_a_vault_whose_default_branch_is_not_main() {
   return $?
 }
 
+test_without_the_helper_it_says_so_and_stays_out_of_the_way() {
+  local lone
+  new_workdir
+  vault_ahead 1
+  lone="$WORK/lone"; mkdir -p "$lone"
+  cp "$HOOK_SCRIPT" "$lone/session-start-vault-check"
+  : > "$OUT"; : > "$ERR"
+  ( cd "$WORK" && printf '%s' "$START" | env HOME="$FAKE_HOME" VAULT_ROOT="$VAULT" bash "$lone/session-start-vault-check" ) > "$OUT" 2> "$ERR"
+  STATUS=$?
+  assert_eq "no helper: exit 0" "0" "$STATUS"
+  assert_silent "no helper: nothing on stdout, so nothing reaches the model" "$OUT"
+  assert_has "no helper: stderr says why" "$ERR" "vault-lib not found"
+  drop_workdir
+  return $?
+}
+
 test_silent_when_vault_has_no_main_branch() {
   new_workdir
   init_repo "$VAULT" trunk
@@ -515,6 +531,7 @@ test_json_without_an_event_name_is_treated_as_unthrottled() {
 test_silent_and_exit_0_when_vault_root_cannot_be_derived
 test_silent_and_exit_0_when_the_vault_is_not_a_git_repo
 test_silent_when_vault_has_no_main_branch
+test_without_the_helper_it_says_so_and_stays_out_of_the_way
 test_reminds_for_a_vault_whose_default_branch_is_not_main
 test_silent_when_vault_has_no_origin
 test_in_sync_is_silent_but_records_that_a_check_ran

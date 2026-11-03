@@ -34,7 +34,7 @@
 # `git pull` (and a fast-forward `pull --rebase`) fires post-merge. A `pull --rebase` that has
 # local commits to replay fires only post-rewrite, with the argument "rebase" and the rewritten
 # commits on stdin, so without the second copy the hook silently never runs for people who pull
-# with rebase. post-rewrite also fires for `commit --amend`, which is ignored here.
+# with rebase. post-rewrite also fires for `commit --amend`, which is ignored here. It also fires for any `git rebase`, including an interactive one over purely local commits; on the default branch that sends the rewritten range to the model, which is accepted as harmless.
 #
 # That auto-commit only gets secret-scanned if tools/hook-templates/pre-commit
 # is ALSO installed in this vault repo's .git/hooks/pre-commit - a plain
@@ -493,7 +493,7 @@ EOF
 
     if [ "$exit_code" -ne 0 ]; then
         echo "$(date -Iseconds) $REPO_NAME exit=$exit_code see $REPO_LOG" >> "$FAILURES_LOG"
-        # --restricted is listed in `claude --help` (checked on 2.1.317): no code-running tools,
+        # --restricted is listed in `claude --help` (checked on 2.1.291 and 2.1.317): no code-running tools,
         # file tools confined to the working directories, user, project and local settings
         # ignored. The hook's safety rests on it, so if a release ever drops or renames it, say
         # so plainly, with the version, rather than leaving an "unknown option" line buried in a

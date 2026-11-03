@@ -228,6 +228,32 @@ test_the_bot_review_credential_guard_ignores_long_paths_but_catches_secrets() {
   return 0
 }
 
+test_the_bot_review_marks_a_diff_it_had_to_cut() {
+  # Runs the workflow's own fetch snippet with a stub `gh`, at each side of the 400000 byte limit.
+  local wf="$ROOT/.github/workflows/pr-review.yml" snippet work size got marked
+  snippet=$(awk '/gh pr diff/ { on = 1 } on { print } on && /^          fi$/ { exit }' "$wf" | sed -E 's/^          //')
+  assert_eq "the fetch snippet is found in the workflow" "yes" "$([[ -n "$snippet" ]] && echo yes || echo no)"
+  work=$(mktemp -d)
+  mkdir -p "$work/bin" "$work/tmp/review" "$work/repo/.review-input"
+  printf '#!/bin/bash\ncat "$STUB_DIFF"\n' > "$work/bin/gh"; chmod +x "$work/bin/gh"
+  for size in 399999 400000 400001; do
+    head -c "$size" /dev/zero | tr '\0' 'a' > "$work/in.diff"
+    ( cd "$work/repo" && env PATH="$work/bin:$PATH" STUB_DIFF="$work/in.diff" PR=1 GITHUB_REPOSITORY=o/r RUNNER_TEMP="$work/tmp" bash -c "$snippet" ) >/dev/null 2>&1
+    got=$(wc -c < "$work/repo/.review-input/pr.diff" | tr -d ' ')
+    marked=$(grep -qF 'diff truncated' "$work/repo/.review-input/pr.diff" && echo yes || echo no)
+    if [[ "$size" -le 400000 ]]; then
+      assert_eq "a $size byte diff is passed on whole" "$size" "$got"
+      assert_eq "...with no truncation notice" "no" "$marked"
+    else
+      assert_eq "a $size byte diff is cut to 400000 bytes plus the notice" "yes" "$([[ "$got" -gt 400000 && "$got" -lt 400200 ]] && echo yes || echo no)"
+      assert_eq "...and the notice is in the file the model reads" "yes" "$marked"
+      assert_eq "...and the first 400000 bytes are the diff itself" "400000" "$(head -c 400000 "$work/repo/.review-input/pr.diff" | tr -cd 'a' | wc -c | tr -d ' ')"
+    fi
+  done
+  rm -rf "$work"
+  return 0
+}
+
 test_every_command_template_carries_a_version_stamp() {
   local f
   for f in "$TOOLS_DIR"/command-templates/*.md; do
@@ -359,6 +385,7 @@ test_mutation_config_is_well_formed_and_every_mutant_applies
 test_the_manual_workflow_offers_exactly_the_mutation_groups
 test_the_bot_review_workflow_stays_locked_down
 test_the_bot_review_credential_guard_ignores_long_paths_but_catches_secrets
+test_the_bot_review_marks_a_diff_it_had_to_cut
 test_shellcheck_reports_no_warnings
 
 echo "--- $PASS passed, $FAIL failed, $SKIPS skipped ---"
