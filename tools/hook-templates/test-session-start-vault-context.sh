@@ -1977,17 +1977,25 @@ test_behind_flag_ignores_context_mode() {
 }
 
 test_behind_flag_never_waits_for_stdin() {
-  local repo vault out started
+  local repo vault out outfile pid waited=0 exited=no
   repo=$(fx_repo widget); vault=$(fx_vault)
   fx_alice_note "$vault" 2026-10-08 202610080900
   fx_commit "$repo" 2026-10-09T12:00:00+0000
   fx_commit "$repo" 2026-10-10T12:00:00+0000
-  started=$SECONDS
-  # stdin stays open and silent for 20 seconds (the sleep holds the write end of the pipe, so only
-  # its stderr is silenced): a hook that read stdin would wait that long.
-  out=$( cd "$repo" && env VAULT_ROOT="$vault" TZ=UTC CONTEXT_TODAY=2026-10-10 bash "$HOOK_SCRIPT" --behind 2>&1 < <(sleep 20 2>/dev/null) )
+  outfile="$vault/behind-stdin.out"
+  # stdin stays open and silent for 20 seconds. The hook runs in the background and writes to a file,
+  # so nothing here waits on the pipe: a hook that read stdin would still be running after 10 seconds.
+  ( cd "$repo" && exec env VAULT_ROOT="$vault" TZ=UTC CONTEXT_TODAY=2026-10-10 bash "$HOOK_SCRIPT" --behind > "$outfile" 2>&1 < <(sleep 20 2>/dev/null) ) &
+  pid=$!
+  while [[ "$waited" -lt 50 ]]; do
+    if ! kill -0 "$pid" 2>/dev/null; then exited=yes; break; fi
+    sleep 0.2
+    waited=$((waited + 1))
+  done
+  [[ "$exited" = yes ]] || kill "$pid" 2>/dev/null
+  out="$(cat "$outfile" 2>/dev/null)"
   assert_eq "the line still comes out" "$BEHIND_TWO_LINE" "$out"
-  assert_eq "...without waiting for stdin to close" "yes" "$([[ $((SECONDS - started)) -lt 15 ]] && echo yes || echo no)"
+  assert_eq "...without waiting for stdin to close" "yes" "$exited"
   return 0
 }
 
