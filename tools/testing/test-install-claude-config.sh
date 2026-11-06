@@ -183,6 +183,22 @@ test_session_start_wrapper_uses_vault_root_file() {
   return $?
 }
 
+test_session_start_wrapper_passes_arguments_to_the_hook() {
+  # /vault-context runs the installed wrapper with --behind, so the argument has to reach the hook:
+  # without it the hook would print the whole context, not the one line.
+  local p v repo out; p=$(mktemp -d); v=$(mktemp -d); repo=$(mktemp -d)/widget; mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  mkdir -p "$v/daily-notes/alice"
+  printf '## Open Questions / Next Steps\n- [ ] ITEM\n' > "$v/daily-notes/alice/2026-10-05-widget-a.md"
+  TZ=UTC touch -t 202610050900 "$v/daily-notes/alice/2026-10-05-widget-a.md"
+  git -C "$repo" -c user.name=alice -c user.email=alice@example.com commit -q --allow-empty -m work
+  bash "$INSTALLER" --prefix "$p/claude" --vault "$v" >/dev/null 2>&1
+  out=$( cd "$repo" && env -u VAULT_ROOT TZ=UTC bash "$p/claude/hook-templates/session-start-vault-context.sh" --behind 2>&1 < /dev/null )
+  assert_eq "wrapper: --behind reaches the hook, so only the behind line comes out" "Behind the repo: 1 commit after 2026-10-05 09:00. Open items may be out of date." "$out"
+  rm -rf "$p" "$v" "$(dirname "$repo")"
+  return $?
+}
+
 test_no_skills_flag_is_still_accepted_and_changes_nothing() {
   # Skills are no longer installed at all. The flag stays so old command lines keep working.
   local p out st; p=$(mktemp -d)
@@ -797,6 +813,7 @@ test_rest_api_backend_writes_no_config_and_explains
 test_unknown_option_is_a_usage_error
 test_never_touches_real_home_without_prefix_in_tests
 test_session_start_wrapper_uses_vault_root_file
+test_session_start_wrapper_passes_arguments_to_the_hook
 test_every_command_and_hook_in_the_repo_is_installed_byte_for_byte
 test_invalid_backend_is_a_usage_error
 test_empty_prefix_is_a_usage_error
