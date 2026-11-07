@@ -55,6 +55,8 @@ Resuming something specific? Name it:
 
 This picks up where a previous session (yours or a teammate's) left off, without anyone re-explaining it.
 
+If the code repo has commits newer than the latest note, the session-start hook and `/vault-context` say so first, with a count, for example `Behind the repo: 15 commits after 2026-11-06 15:02. Open items may be out of date.` Treat the open items as unchecked until you have compared them with what has landed. See [`docs/automation.md`](../docs/automation.md#session-start-vault-context-point-a-session-at-its-repos-vault-context) for how it is counted and what it cannot see.
+
 ## 2. End of session: writing a daily note
 
 Before closing down, ask your assistant:
@@ -117,7 +119,8 @@ A carried item in the new note reads `- [ ] text (from [[old note]], opened YYYY
 
 `/vault-log` reconciles open items at the end of a session:
 
-- It ticks what the session finished.
+- It says first when the repo has commits newer than your newest note that this session did not make, meaning an earlier session was never logged. It gives the count only, and leaves those commits out of the note unless you ask for them to be covered.
+- It ticks what the session finished, and closes an item that other work has overtaken as dropped, with `(dropped YYYY-MM-DD: superseded by [[note]])`.
 - It carries untouched items forward silently.
 - It asks you about partly touched ones, and about anything open longer than `staleOpenItemDays` (30 by default). Such an item is called **stale**.
 - It closes another person's item only with evidence, and then changes only that line's marker.
@@ -147,7 +150,7 @@ A blank vault stays blank unless someone deliberately fills it. Waiting for repo
 
 5. **Review the draft once, don't just regenerate it.** A first pass from reading code alone will miss tribal knowledge: why something was actually decided, what's genuinely load-bearing versus legacy, what's about to change. The person who knows the system best should correct the draft in place, not have the assistant re-derive it from scratch.
 
-6. **Revisit it when the system materially changes** (a major migration, an architecture change), not on a fixed schedule. A repo doc that has silently gone stale is worse than one that's honestly thin.
+6. **Revisit it when the system materially changes** (a major migration, an architecture change), not on a fixed schedule. A repo doc that has silently gone stale is worse than one that's honestly thin. If you set `repoDocBehindCommits` in `vault-config.md` ([`docs/vault-config.md`](../docs/vault-config.md)), `/vault-log` says when the code has moved that many commits past the commit the doc was built from, and offers `/vault-populate`. It never runs it for you, since the result is a draft to read.
 
 ## Cross-linking
 
