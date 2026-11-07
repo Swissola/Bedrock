@@ -187,7 +187,7 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
 # The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
 test_vault_command_templates_carry_the_expected_versions() {
   local pair n want v
-  for pair in vault-log:6 vault-context:6 vault-populate:4; do
+  for pair in vault-log:7 vault-context:6 vault-populate:4; do
     n="${pair%%:*}"; want="${pair##*:}"
     v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
     assert_eq "$n.md is at version $want" "$want" "$v"
@@ -200,17 +200,18 @@ test_vault_command_templates_carry_the_expected_versions() {
 # text changes, the grant does not) every run silently starts asking again, so each shell's grant
 # must hold the same command the body tells the model to run.
 test_vault_commands_pre_approve_exactly_the_hook_command_they_run() {
-  local name f cmd body_cmd shell n
-  # The template holds $HOME literally, for the shell to expand when the command runs, so it must not expand here.
-  # shellcheck disable=SC2016
-  cmd='bash "$HOME/.claude/hook-templates/session-start-vault-context.sh" --behind'
-  for name in vault-context vault-log; do
+  local pair name flag f cmd body_cmd shell n
+  # Each pair is a command and the hook flag it runs. The template holds $HOME literally, for the
+  # shell to expand when the command runs, so it is escaped here to stay literal.
+  for pair in vault-context:--behind vault-log:--behind vault-log:--doc-behind; do
+    name="${pair%%:*}"; flag="${pair##*:}"
     f="$TOOLS_DIR/command-templates/$name.md"
+    cmd="bash \"\$HOME/.claude/hook-templates/session-start-vault-context.sh\" $flag"
     body_cmd="$(grep -c -F -- "run \`$cmd\`" "$f")"
-    assert_eq "$name: the body tells the model to run the hook with --behind" "1" "$body_cmd"
+    assert_eq "$name: the body tells the model to run the hook with $flag" "1" "$body_cmd"
     for shell in Bash PowerShell; do
       n="$(sed -n '1,/^---$/p' "$f" | tr -d '\r' | grep '^allowed-tools:' | grep -c -F -- "$shell($cmd)")"
-      assert_eq "$name: the frontmatter grants $shell exactly that command" "1" "$n"
+      assert_eq "$name: the frontmatter grants $shell exactly the $flag command" "1" "$n"
     done
   done
   return 0
