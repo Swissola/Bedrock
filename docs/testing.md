@@ -222,6 +222,11 @@ At session start, points the session at the repo's vault doc and the latest note
 
 Core scenarios: no vault root, no repo doc, the default layout, the latest note from each contributor, `compact` and malformed stdin, a note with no forward sections, no notes, `vault-config.md` paths and quoting and CRLF, an unclosed config, unsafe config paths, the `{author}` placeholder, and the appended-update handling (latest only, truncation, position, update-only notes).
 
+The one-line checks, which print a single line or nothing and never read stdin:
+
+- `--behind`: commits newer than the newest note, counted from the note's file time and falling back to the end of its date when the file time is wrong. Scenarios cover a linked worktree, a detached head, no history, dates that do not exist, leap days and the century rule, a later note by another contributor, a compact event on stdin, and commit subjects never reaching the output.
+- `--doc-behind`: how far the code has moved on from the repo doc's `source-commit`. It is off unless `repoDocBehindCommits` is a positive whole number, silent below it or when the doc is current, and says so once when the doc has no `source-commit` or names one that is not in the history. A value that is not a hash is never passed to git, and a missing repo doc or a folder outside git gives no output.
+
 Pointer mode:
 
 | Test | What it checks |
