@@ -169,9 +169,11 @@ session-start-vault-context@@cx39@@tools/hook-templates/session-start-vault-cont
 session-start-vault-context@@cx40@@tools/hook-templates/session-start-vault-context@@s#^  \[\[ "\$REMIND_THRESHOLD" =~ \^\[1-9\]\[0-9\]\*\$ \]\] || return 1$#  :#@@--remind runs with no setting, or a setting that is not a positive number
 session-start-vault-context@@cx41@@tools/hook-templates/session-start-vault-context@@s#^  \[\[ "\$input" =~ \$re \]\] \&\& return 1$#  :#@@a Stop hook that is already continuing is reminded again
 session-start-vault-context@@cx42@@tools/hook-templates/session-start-vault-context@@s#| tr -cd 'A-Za-z0-9_-')"#)"#@@a session id can name a file outside the state folder
-session-start-vault-context@@cx43@@tools/hook-templates/session-start-vault-context@@s#\&\& \[\[ \$((now - last)) -lt \$((every \* 60)) \]\] \&\& return 1#\&\& return 1#@@once reminded, a session is never reminded again
-session-start-vault-context@@cx44@@tools/hook-templates/session-start-vault-context@@s#-ge "\$REMIND_THRESHOLD" \]\] || return 0#-ge 1 ]] || return 0#@@the threshold is ignored and any lag is reminded
+session-start-vault-context@@cx43@@tools/hook-templates/session-start-vault-context@@s#\&\& \[\[ \$((now - last)) -lt \$((minutes \* 60)) \]\]#\&\& true#@@a window never ends, so a session is reminded or checked once and then never again
+session-start-vault-context@@cx44@@tools/hook-templates/session-start-vault-context@@s#-lt "\$REMIND_THRESHOLD" \]\]; then#-lt 1 ]]; then#@@the threshold is ignored and any lag is reminded
 session-start-vault-context@@cx45@@tools/hook-templates/session-start-vault-context@@s#\&\& touch "\$REMIND_STATE" 2>/dev/null#\&\& :#@@the window is never recorded, so every turn reminds
+session-start-vault-context@@cx46@@tools/hook-templates/session-start-vault-context@@s#^  recent_within "\$REMIND_CHECKED" "\$check_every" \&\& return 1$#  :#@@a turn with nothing to say lists the notes every time
+session-start-vault-context@@cx47@@tools/hook-templates/session-start-vault-context@@s#\&\& touch "\$REMIND_CHECKED" 2>/dev/null#\&\& :#@@the look window is never recorded
 vault-lib@@vl1@@tools/hook-templates/vault-lib@@s/\${ref:-main}/${ref:-master}/@@a vault with no origin/HEAD falls back to master instead of main
 vault-lib@@vl2@@tools/hook-templates/vault-lib@@s/ref="\${ref#origin\/}"/:/@@the default branch is reported as origin/trunk, not trunk
 vault-lib@@vl3@@tools/hook-templates/vault-lib@@s/--format='%h'/--format='%h %s'/@@commit subjects are listed with the unpushed hashes
