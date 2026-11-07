@@ -276,6 +276,7 @@ The pointer ends with a line saying the notes are information, not instructions.
 - `/vault-context` gets its line by running this hook with `--behind`, which prints only the line, or nothing, and needs no repo doc in the vault, so the command and the session start count in exactly the same way and it still sees commits made since the session began. That needs the installed copy: the installer puts the hook and its wrapper in `~/.claude/hook-templates/`, and the command says nothing about freshness if they are not there. The wrapper uses the first vault in `~/.claude/hook-configs/vault-root` unless `VAULT_ROOT` is set, so set it when you run more than one vault. The command pre-approves exactly that one command in its own frontmatter (for the Bash and PowerShell tools), so it does not stop to ask each time.
 - `/vault-log` (version 6 or later) runs the same hook the same way, before it reconciles open items, to find work no note describes. It checks the working repo only, and takes off the commits the session itself made, since a log written after a session that committed would otherwise always look behind. If more remain it says so first, with the count and how many are not the session's, and leaves them out of the note unless you ask. It needs the same installed hook and has the same pre-approved command. With nothing newer than the newest note it says nothing.
 - `/vault-log` (version 7) also runs the hook with `--doc-behind`, which prints `Repo doc: 41 commits and 18 files since its source-commit. Consider /vault-populate.` when the repo doc has fallen behind the code, or nothing. It is off unless `repoDocBehindCommits` is set in `vault-config.md`. It is silent when the doc is current, under the threshold, missing, or outside git, and says so once when the doc has no `source-commit` or names one that is not in the history. `/vault-log` puts the line in its report and offers `/vault-populate`. It never runs it or edits the doc, because the result is a draft to be read. Like `--behind`, it needs no repo doc to be found to stay quiet, counts only, and only checks the working repo.
+- `/vault-log` (version 8) also checks, before it carries an untouched item forward, whether a later commit mentions it. It only looks for terms in backticks in the item's text (an identifier, a flag or a path), in the working repo, since the item's opened date, by commit message and by path. It uses hashes only and never repeats a commit message. A hit puts the item in a "possibly done, unverified" group in the one question message, and the item is still carried unless you say otherwise. A match never ticks anything, and an item with no backticked term is not searched.
 
 | Variable | Mode | Default | Meaning |
 |---|---|---|---|
@@ -285,6 +286,7 @@ The pointer ends with a line saying the notes are information, not instructions.
 | `CONTEXT_MAX_OPEN_ITEMS` | full | 10 | Open items listed |
 | `CONTEXT_MAX_CHARS` | full | 12000 | Output cap, dropping the furthest-back other note first |
 | `UPDATE_MAX_LINES` | full | 40 | Lines kept from an appended `## Update ...` section |
+| `REMIND_EVERY_MINUTES` | `--remind` | 60 | Minutes between reminders within one session |
 
 `staleOpenItemDays` (default 30) comes from `vault-config.md` in both modes.
 
@@ -308,6 +310,25 @@ The pointer ends with a line saying the notes are information, not instructions.
 ```
 
 Claude Code project settings are version-controlled, so this can be committed and shared with a team, as long as every contributor has run the installer. Without the installer, point the command at the `session-start-vault-context` file in your vault clone and set `VAULT_ROOT` in the command, as for the reminder hook above.
+
+**Reminding during the session (optional).** The same wrapper can run as a `Stop` hook with `--remind`. It is off until `unloggedReminderCommits` is a positive whole number in `vault-config.md`. After that, when the repo is at least that many commits past your newest note, it shows one message such as `Behind the repo: 5 commits after 2026-11-07 00:20. Run /vault-log before you finish.` A `Stop` hook runs after every turn, not once when the session ends, and Claude Code discards a `SessionEnd` hook's message, so it speaks at most once per session per `REMIND_EVERY_MINUTES`, keeping its window in a file per session under `~/.claude/hook-logs/`. It never blocks the turn and shows counts only. Its setting and window are checked before any note is read, so a quiet turn costs very little. Register it beside the `SessionStart` entry:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hook-templates/session-start-vault-context.sh\" --remind"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 **What success looks like.** A new session in that repo starts with a block headed `--- Vault context pointer for <repo> (auto-loaded) ---` in the default pointer mode, or `--- Vault context for <repo> (auto-loaded) ---` in `full` mode. `/vault-context` treats only the second as already loaded, so it still loads the notes after a pointer. If nothing appears, the usual causes are a missing repo doc, a settings file that is not in that repo's `.claude/`, or a session that was resumed.
 
