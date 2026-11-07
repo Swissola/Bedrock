@@ -599,6 +599,15 @@ const scenarios = [
     const written = notesOf(r).filter((f) => f !== rel).map((f) => read(vault, f)).join('\n');
     check('still carries it forward as open', /- \[ \].*widgetrouter/.test(written), written.slice(0, 400));
   } },
+  { name: 'log: finds a commit made earlier today for an item opened today', run() {
+    const { repo } = mkRepo('widget');
+    sh('git', ['commit', '--allow-empty', '-qm', 'add the widgetrouter'], repo, { GIT_COMMITTER_DATE: `${daysAgo(0)}T00:01:00Z`, GIT_AUTHOR_DATE: `${daysAgo(0)}T00:01:00Z` });
+    const hit = sh('git', ['rev-parse', '--short', 'HEAD'], repo).stdout.trim();
+    const rel = `daily-notes/test-user/${daysAgo(1)}-widget-a.md`;
+    const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, [rel]: dnote('MINE', `- [ ] Build the \`widgetrouter\` module (opened ${daysAgo(0)})\n`) });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'carry-today', system: SESSION });
+    check('gives the commit made earlier today by hash', r.final.includes(hit), `${hit} in ${r.final.slice(0, 700)}`);
+  } },
   { name: 'log: says nothing about a possible match when no later commit mentions the item', run() {
     const { repo } = mkRepo('widget');
     sh('git', ['commit', '--allow-empty', '-qm', 'tidy the wording'], repo);
