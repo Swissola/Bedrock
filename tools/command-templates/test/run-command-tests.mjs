@@ -201,19 +201,23 @@ function runCommand({ vault, repo, template, args = '', system = '', stubEnv = n
   return { calls, shell, files: walk(vault), final };
 }
 
-// Reads the stream-json event log: the obsidian MCP tool calls made, and the final result text.
+// Files one tool_use block from the event log: a shell command, or an obsidian MCP call.
+function recordToolUse(c, calls, shell) {
+  if (c.type !== 'tool_use') return;
+  if (c.name === 'Bash' || c.name === 'PowerShell') shell.push(String(c.input?.command ?? ''));
+  if (!c.name.startsWith('mcp__obsidian__')) return;
+  const name = c.name.replace('mcp__obsidian__', '');
+  calls.push({ name, op: OPS[name] || name, path: c.input?.path ?? '' });
+}
+
+// Reads the stream-json event log: the obsidian MCP tool calls made, the shell commands run, and the final result text.
 function parseEvents(stdout) {
   const calls = []; const shell = []; let final = '';
   for (const line of stdout.split('\n')) {
     let j; try { j = JSON.parse(line); } catch { continue; }
     if (j.type === 'result') final = j.result || '';
     if (j.type !== 'assistant') continue;
-    for (const c of j.message?.content || []) {
-      if (c.type === 'tool_use' && (c.name === 'Bash' || c.name === 'PowerShell')) shell.push(String(c.input?.command ?? ''));
-      if (c.type !== 'tool_use' || !c.name.startsWith('mcp__obsidian__')) continue;
-      const name = c.name.replace('mcp__obsidian__', '');
-      calls.push({ name, op: OPS[name] || name, path: c.input?.path ?? '' });
-    }
+    for (const c of j.message?.content || []) recordToolUse(c, calls, shell);
   }
   return { calls, shell, final };
 }
