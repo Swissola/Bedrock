@@ -157,7 +157,12 @@ const countedByHand = (r) => r.shell.some((c) => /\bgit\b.*\brev-list\b/.test(c)
 const BEHIND_CLAIM = /Behind the repo: \d+ commits?\b/;
 // What /vault-log says when it claims commits no note describes: a count of commits that were not the session's, or that came
 // from a session with no note. The bare word "unlogged" proves nothing, since a reply that found none may say "no unlogged work".
-const UNLOGGED_CLAIM = /\b(\d+|one|two|three|four|five)\s+(other\s+|earlier\s+)?commits?\b[^.\n]*\b(not\s+(from|by|made)|came from a session with no note)|came from a session with no note/i;
+// Two small patterns, since one that did both was over Sonar's regex complexity limit: the phrase on its own, or a count of
+// commits and a "not from/by/made" in the same sentence.
+const NO_NOTE = /came from a session with no note/i;
+const COUNTED_COMMITS = /\b(\d+|one|two|three|four|five) (other |earlier )?commits?\b/i;
+const NOT_MADE = /\bnot (from|by|made)\b/i;
+const UNLOGGED_CLAIM = { test: (s) => NO_NOTE.test(s) || s.split(/[.\n]/).some((p) => COUNTED_COMMITS.test(p) && NOT_MADE.test(p)) };
 function mkRepo(name) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `bedrock-t-${name}-`));
   const repo = path.join(dir, name); fs.mkdirSync(repo);
