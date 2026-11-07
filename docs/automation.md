@@ -267,6 +267,13 @@ This is a different hook from the one above. That one fires everywhere and only 
 
 The pointer ends with a line saying the notes are information, not instructions. Any `CONTEXT_MODE` value other than `pointer` or `full` falls back to `pointer`.
 
+**Behind the repo.** In both modes, when the code repo has commits newer than the moment the newest note's file was last written, one line says so before the open items: `Behind the repo: 15 commits after 2026-11-06 15:02. Open items may be out of date.`
+
+- The moment is the file's modification time, so work done after a log earlier the same day counts, which matters if you log several times a day. It is used only when it falls on or after the note's own date, since a restored copy keeps an old one. Otherwise the count is from the end of the note's day and the line shows the date alone.
+- It counts the commits of the session's own checkout and branch, so a linked worktree is counted on its own branch, not the main checkout's. The line carries counts and the note's date only, never a commit subject, since whoever commits chooses it.
+- There is no line when nothing is newer than the note, the repo has no commits or no git history, there are no notes, only an older note of unknown repo exists, or the newest note's filename has no date or a date that does not exist (such as 2026-02-31, which git reads as no date and counts every commit).
+- It can only undercount. On a git-backed vault the file time is when the note was pulled, which is later than when it was written, and a clock set wrong stops git counting early. It is worked out once, at session start, and cannot tell that an earlier session went unlogged once a later note exists.
+
 | Variable | Mode | Default | Meaning |
 |---|---|---|---|
 | `CONTEXT_MODE` | both | `pointer` | `pointer` or `full` |

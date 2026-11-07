@@ -170,7 +170,8 @@ configure_statusline() {
 
 # The wrapper a project's SessionStart hook can call without knowing the vault
 # path: it falls back to <prefix>/hook-configs/vault-root when VAULT_ROOT is
-# unset, then hands over to the real hook (stdin passes straight through).
+# unset, then hands over to the real hook (stdin and any arguments pass straight
+# through, so /vault-context can run it with --behind).
 wrapper_content() {
   cat <<'EOF'
 #!/usr/bin/env bash
@@ -182,7 +183,7 @@ if [ -z "${VAULT_ROOT:-}" ] && [ -f "$d/../hook-configs/vault-root" ]; then
   VAULT_ROOT="$(head -n1 "$d/../hook-configs/vault-root" | tr -d '\r')"
   export VAULT_ROOT
 fi
-exec bash "$d/session-start-vault-context"
+exec bash "$d/session-start-vault-context" "$@"
 EOF
   return $?
 }
