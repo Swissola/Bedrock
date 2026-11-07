@@ -89,7 +89,7 @@ cp tools/command-templates/vault-populate.md ~/.claude/commands/vault-populate.m
 
 | Command | What it does |
 |---|---|
-| `/vault-context` | Reads the hub note, your latest daily note for this repo, a short form of up to three other contributors' notes, and the open items across them |
+| `/vault-context` | Reads the hub note, your latest daily note for this repo, a short form of up to three other contributors' notes, and the open items across them, and says when the repo has moved on from them (see below) |
 | `/vault-log` | Writes the session as one daily note per repo worked in, and reconciles open items |
 | `/vault-populate` | Bootstraps a repo doc for a codebase. It keeps the doc's frontmatter and any `## Hand-written notes` section, and skips the rewrite when the repo has not changed since `source-commit` |
 
@@ -273,6 +273,7 @@ The pointer ends with a line saying the notes are information, not instructions.
 - It counts the commits of the session's own checkout and branch, so a linked worktree is counted on its own branch, not the main checkout's. The line carries counts and the note's date only, never a commit subject, since whoever commits chooses it.
 - There is no line when nothing is newer than the note, the repo has no commits or no git history, there are no notes, only an older note of unknown repo exists, or the newest note's filename has no date or a date that does not exist (such as 2026-02-31, which git reads as no date and counts every commit).
 - It can only undercount. On a git-backed vault the file time is when the note was pulled, which is later than when it was written, and a clock set wrong stops git counting early. It is worked out once, at session start, and cannot tell that an earlier session went unlogged once a later note exists.
+- `/vault-context` gets its line by running this hook with `--behind`, which prints only the line, or nothing, so the command and the session start count in exactly the same way and it still sees commits made since the session began. That needs the installed copy: the installer puts the hook and its wrapper in `~/.claude/hook-templates/`, and the command says nothing about freshness if they are not there. The wrapper uses the first vault in `~/.claude/hook-configs/vault-root` unless `VAULT_ROOT` is set, so set it when you run more than one vault. The command pre-approves exactly that one command in its own frontmatter (for the Bash and PowerShell tools), so it does not stop to ask each time.
 
 | Variable | Mode | Default | Meaning |
 |---|---|---|---|
