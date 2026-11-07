@@ -55,6 +55,8 @@ Resuming something specific? Name it:
 
 This picks up where a previous session (yours or a teammate's) left off, without anyone re-explaining it.
 
+If the code repo has commits newer than the latest note, the session-start hook and `/vault-context` say so first, with a count, for example `Behind the repo: 15 commits after 2026-11-06 15:02. Open items may be out of date.` Treat the open items as unchecked until you have compared them with what has landed. See [`docs/automation.md`](../docs/automation.md#session-start-vault-context-point-a-session-at-its-repos-vault-context) for how it is counted and what it cannot see.
+
 ## 2. End of session: writing a daily note
 
 Before closing down, ask your assistant:
@@ -117,7 +119,8 @@ A carried item in the new note reads `- [ ] text (from [[old note]], opened YYYY
 
 `/vault-log` reconciles open items at the end of a session:
 
-- It ticks what the session finished.
+- It says first when the repo has commits newer than your newest note that this session did not make, meaning an earlier session was never logged. It gives the count only, and leaves those commits out of the note unless you ask for them to be covered.
+- It ticks what the session finished, and closes an item that other work has overtaken as dropped, with `(dropped YYYY-MM-DD: superseded by [[note]])`.
 - It carries untouched items forward silently.
 - It asks you about partly touched ones, and about anything open longer than `staleOpenItemDays` (30 by default). Such an item is called **stale**.
 - It closes another person's item only with evidence, and then changes only that line's marker.
