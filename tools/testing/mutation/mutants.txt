@@ -159,6 +159,13 @@ pre-commit@@pc8@@tools/hook-templates/pre-commit@@s/-ne 1 \]\]/-ne 99 ]]/@@a rea
 pre-commit@@pc9@@tools/hook-templates/pre-commit@@s/^        exit 1$/        exit 0/@@strict mode no longer blocks when the scanner itself failed
 session-start-vault-context@@cx31@@tools/hook-templates/session-start-vault-context@@s/POINTER_MAX_ITEMS:-3/POINTER_MAX_ITEMS:-9/@@the pointer lists nine open items, not three
 session-start-vault-context@@cx32@@tools/hook-templates/session-start-vault-context@@s/Vault context pointer for/Vault context for/@@the pointer carries the full-output header, so /vault-context treats it as already loaded
+session-start-vault-context@@cx33@@tools/hook-templates/session-start-vault-context@@s#^  \[\[ "\$threshold" =~ \^\[1-9\]\[0-9\]\*\$ \]\] || return 0$#  :#@@--doc-behind runs with no setting, or a setting that is not a positive number
+session-start-vault-context@@cx34@@tools/hook-templates/session-start-vault-context@@s#^  \[\[ "\$src" =~ \^\[0-9a-f\]{7,40}\$ \]\] || return 0$#  :#@@text that is not a hash is passed to git
+session-start-vault-context@@cx35@@tools/hook-templates/session-start-vault-context@@s#-ge "\$threshold" \]\] || return 0#-ge 1 ]] || return 0#@@the threshold is ignored and any lag is reported
+session-start-vault-context@@cx36@@tools/hook-templates/session-start-vault-context@@s#^    echo "Repo doc: no source-commit recorded, so it has not been checked against the repo\."$#    :#@@a doc that was never populated is not reported
+session-start-vault-context@@cx37@@tools/hook-templates/session-start-vault-context@@s#^  git -C "\$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0$#  :#@@outside git a repo doc is reported as missing from the history
+session-start-vault-context@@cx38@@tools/hook-templates/session-start-vault-context@@s#if ! git -C "\$dir" cat-file -e#if git -C "$dir" cat-file -e#@@a source-commit in the history is called unknown, and an unknown one is counted
+session-start-vault-context@@cx39@@tools/hook-templates/session-start-vault-context@@s#if \[\[ "\$DOC_ONLY" = 1 \]\]; then doc_behind_line; else behind_line; fi#behind_line#@@--doc-behind prints the behind-the-repo line instead
 vault-lib@@vl1@@tools/hook-templates/vault-lib@@s/\${ref:-main}/${ref:-master}/@@a vault with no origin/HEAD falls back to master instead of main
 vault-lib@@vl2@@tools/hook-templates/vault-lib@@s/ref="\${ref#origin\/}"/:/@@the default branch is reported as origin/trunk, not trunk
 vault-lib@@vl3@@tools/hook-templates/vault-lib@@s/--format='%h'/--format='%h %s'/@@commit subjects are listed with the unpushed hashes
