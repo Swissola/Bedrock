@@ -165,7 +165,13 @@ session-start-vault-context@@cx35@@tools/hook-templates/session-start-vault-cont
 session-start-vault-context@@cx36@@tools/hook-templates/session-start-vault-context@@s#^    echo "Repo doc: no source-commit recorded, so it has not been checked against the repo\."$#    :#@@a doc that was never populated is not reported
 session-start-vault-context@@cx37@@tools/hook-templates/session-start-vault-context@@s#^  git -C "\$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0$#  :#@@outside git a repo doc is reported as missing from the history
 session-start-vault-context@@cx38@@tools/hook-templates/session-start-vault-context@@s#if ! git -C "\$dir" cat-file -e#if git -C "$dir" cat-file -e#@@a source-commit in the history is called unknown, and an unknown one is counted
-session-start-vault-context@@cx39@@tools/hook-templates/session-start-vault-context@@s#if \[\[ "\$DOC_ONLY" = 1 \]\]; then doc_behind_line; else behind_line; fi#behind_line#@@--doc-behind prints the behind-the-repo line instead
+session-start-vault-context@@cx39@@tools/hook-templates/session-start-vault-context@@s#elif \[\[ "\$DOC_ONLY" = 1 \]\]; then doc_behind_line#elif false; then doc_behind_line#@@--doc-behind prints the behind-the-repo line instead
+session-start-vault-context@@cx40@@tools/hook-templates/session-start-vault-context@@s#^  \[\[ "\$REMIND_THRESHOLD" =~ \^\[1-9\]\[0-9\]\*\$ \]\] || return 1$#  :#@@--remind runs with no setting, or a setting that is not a positive number
+session-start-vault-context@@cx41@@tools/hook-templates/session-start-vault-context@@s#^  \[\[ "\$input" =~ \$re \]\] \&\& return 1$#  :#@@a Stop hook that is already continuing is reminded again
+session-start-vault-context@@cx42@@tools/hook-templates/session-start-vault-context@@s#| tr -cd 'A-Za-z0-9_-')"#)"#@@a session id can name a file outside the state folder
+session-start-vault-context@@cx43@@tools/hook-templates/session-start-vault-context@@s#\&\& \[\[ \$((now - last)) -lt \$((every \* 60)) \]\] \&\& return 1#\&\& return 1#@@once reminded, a session is never reminded again
+session-start-vault-context@@cx44@@tools/hook-templates/session-start-vault-context@@s#-ge "\$REMIND_THRESHOLD" \]\] || return 0#-ge 1 ]] || return 0#@@the threshold is ignored and any lag is reminded
+session-start-vault-context@@cx45@@tools/hook-templates/session-start-vault-context@@s#\&\& touch "\$REMIND_STATE" 2>/dev/null#\&\& :#@@the window is never recorded, so every turn reminds
 vault-lib@@vl1@@tools/hook-templates/vault-lib@@s/\${ref:-main}/${ref:-master}/@@a vault with no origin/HEAD falls back to master instead of main
 vault-lib@@vl2@@tools/hook-templates/vault-lib@@s/ref="\${ref#origin\/}"/:/@@the default branch is reported as origin/trunk, not trunk
 vault-lib@@vl3@@tools/hook-templates/vault-lib@@s/--format='%h'/--format='%h %s'/@@commit subjects are listed with the unpushed hashes
