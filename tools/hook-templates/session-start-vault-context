@@ -95,11 +95,17 @@ set -u
 #
 # `--doc-behind` is the same kind of one-line check on the repo doc: how far the code has moved on
 # from the commit the doc was built from. It rides on the same switch, so it never reads stdin either.
+#
+# `--remind` is for a Stop hook: it reads the event from stdin itself, and prints a JSON systemMessage
+# saying the repo is behind its newest note, at most once per session per hour. Off unless
+# `unloggedReminderCommits` is set in vault-config.md.
 BEHIND_ONLY=0
 DOC_ONLY=0
+REMIND_ONLY=0
 case "${1:-}" in
   --behind) BEHIND_ONLY=1 ;;
   --doc-behind) BEHIND_ONLY=1; DOC_ONLY=1 ;;
+  --remind) BEHIND_ONLY=1; REMIND_ONLY=1 ;;
   *) ;;
 esac
 
@@ -142,6 +148,35 @@ safe_rel() {
   case "$1" in ""|/*|[A-Za-z]:*|*..*) return 1 ;; esac
   return 0
 }
+
+# --- the Stop reminder's gate --------------------------------------------------
+
+# A Stop hook runs after every turn, so the common answer, nothing to say, has to be cheap: this runs
+# before any note is listed and stays silent (returns 1) when the setting is off, a stop hook is
+# already continuing, or this session was reminded within REMIND_EVERY_MINUTES (default 60). It sets
+# REMIND_THRESHOLD and REMIND_STATE, the file whose modification time is the window, one per
+# session. The session id is cleaned to letters, digits, hyphen and underscore so it cannot name a
+# path outside the state folder.
+remind_gate() {
+  local input session last now every="${REMIND_EVERY_MINUTES:-60}" re
+  REMIND_THRESHOLD="$(config_value unloggedReminderCommits)"
+  [[ "$REMIND_THRESHOLD" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$every" =~ ^[1-9][0-9]*$ ]] || every=60
+  input="$(cat 2>/dev/null)"
+  re='"stop_hook_active"[[:space:]]*:[[:space:]]*true'
+  [[ "$input" =~ $re ]] && return 1
+  session="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 | tr -cd 'A-Za-z0-9_-')"
+  REMIND_STATE="$HOME/.claude/hook-logs/.vault-log-reminder-${session:-none}"
+  if [[ -f "$REMIND_STATE" ]]; then
+    last="$(stat -c %Y "$REMIND_STATE" 2>/dev/null || stat -f %m "$REMIND_STATE" 2>/dev/null || echo 0)"
+    now="$(date +%s)"
+    [[ "$last" =~ ^[0-9]+$ ]] && [[ $((now - last)) -lt $((every * 60)) ]] && return 1
+  fi
+  return 0
+}
+REMIND_THRESHOLD=""
+REMIND_STATE=""
+if [[ "$REMIND_ONLY" = 1 ]]; then remind_gate || exit 0; fi
 
 # --- which repo --------------------------------------------------------------
 
@@ -663,8 +698,9 @@ epoch_stamp() {
 # Counts and the moment only, never a commit subject: whoever commits chooses it, and this text
 # goes into the model's context. Silent outside git, with no commits, with an unusable note
 # date, and when the only note is an older one of unknown repo.
-behind_line() {
-  local ref_date ref_epoch stamp since_arg shown total noun="commits"
+behind_calc() {
+  local ref_date ref_epoch stamp since_arg shown total
+  BEHIND_TOTAL=""; BEHIND_SHOWN=""
   [[ -z "$OLDER_PATH" ]] || return 0
   IFS="$TAB" read -r ref_date ref_epoch _ <<EOF
 $ALL_SORTED
@@ -682,8 +718,31 @@ EOF
   # checkout, whose branch is not the one being worked on.
   total="$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-list --count --since="$since_arg" HEAD 2>/dev/null)" || return 0
   [[ "$total" =~ ^[1-9][0-9]*$ ]] || return 0
-  [[ "$total" -eq 1 ]] && noun="commit"
-  echo "Behind the repo: $total $noun after $shown. Open items may be out of date."
+  BEHIND_TOTAL="$total"; BEHIND_SHOWN="$shown"
+  return 0
+}
+
+# The same count as one line: the text /vault-context and the session start print.
+behind_line() {
+  local noun="commits"
+  behind_calc
+  [[ -n "$BEHIND_TOTAL" ]] || return 0
+  [[ "$BEHIND_TOTAL" -eq 1 ]] && noun="commit"
+  echo "Behind the repo: $BEHIND_TOTAL $noun after $BEHIND_SHOWN. Open items may be out of date."
+  return 0
+}
+
+# The Stop reminder, once remind_gate has let it through: when the repo is at least
+# `unloggedReminderCommits` past the newest note, one JSON line whose systemMessage says so, and the
+# window for this session starts. Counts and the moment only, never a commit subject, and it never
+# blocks: a Stop hook that blocks keeps Claude working.
+remind_line() {
+  local noun="commits"
+  behind_calc
+  [[ -n "$BEHIND_TOTAL" && "$BEHIND_TOTAL" -ge "$REMIND_THRESHOLD" ]] || return 0
+  mkdir -p "$(dirname "$REMIND_STATE")" 2>/dev/null && touch "$REMIND_STATE" 2>/dev/null
+  [[ "$BEHIND_TOTAL" -eq 1 ]] && noun="commit"
+  printf '{"systemMessage":"Behind the repo: %s %s after %s. Run /vault-log before you finish."}\n' "$BEHIND_TOTAL" "$noun" "$BEHIND_SHOWN"
   return 0
 }
 
@@ -782,7 +841,9 @@ EOF
 }
 
 if [[ "$BEHIND_ONLY" = 1 ]]; then
-  if [[ "$DOC_ONLY" = 1 ]]; then doc_behind_line; else behind_line; fi
+  if [[ "$REMIND_ONLY" = 1 ]]; then remind_line
+  elif [[ "$DOC_ONLY" = 1 ]]; then doc_behind_line
+  else behind_line; fi
   exit 0
 fi
 
