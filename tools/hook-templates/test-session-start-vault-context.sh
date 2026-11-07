@@ -2255,6 +2255,21 @@ test_remind_flag_works_when_stdin_has_no_session_id() {
   return 0
 }
 
+# Listing the notes takes about a second and a half on a Windows machine, and a Stop hook runs after
+# every turn, so a turn that found nothing to say must not do it again straight away.
+test_remind_flag_does_not_look_again_inside_the_check_window() {
+  local repo vault home state
+  read -r repo vault home <<< "$(remind_fixture 3)"
+  state="$home/.claude/hook-logs/.vault-log-checked-s1"
+  assert_eq "two commits against a threshold of three: nothing" "" "$(run_remind "$repo" "$vault" "$home")"
+  assert_eq "the check left its mark" "yes" "$([[ -e "$state" ]] && echo yes || echo no)"
+  fx_commit "$repo" 2026-10-10T13:00:00+0000
+  assert_eq "a third commit straight after is not looked for yet" "" "$(run_remind "$repo" "$vault" "$home")"
+  touch -t 202001010000 "$state"
+  assert_eq "once the window has passed it looks again" '{"systemMessage":"Behind the repo: 3 commits after 2026-10-08 09:00. Run /vault-log before you finish."}' "$(run_remind "$repo" "$vault" "$home")"
+  return 0
+}
+
 test_commits_after_the_notes_last_write_are_counted_by_the_time_not_the_day
 test_doc_behind_flag_prints_one_line_with_counts_only_at_the_threshold
 test_doc_behind_flag_is_silent_below_the_threshold
@@ -2274,6 +2289,7 @@ test_remind_flag_is_silent_when_a_stop_hook_is_already_continuing
 test_remind_flag_is_silent_when_nothing_is_behind
 test_remind_flag_keeps_an_odd_session_id_inside_the_state_folder
 test_remind_flag_works_when_stdin_has_no_session_id
+test_remind_flag_does_not_look_again_inside_the_check_window
 test_behind_flag_prints_only_the_behind_line
 test_behind_flag_prints_nothing_when_the_repo_is_not_behind
 test_behind_flag_needs_no_repo_doc

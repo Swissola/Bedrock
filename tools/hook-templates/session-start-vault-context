@@ -151,31 +151,42 @@ safe_rel() {
 
 # --- the Stop reminder's gate --------------------------------------------------
 
-# A Stop hook runs after every turn, so the common answer, nothing to say, has to be cheap: this runs
-# before any note is listed and stays silent (returns 1) when the setting is off, a stop hook is
-# already continuing, or this session was reminded within REMIND_EVERY_MINUTES (default 60). It sets
-# REMIND_THRESHOLD and REMIND_STATE, the file whose modification time is the window, one per
-# session. The session id is cleaned to letters, digits, hyphen and underscore so it cannot name a
-# path outside the state folder.
+# True when `$1` exists and was last modified less than `$2` minutes ago.
+recent_within() {
+  local file="$1" minutes="$2" last now
+  [[ -f "$file" ]] || return 1
+  last="$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || echo 0)"
+  now="$(date +%s)"
+  [[ "$last" =~ ^[0-9]+$ ]] && [[ $((now - last)) -lt $((minutes * 60)) ]]
+}
+
+# A Stop hook runs after every turn, so the common answer, nothing to say, has to be cheap. Listing
+# the notes is the slow part (about a second and a half on a Windows machine), so this runs before
+# it and stays silent (returns 1) when the setting is off, a stop hook is already continuing, this
+# session was reminded within REMIND_EVERY_MINUTES (default 120), or it last looked and found nothing
+# to say within REMIND_CHECK_MINUTES (default 60). It sets REMIND_THRESHOLD, REMIND_STATE (the
+# reminder window) and REMIND_CHECKED (the look window): one file of each per session, whose
+# modification time is the window. The session id is cleaned to letters, digits, hyphen and
+# underscore so it cannot name a path outside the state folder.
 remind_gate() {
-  local input session last now every="${REMIND_EVERY_MINUTES:-60}" re
+  local input session every="${REMIND_EVERY_MINUTES:-120}" check_every="${REMIND_CHECK_MINUTES:-60}" re
   REMIND_THRESHOLD="$(config_value unloggedReminderCommits)"
   [[ "$REMIND_THRESHOLD" =~ ^[1-9][0-9]*$ ]] || return 1
-  [[ "$every" =~ ^[1-9][0-9]*$ ]] || every=60
+  [[ "$every" =~ ^[1-9][0-9]*$ ]] || every=120
+  [[ "$check_every" =~ ^[1-9][0-9]*$ ]] || check_every=60
   input="$(cat 2>/dev/null)"
   re='"stop_hook_active"[[:space:]]*:[[:space:]]*true'
   [[ "$input" =~ $re ]] && return 1
   session="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 | tr -cd 'A-Za-z0-9_-')"
   REMIND_STATE="$HOME/.claude/hook-logs/.vault-log-reminder-${session:-none}"
-  if [[ -f "$REMIND_STATE" ]]; then
-    last="$(stat -c %Y "$REMIND_STATE" 2>/dev/null || stat -f %m "$REMIND_STATE" 2>/dev/null || echo 0)"
-    now="$(date +%s)"
-    [[ "$last" =~ ^[0-9]+$ ]] && [[ $((now - last)) -lt $((every * 60)) ]] && return 1
-  fi
+  REMIND_CHECKED="$HOME/.claude/hook-logs/.vault-log-checked-${session:-none}"
+  recent_within "$REMIND_STATE" "$every" && return 1
+  recent_within "$REMIND_CHECKED" "$check_every" && return 1
   return 0
 }
 REMIND_THRESHOLD=""
 REMIND_STATE=""
+REMIND_CHECKED=""
 if [[ "$REMIND_ONLY" = 1 ]]; then remind_gate || exit 0; fi
 
 # --- which repo --------------------------------------------------------------
@@ -734,12 +745,16 @@ behind_line() {
 
 # The Stop reminder, once remind_gate has let it through: when the repo is at least
 # `unloggedReminderCommits` past the newest note, one JSON line whose systemMessage says so, and the
-# window for this session starts. Counts and the moment only, never a commit subject, and it never
-# blocks: a Stop hook that blocks keeps Claude working.
+# reminder window for this session starts. When it is not, the look window starts instead, so the
+# next turns skip this. Counts and the moment only, never a commit subject, and it never blocks: a
+# Stop hook that blocks keeps Claude working.
 remind_line() {
   local noun="commits"
   behind_calc
-  [[ -n "$BEHIND_TOTAL" && "$BEHIND_TOTAL" -ge "$REMIND_THRESHOLD" ]] || return 0
+  if [[ -z "$BEHIND_TOTAL" || "$BEHIND_TOTAL" -lt "$REMIND_THRESHOLD" ]]; then
+    mkdir -p "$(dirname "$REMIND_CHECKED")" 2>/dev/null && touch "$REMIND_CHECKED" 2>/dev/null
+    return 0
+  fi
   mkdir -p "$(dirname "$REMIND_STATE")" 2>/dev/null && touch "$REMIND_STATE" 2>/dev/null
   [[ "$BEHIND_TOTAL" -eq 1 ]] && noun="commit"
   printf '{"systemMessage":"Behind the repo: %s %s after %s. Run /vault-log before you finish."}\n' "$BEHIND_TOTAL" "$noun" "$BEHIND_SHOWN"
