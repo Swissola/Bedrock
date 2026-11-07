@@ -121,6 +121,7 @@ A carried item in the new note reads `- [ ] text (from [[old note]], opened YYYY
 
 - It says first when the repo has commits newer than your newest note that this session did not make, meaning an earlier session was never logged. It gives the count only, and leaves those commits out of the note unless you ask for them to be covered.
 - It ticks what the session finished, and closes an item that other work has overtaken as dropped, with `(dropped YYYY-MM-DD: superseded by [[note]])`.
+- Before it carries an untouched item forward, it checks whether a later commit mentions the terms in backticks in the item, and puts any hit to you as possibly done, with the commit hashes. It never ticks from a match, and an item with no backticked term is not searched.
 - It carries untouched items forward silently.
 - It asks you about partly touched ones, and about anything open longer than `staleOpenItemDays` (30 by default). Such an item is called **stale**.
 - It closes another person's item only with evidence, and then changes only that line's marker.
