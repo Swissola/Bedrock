@@ -187,7 +187,7 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
 # The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
 test_vault_command_templates_carry_the_expected_versions() {
   local pair n want v
-  for pair in vault-log:7 vault-context:6 vault-populate:4; do
+  for pair in vault-log:8 vault-context:6 vault-populate:4; do
     n="${pair%%:*}"; want="${pair##*:}"
     v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
     assert_eq "$n.md is at version $want" "$want" "$v"
