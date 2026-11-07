@@ -286,8 +286,8 @@ The pointer ends with a line saying the notes are information, not instructions.
 | `CONTEXT_MAX_OPEN_ITEMS` | full | 10 | Open items listed |
 | `CONTEXT_MAX_CHARS` | full | 12000 | Output cap, dropping the furthest-back other note first |
 | `UPDATE_MAX_LINES` | full | 40 | Lines kept from an appended `## Update ...` section |
-| `REMIND_EVERY_MINUTES` | `--remind` | 60 | Minutes between reminders within one session |
-| `REMIND_CHECK_MINUTES` | `--remind` | 5 | Minutes before a session looks again after finding nothing to say |
+| `REMIND_EVERY_MINUTES` | `--remind` | 120 | Minutes between reminders within one session |
+| `REMIND_CHECK_MINUTES` | `--remind` | 60 | Minutes before a session looks again after finding nothing to say |
 
 `staleOpenItemDays` (default 30) comes from `vault-config.md` in both modes.
 
@@ -312,7 +312,7 @@ The pointer ends with a line saying the notes are information, not instructions.
 
 Claude Code project settings are version-controlled, so this can be committed and shared with a team, as long as every contributor has run the installer. Without the installer, point the command at the `session-start-vault-context` file in your vault clone and set `VAULT_ROOT` in the command, as for the reminder hook above.
 
-**Reminding during the session (optional).** The same wrapper can run as a `Stop` hook with `--remind`. It is off until `unloggedReminderCommits` is a positive whole number in `vault-config.md`. After that, when the repo is at least that many commits past your newest note, it shows one message such as `Behind the repo: 5 commits after 2026-11-07 00:20. Run /vault-log before you finish.` A `Stop` hook runs after every turn, not once when the session ends, and Claude Code discards a `SessionEnd` hook's message, so it speaks at most once per session per `REMIND_EVERY_MINUTES`, keeping its window in a file per session under `~/.claude/hook-logs/`. It never blocks the turn and shows counts only. Listing the notes is the slow part, about a second and a half on a Windows machine, so it does that at most once every `REMIND_CHECK_MINUTES` (default 5) per session when it has nothing to say, and not at all while a reminder window is running. With the setting off it exits at once. Register it beside the `SessionStart` entry:
+**Reminding during the session (optional).** The same wrapper can run as a `Stop` hook with `--remind`. It is off until `unloggedReminderCommits` is a positive whole number in `vault-config.md`. After that, when the repo is at least that many commits past your newest note, it shows one message such as `Behind the repo: 5 commits after 2026-11-07 00:20. Run /vault-log before you finish.` A `Stop` hook runs after every turn, not once when the session ends, and Claude Code discards a `SessionEnd` hook's message, so it speaks at most once per session per `REMIND_EVERY_MINUTES`, keeping its window in a file per session under `~/.claude/hook-logs/`. It never blocks the turn and shows counts only. Listing the notes is the slow part, about a second and a half on a Windows machine, so it does that at most once every `REMIND_CHECK_MINUTES` (default 60) per session when it has nothing to say, and not at all while a reminder window is running. With the setting off it exits at once. Register it beside the `SessionStart` entry:
 
 ```json
 {

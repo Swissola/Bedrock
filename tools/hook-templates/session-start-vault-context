@@ -163,17 +163,17 @@ recent_within() {
 # A Stop hook runs after every turn, so the common answer, nothing to say, has to be cheap. Listing
 # the notes is the slow part (about a second and a half on a Windows machine), so this runs before
 # it and stays silent (returns 1) when the setting is off, a stop hook is already continuing, this
-# session was reminded within REMIND_EVERY_MINUTES (default 60), or it last looked and found nothing
-# to say within REMIND_CHECK_MINUTES (default 5). It sets REMIND_THRESHOLD, REMIND_STATE (the
+# session was reminded within REMIND_EVERY_MINUTES (default 120), or it last looked and found nothing
+# to say within REMIND_CHECK_MINUTES (default 60). It sets REMIND_THRESHOLD, REMIND_STATE (the
 # reminder window) and REMIND_CHECKED (the look window): one file of each per session, whose
 # modification time is the window. The session id is cleaned to letters, digits, hyphen and
 # underscore so it cannot name a path outside the state folder.
 remind_gate() {
-  local input session every="${REMIND_EVERY_MINUTES:-60}" check_every="${REMIND_CHECK_MINUTES:-5}" re
+  local input session every="${REMIND_EVERY_MINUTES:-120}" check_every="${REMIND_CHECK_MINUTES:-60}" re
   REMIND_THRESHOLD="$(config_value unloggedReminderCommits)"
   [[ "$REMIND_THRESHOLD" =~ ^[1-9][0-9]*$ ]] || return 1
-  [[ "$every" =~ ^[1-9][0-9]*$ ]] || every=60
-  [[ "$check_every" =~ ^[1-9][0-9]*$ ]] || check_every=5
+  [[ "$every" =~ ^[1-9][0-9]*$ ]] || every=120
+  [[ "$check_every" =~ ^[1-9][0-9]*$ ]] || check_every=60
   input="$(cat 2>/dev/null)"
   re='"stop_hook_active"[[:space:]]*:[[:space:]]*true'
   [[ "$input" =~ $re ]] && return 1
