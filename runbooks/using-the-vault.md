@@ -150,7 +150,7 @@ A blank vault stays blank unless someone deliberately fills it. Waiting for repo
 
 5. **Review the draft once, don't just regenerate it.** A first pass from reading code alone will miss tribal knowledge: why something was actually decided, what's genuinely load-bearing versus legacy, what's about to change. The person who knows the system best should correct the draft in place, not have the assistant re-derive it from scratch.
 
-6. **Revisit it when the system materially changes** (a major migration, an architecture change), not on a fixed schedule. A repo doc that has silently gone stale is worse than one that's honestly thin.
+6. **Revisit it when the system materially changes** (a major migration, an architecture change), not on a fixed schedule. A repo doc that has silently gone stale is worse than one that's honestly thin. If you set `repoDocBehindCommits` in `vault-config.md` ([`docs/vault-config.md`](../docs/vault-config.md)), `/vault-log` says when the code has moved that many commits past the commit the doc was built from, and offers `/vault-populate`. It never runs it for you, since the result is a draft to read.
 
 ## Cross-linking
 
