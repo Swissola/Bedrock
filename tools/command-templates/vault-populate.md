@@ -4,13 +4,13 @@ argument-hint: [optional repo name override, otherwise inferred from this folder
 ---
 <!-- bedrock-template: vault-populate, version 4 -->
 
-See `runbooks/using-the-vault.md` in the vault, section 3, for the full manual version of this workflow and its rationale — this command just automates it. Per-vault differences are optional and live in a `vault-config.md` note at the vault root; see `docs/vault-config.md`. With no `vault-config.md`, every setting below takes its default and this behaves exactly as it always has (writing `repos/<name>/index.md`).
+See `runbooks/using-the-vault.md` in the vault, section 3, for the manual version of this workflow; this command automates it. Optional per-vault settings live in `vault-config.md` at the vault root (`docs/vault-config.md`); with none, every setting takes its default (writing `repos/<name>/index.md`).
 
 Using the `obsidian` MCP server (must be registered at user scope — if any `mcp__obsidian__*` call fails, say so plainly and point at `docs/mcp-setup.md` rather than guessing):
 
 ## Step 0 — Backend and settings
 
-**Backend.** Two different `obsidian` MCP servers are in use, with different tool names. Detect which one you have from the tools actually available to you, and use that column for every step below:
+**Backend.** Detect which `obsidian` MCP server you have from the tools actually available to you (their tool names differ), and use that column for every step below:
 
 | Operation | `rest-api` (Local REST API plugin) | `mcpvault` |
 |---|---|---|
@@ -20,7 +20,7 @@ Using the `obsidian` MCP server (must be registered at user scope — if any `mc
 
 Always read the full current content, then write the full updated content back, for either backend (the surgical `vault_patch` tool is unreliable on some plugin versions, see the Known Gotchas table in `docs/mcp-setup.md`). If you have neither set of tools, stop and say so.
 
-**Settings.** Do this first, on its own: read `vault-config.md` at the vault root and wait for the result before making any other vault call (do not batch it with other reads or listings — the settings decide which paths to touch). If it doesn't exist, or a key is missing, use the default. If it exists but part of it is malformed, use what you can read reliably, the default for everything else, and tell me plainly which part was unreadable. Unknown keys are ignored. A `backend` key, if present, overrides the detection above.
+**Settings.** First, on its own: read `vault-config.md` at the vault root and wait for the result before any other vault call (never batch it with other reads or listings, as the settings decide which paths to touch). A missing file or key takes the default. If part of it is malformed, use what you can read reliably, the default for the rest, and tell me plainly which part was unreadable. Unknown keys are ignored. A `backend` key overrides the detection above.
 
 | Setting | Default | Meaning |
 |---|---|---|

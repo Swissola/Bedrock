@@ -5,13 +5,13 @@ allowed-tools: Bash(bash "$HOME/.claude/hook-templates/session-start-vault-conte
 ---
 <!-- bedrock-template: vault-context, version 6 -->
 
-See `runbooks/using-the-vault.md` in the vault, section 1, for the manual version of this workflow and its rationale — this command just automates it. Per-vault differences are optional and live in a `vault-config.md` note at the vault root; see `docs/vault-config.md`. With no `vault-config.md`, every setting below takes its default and this behaves exactly as it always has.
+See `runbooks/using-the-vault.md` in the vault, section 1, for the manual version of this workflow; this command automates it. Optional per-vault settings live in `vault-config.md` at the vault root (`docs/vault-config.md`); with none, every setting takes its default.
 
 Using the `obsidian` MCP server (must be registered at user scope — if any `mcp__obsidian__*` call fails, say so plainly and point at `docs/mcp-setup.md` rather than guessing):
 
 ## Step 0 — Backend and settings
 
-**Backend.** Two different `obsidian` MCP servers are in use, with different tool names. Detect which one you have from the tools actually available to you, and use that column for every step below:
+**Backend.** Detect which `obsidian` MCP server you have from the tools actually available to you (their tool names differ), and use that column for every step below:
 
 | Operation | `rest-api` (Local REST API plugin) | `mcpvault` |
 |---|---|---|
@@ -21,7 +21,7 @@ Using the `obsidian` MCP server (must be registered at user scope — if any `mc
 
 If you have neither set of tools, stop and say so.
 
-**Settings.** Do this first, on its own: read `vault-config.md` at the vault root and wait for the result before making any other vault call (do not batch it with other reads or listings — the settings decide which paths to touch). If it doesn't exist, or a key is missing, use the default. If it exists but part of it is malformed, use what you can read reliably, the default for everything else, and tell me plainly which part was unreadable. Unknown keys are ignored. A `backend` key, if present, overrides the detection above.
+**Settings.** First, on its own: read `vault-config.md` at the vault root and wait for the result before any other vault call (never batch it with other reads or listings, as the settings decide which paths to touch). A missing file or key takes the default. If part of it is malformed, use what you can read reliably, the default for the rest, and tell me plainly which part was unreadable. Unknown keys are ignored. A `backend` key overrides the detection above.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -41,6 +41,6 @@ If you have neither set of tools, stop and say so.
 5. **Otherwise find this repo's notes by listing folders, without reading any note.** A note belongs to the repo if its filename, after the date, starts with the repo name and a hyphen, taking the longest match among the repos documented under `reposPath` (so `widget` does not claim `widget-ui`'s notes). Take your own latest note for this repo, always, plus the latest note for this repo from each of up to three other contributors, most recent first (newest filename date, then modification time if the backend reports it). A solo vault therefore loads one note.
 6. **Read those notes and show them trimmed.** Yours: `Context for Future Sessions`, the prose of `Open Questions / Next Steps` and the latest `## Update` section. Others': `Context for Future Sessions` only. Leave out every checkbox line (`- [ ]`, `[x]`, `[-]`, `[>]`) from what you show: open items go in step 7. Show each note's tags.
 7. **Open items.** From each contributor's latest note for this repo, loaded or not (search for `- [ ]` rather than reading whole notes; if you must read one that step 5 did not select, take only its open items and show nothing else from it), list the open items once each with owner and age. Age counts from `opened YYYY-MM-DD` on the line if there is one, else from the note's date. Flag as stale any older than `staleOpenItemDays`, and list stale ones first. Show at most 10, then "and N more".
-   **Freshness.** Before that list, run `bash "$HOME/.claude/hook-templates/session-start-vault-context.sh" --behind`. That is the installed session-start hook asked for one thing: a `Behind the repo: N commits after <when>. Open items may be out of date.` line when the repo has commits newer than the newest of these notes, and nothing when it has none. Run it even if the session-start hook's own block is in the conversation, since commits may have landed since the session started. If the file is not there or it prints nothing, say nothing about freshness. If it prints the line, put it first in the summary exactly as printed. Do not work the count out yourself.
+   **Freshness.** Before that list, run `bash "$HOME/.claude/hook-templates/session-start-vault-context.sh" --behind`. It prints a `Behind the repo: N commits after <when>. Open items may be out of date.` line when the repo has commits newer than the newest of these notes, and nothing otherwise. Run it even if the session-start hook's block is already here, since commits may have landed since. If the file is missing or it prints nothing, say nothing about freshness; otherwise put the line first in the summary exactly as printed. Never count commits yourself.
 8. **No notes for this repo?** Use the newest note with no repo in its filename (an older note), reading the frontmatter of at most the newest 5 and skipping any whose `repo:` names a different repo, and stop at the first usable one. Label it "older note, repo unknown" and say there are at least N such notes. Never use a note that belongs to another repo. If there is none, say there are no notes yet.
 9. Summarise for me: any `Behind the repo:` line from step 7 first, then what was done, what is open (the list from step 7), and anything I should know before continuing. Keep it tight: a few sentences per note, not a re-print.
