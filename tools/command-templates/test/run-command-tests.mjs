@@ -268,7 +268,19 @@ function unloggedFixture(subjects, noteDays = 5) {
   if (noteDays > 0) setFileTime(vault, rel, new Date(`${daysAgo(noteDays)}T09:00:00Z`));
   return { repo, vault };
 }
-const UNLOGGED_SESSION = 'TEST HARNESS: synthetic session in repo widget. You edited the config loader (marker WIDGET-WORK-1) and made exactly one commit, the latest one. Nothing touched ITEM-MINE.';
+// A repo with `commits` commits after the one its repo doc names as source-commit. With a `threshold` the vault's
+// config sets repoDocBehindCommits to it, and without one the setting is absent, which means off.
+const DOC_CLAIM = /Repo doc: \d+ commits?\b/;
+const ranTheDocHook = (r) => r.shell.some((c) => c.includes('session-start-vault-context.sh') && c.includes('--doc-behind'));
+function docBehindFixture(commits, threshold = null) {
+  const { repo } = mkRepo('widget');
+  const src = sh('git', ['rev-parse', '--short', 'HEAD'], repo).stdout.trim();
+  for (let i = 0; i < commits; i++) sh('git', ['commit', '--allow-empty', '-qm', `change ${i}`], repo);
+  const doc = `---\nrepo: widget\nsource-commit: ${src}\n---\n\n# widget\n`;
+  const config = threshold === null ? {} : { 'vault-config.md': `---\nrepoDocBehindCommits: ${threshold}\n---\nConfig.\n` };
+  return { repo, doc, vault: mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'repos/widget/index.md': doc, ...config }) };
+}
+const UNLOGGED_SESSION ='TEST HARNESS: synthetic session in repo widget. You edited the config loader (marker WIDGET-WORK-1) and made exactly one commit, the latest one. Nothing touched ITEM-MINE.';
 const DOCS = { 'repos/widget/index.md': '# widget\n', 'repos/gadget/index.md': '# gadget\n', 'repos/gizmo/index.md': '# gizmo\n' };
 
 // A session that worked in three repos: widget (the working directory) plus gadget and gizmo, given by path.
@@ -546,6 +558,29 @@ const scenarios = [
     const r = runCommand({ vault, repo, template: 'vault-log', args: 'quiet-gap', system: SESSION });
     check('no behind-the-repo line', !BEHIND_CLAIM.test(r.final), r.final.slice(0, 700));
     check('does not report a gap', !BEHIND_CLAIM.test(r.final) && !UNLOGGED_CLAIM.test(r.final), r.final.slice(0, 700));
+  } },
+  { name: 'log: offers /vault-populate when the repo doc is behind, and neither runs it nor touches the doc', run() {
+    if (skipWithoutHook()) return;
+    const { repo, vault, doc } = docBehindFixture(3, 2);
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'doc-behind', system: SESSION });
+    check('got the line by running the hook', ranTheDocHook(r), r.shell.join(' | ').slice(0, 300));
+    check('did not count the commits itself', !countedByHand(r), r.shell.join(' | ').slice(0, 300));
+    check('gives the line as printed, with the count of 3', /Repo doc: 3 commits\b/.test(r.final), r.final.slice(0, 700));
+    check('offers /vault-populate', r.final.includes('/vault-populate'), r.final.slice(0, 700));
+    check('the repo doc is untouched', read(vault, 'repos/widget/index.md') === doc, read(vault, 'repos/widget/index.md').slice(0, 200));
+    check('still writes the note', notesOf(r).some((f) => f.includes('-widget-doc-behind')), notesOf(r).join(', '));
+  } },
+  { name: 'log: says nothing about the repo doc when it is under the threshold', run() {
+    if (skipWithoutHook()) return;
+    const { repo, vault } = docBehindFixture(3, 5);
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'doc-under', system: SESSION });
+    check('no repo doc line', !DOC_CLAIM.test(r.final), r.final.slice(0, 700));
+  } },
+  { name: 'log: says nothing about the repo doc when the setting is absent', run() {
+    if (skipWithoutHook()) return;
+    const { repo, vault } = docBehindFixture(3);
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'doc-off', system: SESSION });
+    check('no repo doc line, as the check is off by default', !DOC_CLAIM.test(r.final), r.final.slice(0, 700));
   } },
   { name: 'log: three repos in one session give three notes, each with its own tags and only its own work', run() {
     const { repo } = mkRepo('widget'); const g = mkRepo('gadget'); const z = mkRepo('gizmo');
