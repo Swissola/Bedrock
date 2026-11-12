@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Automates the scriptable parts of docs/mcp-setup.md for this vault, on Windows.
 

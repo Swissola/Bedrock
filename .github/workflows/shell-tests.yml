@@ -121,6 +121,10 @@ jobs:
       - name: PowerShell scripts, Windows PowerShell 5.1
         shell: powershell
         run: ./tools/testing/test-powershell-scripts.ps1
+      # Rules and exclusions are in tools/PSScriptAnalyzerSettings.psd1. -Install is a no-op if the runner already has it.
+      - name: PowerShell scripts, PSScriptAnalyzer
+        shell: pwsh
+        run: ./tools/lint-powershell.ps1 -Install
       - name: pre-commit hook
         shell: bash
         run: bash tools/hook-templates/test-pre-commit.sh
