@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Stages selected vault docs for publishing to an external wiki, per docs/publishing-to-a-wiki.md.
 
