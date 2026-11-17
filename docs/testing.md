@@ -345,6 +345,25 @@ Further scenarios:
 | `statusline_without_node_copies_the_script_and_warns` | With no `node` on `PATH` the script is copied, `settings.json` is not created, the snippet is printed, exit 0. Skipped under Git Bash, where a node-free `PATH` cannot be built. |
 | `help_documents_the_statusline_flag` / `force_without_statusline_never_edits_settings` | `--help` lists the flag; `--force` alone never touches `settings.json`. |
 
+### `tools/testing/test-migrate-vault-format.sh`: the format 2 converter
+
+`tools/migrate-vault-format` converts a vault to format 2 (one open-items file per author per repo). Every fixture is a synthetic vault built inside the test; no real vault is read.
+
+| Test | What it checks |
+|---|---|
+| `a_solo_flat_vault_converts`, `a_team_vault_converts_per_author` | Flat and `{author}` layouts each get the right open-items files, the marker, and nothing of another author's. |
+| `a_second_run_changes_nothing` | A second run reports "already", changes no file and makes no second backup. |
+| `a_dry_run_writes_nothing` | `--dry-run` changes nothing, makes no backup, and reports the counts. |
+| `notes_on_the_latest_date_are_merged_and_older_ones_ignored` | Several notes on an author's latest date are merged, duplicates keep the earliest opened date, older notes are not carried. |
+| `a_from_suffix_is_stripped_and_deduplicated`, `an_item_with_no_opened_date_takes_the_note_date` | `(from [[note]], opened DATE)` is cleaned and de-duplicated; a line with no opened date takes its note's date. |
+| `a_repo_with_no_open_items_gets_an_empty_open_section` | An empty Open section, still converted. |
+| `a_shorter_repo_name_does_not_claim_a_longer_ones_notes`, `the_repo_in_a_notes_frontmatter_wins_over_its_filename` | `widget` does not take `widget-ui`'s notes; a frontmatter `repo:` wins over the filename. |
+| `crlf_notes_convert_without_carriage_returns`, `repo_name_case_keep_names_the_file_with_the_repos_case` | Windows line endings and `repoNameCase: keep`. |
+| `the_backup_is_outside_the_vault_and_holds_the_originals` | The backup sits beside the vault and holds the original notes and config. |
+| `a_conflict_copy_of_an_open_items_file_stops_the_run`, `a_failed_verification_sets_no_marker_and_writes_nothing` | A `.sync-conflict` copy exits 2; a count mismatch exits 1; neither writes a file or the marker. |
+| `old_notes_are_left_untouched`, `an_existing_open_items_file_is_kept` | Old notes stay byte-identical; a hand-edited open-items file is never overwritten. |
+| `an_unreadable_config_stops_before_anything_is_written`, `a_missing_config_is_created_with_the_marker`, `an_existing_marker_value_is_replaced_not_duplicated`, `bad_usage_exits_2` | Config handling and exit codes. |
+
 ### `tools/testing/test-setup-mcp.sh`: `setup-mcp.sh`
 
 The five steps of the Obsidian MCP setup, with `claude` and `curl` stubbed and a fixture `data.json`.

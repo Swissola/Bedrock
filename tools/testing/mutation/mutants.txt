@@ -178,3 +178,16 @@ vault-lib@@vl1@@tools/hook-templates/vault-lib@@s/\${ref:-main}/${ref:-master}/@
 vault-lib@@vl2@@tools/hook-templates/vault-lib@@s/ref="\${ref#origin\/}"/:/@@the default branch is reported as origin/trunk, not trunk
 vault-lib@@vl3@@tools/hook-templates/vault-lib@@s/--format='%h'/--format='%h %s'/@@commit subjects are listed with the unpushed hashes
 setup-mcp@@sm5@@tools/setup-mcp.sh@@s/"${curl_key}" | curl/"${api_key}" | curl/@@the key is passed to curl unescaped, so a backslash in it breaks the config line
+
+# ---- migrate-vault-format ------------------------------------------------------------------
+migrate-vault-format@@mv1@@tools/migrate-vault-format@@s/\[\[ "\$got" != "\$expected" \]\]/[[ "$got" == "-1" ]]/@@the count check after building no longer stops a run that lost an item
+migrate-vault-format@@mv2@@tools/migrate-vault-format@@s/!seen\[\$1\]++/1/@@duplicate items are no longer merged
+migrate-vault-format@@mv3@@tools/migrate-vault-format@@s/sort -t "\$TAB" -k1,1 -k2,2 "\$ALL_FILE"/sort -t "$TAB" -k1,1 -k2,2r "$ALL_FILE"/@@a duplicate keeps its latest opened date instead of its earliest
+migrate-vault-format@@mv4@@tools/migrate-vault-format@@s/-name 'open-items-\*sync-conflict\*'/-name 'no-such-name-xyz'/@@a sync-conflict copy of an open-items file no longer stops the run
+migrate-vault-format@@mv5@@tools/migrate-vault-format@@s/if \[\[ -e "\$target" \]\]; then kept=/if false; then kept=/@@an existing open-items file is overwritten instead of kept
+migrate-vault-format@@mv6@@tools/migrate-vault-format@@s/cp -R "\$DAILY_DIR" "\$BACKUP\/\$DAILY_BASE"/:/@@the backup no longer copies the daily-notes folder
+migrate-vault-format@@mv7@@tools/migrate-vault-format@@s/ \&\& "\$d" == "\$latest" \]\] || continue/ ]] || continue/@@notes older than the latest date are carried too
+migrate-vault-format@@mv8@@tools/migrate-vault-format@@s/sort -rn | cut -f2-/sort -n | cut -f2-/@@a shorter repo name is tried before a longer one and claims its notes
+migrate-vault-format@@mv9@@tools/migrate-vault-format@@s/^if \[\[ "\$DRY" = 1 \]\]; then$/if false; then/@@a dry run goes on to back up and write
+migrate-vault-format@@mv10@@tools/migrate-vault-format@@s/tr -d '..' < "\$note" | awk -v sec/cat "$note" | awk -v sec/@@carriage returns from Windows notes reach the open-items file@@not-observable-on-windows
+migrate-vault-format@@mv11@@tools/migrate-vault-format@@s/infm \&\& index(line, "vaultFormat:") == 1 { print "vaultFormat: 2" cr; done = 1; next }//@@an existing vaultFormat line is left and a second one is added

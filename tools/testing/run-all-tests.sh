@@ -43,6 +43,7 @@ SUITES=(
   "bash|hook-templates/test-session-start-vault-check.sh"
   "bash|hook-templates/test-session-start-vault-context.sh"
   "bash|testing/test-install-claude-config.sh"
+  "bash|testing/test-migrate-vault-format.sh"
   "bash|testing/test-setup-mcp.sh"
   "bash|testing/test-structure.sh"
   "node|command-templates/test/test-stub-rest-api-mcp.mjs"
