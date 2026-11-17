@@ -12,9 +12,10 @@ SCRIPT="${SCRIPT_UNDER_TEST:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/mi
 PASS=0
 FAIL=0
 CLEANUP_DIRS=()
-NOTES_DIR=daily-notes
-CONFIG_FILE=vault-config.md
-OPEN_FILE_WIDGET=open-items-widget.md
+NOTES_DIR="daily-notes"
+CONFIG_FILE="vault-config.md"
+OPEN_FILE_WIDGET="open-items-widget.md"
+ONE_ITEM='- [ ] one (opened 2026-11-01)'
 
 cleanup() {
   local d
@@ -79,8 +80,8 @@ write_config() {  # args: vault, then one "key: value" per argument
 
 # A checksum listing of every file under a folder, for before and after comparisons.
 snapshot() {
-  local f
-  find "$1" -type f | sort | while IFS= read -r f; do printf '%s ' "$f"; cksum < "$f"; done
+  local dir="$1" f
+  find "$dir" -type f | sort | while IFS= read -r f; do printf '%s ' "$f"; cksum < "$f"; done
   return 0
 }
 
@@ -93,8 +94,8 @@ run_migrate() {
   return 0
 }
 
-open_count() { grep -c '^- \[ \]' "$1" 2>/dev/null || true; return 0; }
-marker_of() { [[ -f "$1/$CONFIG_FILE" ]] || return 0; tr -d '\r' < "$1/$CONFIG_FILE" | grep '^vaultFormat:' | head -n 1; return 0; }
+open_count() { local file="$1"; grep -c '^- \[ \]' "$file" 2>/dev/null || true; return 0; }
+marker_of() { local vault="$1"; [[ -f "$vault/$CONFIG_FILE" ]] || return 0; tr -d '\r' < "$vault/$CONFIG_FILE" | grep '^vaultFormat:' | head -n 1; return 0; }
 
 test_a_solo_flat_vault_converts() {
   local v; v="$(new_vault)"
@@ -128,7 +129,7 @@ test_a_second_run_changes_nothing() {
   local v before after
   v="$(new_vault)"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-03-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-03-widget-a.md" ""
   run_migrate "$v"
   before="$(snapshot "$v")"
   run_migrate "$v"
@@ -144,7 +145,7 @@ test_a_dry_run_writes_nothing() {
   local v before after
   v="$(new_vault)"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-03-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-03-widget-a.md" ""
   before="$(snapshot "$(dirname "$v")")"
   run_migrate "$v" --dry-run
   after="$(snapshot "$(dirname "$v")")"
@@ -250,7 +251,7 @@ test_repo_name_case_keep_names_the_file_with_the_repos_case() {
   v="$(new_vault)"
   write_config "$v" "repoNameCase: keep"
   mkdir -p "$v/repos/Widget"; echo doc > "$v/repos/Widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-Widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-Widget-a.md" ""
   run_migrate "$v"
   assert_eq "case keep: mixed-case file name" "1" "$(open_count "$v/$NOTES_DIR/alice/open-items-Widget.md")"
   assert_eq "case keep: marker added and the setting kept" "repoNameCase: keep" "$(grep '^repoNameCase' "$v/$CONFIG_FILE")"
@@ -262,7 +263,7 @@ test_the_backup_is_outside_the_vault_and_holds_the_originals() {
   v="$(new_vault)"
   write_config "$v" "dailyNotesPath: $NOTES_DIR/{author}"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
   run_migrate "$v"
   b="$(printf '%s\n' "$OUT" | sed -n 's/^backup=//p' | head -n 1)"
   assert_eq "backup: a folder was reported and exists" "yes" "$([[ -n "$b" && -d "$b" ]] && echo yes || echo no)"
@@ -276,7 +277,7 @@ test_a_conflict_copy_of_an_open_items_file_stops_the_run() {
   local v
   v="$(new_vault)"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
   echo stale > "$v/$NOTES_DIR/alice/open-items-widget.sync-conflict-20261101-120000-ABCDEFG.md"
   run_migrate "$v"
   assert_eq "conflict: exit 2" "2" "$ST"
@@ -302,7 +303,7 @@ test_old_notes_are_left_untouched() {
   local v before after
   v="$(new_vault)"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
   printf -- '- [ ] two (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-02-widget-b.md" ""
   before="$(snapshot "$v/$NOTES_DIR/alice" | grep -v open-items)"
   run_migrate "$v"
@@ -315,7 +316,7 @@ test_an_existing_open_items_file_is_kept() {
   local v f
   v="$(new_vault)"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
   f="$v/$NOTES_DIR/alice/$OPEN_FILE_WIDGET"
   printf -- '---\nrepo: widget\n---\n\n## Open\n- [ ] hand edited (opened 2026-11-09)\n\n## Closed\n' > "$f"
   run_migrate "$v"
@@ -330,7 +331,7 @@ test_an_unreadable_config_stops_before_anything_is_written() {
   v="$(new_vault)"
   printf -- '---\ndailyNotesPath: daily-notes\nno closing line\n' > "$v/$CONFIG_FILE"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
   before="$(snapshot "$(dirname "$v")")"
   run_migrate "$v"
   after="$(snapshot "$(dirname "$v")")"
@@ -343,7 +344,7 @@ test_a_missing_config_is_created_with_the_marker() {
   local v
   v="$(new_vault)"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
   run_migrate "$v"
   assert_eq "no config: created with the marker" "vaultFormat: 2" "$(marker_of "$v")"
   return 0
@@ -354,7 +355,7 @@ test_an_existing_marker_value_is_replaced_not_duplicated() {
   v="$(new_vault)"
   write_config "$v" "vaultFormat: 1" "staleOpenItemDays: 14"
   mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
-  printf -- '- [ ] one (opened 2026-11-01)\n' | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
   run_migrate "$v"
   assert_eq "old marker: one vaultFormat line" "1" "$(grep -c '^vaultFormat:' "$v/$CONFIG_FILE")"
   assert_eq "old marker: now 2" "vaultFormat: 2" "$(marker_of "$v")"

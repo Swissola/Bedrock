@@ -53,7 +53,7 @@ CONFIG_FILE="$VAULT_ROOT/$CONFIG_NAME"
 # because this script writes to it.
 config_value() {
   local key="$1"
-  [ -f "$CONFIG_FILE" ] || return 0
+  [[ -f "$CONFIG_FILE" ]] || return 0
   tr -d '\r' < "$CONFIG_FILE" | awk -v k="$key" '
     NR == 1 { if ($0 != "---") exit; next }
     $0 == "---" { closed = 1; exit }
