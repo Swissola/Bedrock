@@ -227,6 +227,17 @@ test_vault_log_note_template_starts_with_the_handoff() {
   return 0
 }
 
+# /vault-populate has a mode that writes only the repo summary, and lets a repo that is itself a vault
+# template (it has vault-config.md, index.md and daily-notes/, like Bedrock) through the "is this the
+# vault" guard when it already has a doc. Both are prompt text, so the test holds the words they rest on.
+test_vault_populate_documents_context_only_and_the_documented_repo_exception() {
+  local f="$TOOLS_DIR/command-templates/vault-populate.md"
+  assert_eq "the argument hint offers --context-only" "1" "$(sed -n '1,/^---$/p' "$f" | tr -d '\r' | grep -c '^argument-hint:.*--context-only')"
+  assert_eq "the steps say what --context-only skips and writes" "yes" "$(grep -qF 'skip steps 4 and 5, read nothing from the repo, write only `context.md`' "$f" && echo yes || echo no)"
+  assert_eq "a vault-looking repo with its own doc is let through" "yes" "$(grep -qF 'unless the repo already has a doc at `reposPath`' "$f" && echo yes || echo no)"
+  return 0
+}
+
 # A command template is a prompt read in full on every run, so its length is a running cost:
 # each has a line ceiling (the version 3 length plus about 40%). Tighten wording before raising one.
 test_vault_command_templates_stay_under_their_line_ceilings() {
@@ -413,6 +424,7 @@ test_vault_commands_pre_approve_exactly_the_hook_command_they_run
 test_vault_command_templates_carry_the_expected_versions
 test_vault_command_templates_stay_under_their_line_ceilings
 test_vault_log_note_template_starts_with_the_handoff
+test_vault_populate_documents_context_only_and_the_documented_repo_exception
 test_test_scripts_avoid_bash_4_only_features
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback
 test_every_suite_cleans_up_after_itself_with_a_trap

@@ -867,6 +867,53 @@ const scenarios = [
     check('Opened and Closed is last', s[s.length - 1] === 'Opened and Closed', s.join('|'));
     check('the two old sections are not written', !s.includes('Context for Future Sessions') && !s.includes('Open Questions / Next Steps'), s.join('|'));
   } },
+  { name: 'populate: --context-only writes only context.md from the doc and leaves the doc alone', run() {
+    const { repo } = mkRepo('widget');
+    const doc = `---\nrepo: widget\nlast-populated: 2026-01-01\ntags: [repo-doc, widget]\n---\n\n# widget\n\nA tiny echo service. Run it with python app.py.\n\n## Layout\n- app.py: the service.\n\n## Hand-written notes\n- **Never edit generated files.** They are rebuilt on every run, so changes are lost. More detail that should not be copied: MARKER-LONG-TAIL.\n`;
+    const vault = mkVault({ 'index.md': DEFAULT_HUB, [DOC]: doc });
+    const r = runCommand({ vault, repo, template: 'vault-populate', args: '--context-only' });
+    const ctx = fs.existsSync(path.join(vault, 'repos/widget/context.md')) ? read(vault, 'repos/widget/context.md') : '';
+    check('context.md was written', ctx.length > 0, walk(vault).join(', '));
+    check('the doc is byte for byte as it was, and was not written', read(vault, DOC) === doc && !r.calls.some((c) => (c.op === 'write' || c.op === 'patch') && c.path === DOC), r.calls.map((c) => c.name + ':' + c.path).join(','));
+    check('it is under 4 KB with the rule\'s lead-in and not its tail', Buffer.byteLength(ctx) < 4096 && ctx.includes('**Never edit generated files.**') && !ctx.includes('MARKER-LONG-TAIL'), ctx.slice(-300));
+    check('the doc had no source-commit, so the summary has none', sourceCommit(frontmatter(ctx)) === '', frontmatter(ctx));
+    check('it did not survey the repo (no git diff or file reads of the code)', !r.shell.some((c) => /\bgit\b.*\bdiff\b/.test(c)), r.shell.join(' | ').slice(0, 300));
+    check('it says the summary came from the doc, not the code', /doc alone|from the doc|not the code/i.test(r.final), r.final.slice(0, 300));
+  } },
+  { name: 'populate: --context-only with no doc stops and writes nothing', run() {
+    const { repo } = mkRepo('widget');
+    const vault = mkVault({ 'index.md': DEFAULT_HUB });
+    const r = runCommand({ vault, repo, template: 'vault-populate', args: '--context-only' });
+    check('nothing was written', !r.calls.some((c) => c.op === 'write' || c.op === 'patch'), r.calls.map((c) => c.name + ':' + c.path).join(','));
+    check('it says there is nothing to summarise', /nothing to summari|no doc|does not exist|plain run/i.test(r.final), r.final.slice(0, 300));
+  } },
+  { name: 'populate: a repo that is a vault template and has its own doc is refreshed, not refused', run() {
+    const { repo } = mkRepo('widget');
+    fs.mkdirSync(path.join(repo, 'daily-notes'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'daily-notes', '.keep'), '');
+    fs.writeFileSync(path.join(repo, 'index.md'), '# hub template\n');
+    fs.writeFileSync(path.join(repo, 'vault-config.md'), '---\nvaultFormat: 2\n---\n');
+    sh('git', ['add', '-A'], repo); sh('git', ['commit', '-qm', 'vault template files'], repo);
+    const first = headFull(repo).slice(0, 7);
+    fs.appendFileSync(path.join(repo, 'app.py'), "print('another change')\n"); sh('git', ['commit', '-qam', 'change'], repo);
+    const doc = `---\nrepo: widget\nlast-populated: 2026-01-01\nsource-commit: ${first}\ntags: [repo-doc, widget]\n---\n\n# widget\n\nOld text.\n\n## Hand-written notes\n- **Keep it small.** Because tokens cost money.\n`;
+    const vault = mkVault({ 'index.md': DEFAULT_HUB, [DOC]: doc });
+    runCommand({ vault, repo, template: 'vault-populate' });
+    check('context.md was written, so the guard did not refuse', walk(vault).includes('repos/widget/context.md'), walk(vault).join(', '));
+    check('the doc moved on to the current commit', headFull(repo).startsWith(sourceCommit(frontmatter(read(vault, DOC)))), frontmatter(read(vault, DOC)));
+  } },
+  { name: 'populate: a folder that looks like the vault and has no doc is refused', run() {
+    const { repo } = mkRepo('widget');
+    fs.mkdirSync(path.join(repo, 'daily-notes'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'daily-notes', '.keep'), '');
+    fs.writeFileSync(path.join(repo, 'index.md'), '# hub\n');
+    fs.writeFileSync(path.join(repo, 'vault-config.md'), '---\nvaultFormat: 2\n---\n');
+    sh('git', ['add', '-A'], repo); sh('git', ['commit', '-qm', 'vault files'], repo);
+    const vault = mkVault({ 'index.md': DEFAULT_HUB });
+    const r = runCommand({ vault, repo, template: 'vault-populate' });
+    check('nothing was written', !r.calls.some((c) => c.op === 'write' || c.op === 'patch'), r.calls.map((c) => c.name + ':' + c.path).join(','));
+    check('it says the command is for other repos', /other repos|is the vault|vault itself/i.test(r.final), r.final.slice(0, 300));
+  } },
 ];
 
 console.log(`Backend: ${backend}  model: ${model}  repeat: ${repeat}\n`);
