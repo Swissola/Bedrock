@@ -234,6 +234,8 @@ test_every_command_and_hook_in_the_repo_is_installed_byte_for_byte() {
     [[ -x "$p/claude/hook-templates/$h" ]] || missing=$((missing + 1))
     cmp -s "$TOOLS_DIR/hook-templates/$h" "$p/claude/hook-templates/$h" || differing=$((differing + 1))
   done
+  [[ -x "$p/claude/hook-templates/migrate-vault-format" ]] || missing=$((missing + 1))
+  cmp -s "$TOOLS_DIR/migrate-vault-format" "$p/claude/hook-templates/migrate-vault-format" || differing=$((differing + 1))
   assert_eq "every source command and hook is installed (and hooks are executable)" "0" "$missing"
   assert_eq "every installed copy is byte-identical to its source" "0" "$differing"
   assert_eq "the session-start wrapper is executable" "yes" "$([[ -x "$p/claude/hook-templates/session-start-vault-context.sh" ]] && echo yes || echo no)"

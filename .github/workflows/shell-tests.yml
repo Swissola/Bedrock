@@ -90,6 +90,8 @@ jobs:
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/hook-templates/test-post-merge.sh
       - name: installer
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/testing/test-install-claude-config.sh
+      - name: migrate-vault-format
+        run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/testing/test-migrate-vault-format.sh
       - name: setup-mcp.sh
         run: PATH="${{ matrix.path_prefix }}$PATH" ${{ matrix.bash }} tools/testing/test-setup-mcp.sh
       # shellcheck is preinstalled on the Ubuntu runner only; elsewhere that one check skips.
@@ -140,6 +142,9 @@ jobs:
       - name: installer
         shell: bash
         run: bash tools/testing/test-install-claude-config.sh
+      - name: migrate-vault-format
+        shell: bash
+        run: bash tools/testing/test-migrate-vault-format.sh
       - name: setup-mcp.sh
         shell: bash
         run: bash tools/testing/test-setup-mcp.sh

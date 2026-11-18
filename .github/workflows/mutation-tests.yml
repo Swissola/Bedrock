@@ -22,6 +22,7 @@ on:
           - session-start-vault-context
           - vault-lib
           - install-claude-config
+          - migrate-vault-format
           - setup-mcp
           - statusline
           - configure-settings

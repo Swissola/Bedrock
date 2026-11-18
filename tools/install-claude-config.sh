@@ -212,6 +212,7 @@ fi
 if [[ "$CHECK" = "1" ]]; then
   for f in "${COMMAND_SRCS[@]}"; do [[ -f "$f" ]] && check_file "$f" "$PREFIX/commands/$(basename "$f")" "commands/$(basename "$f")"; done
   for h in "${HOOKS[@]}"; do check_file "$SRC_ROOT/tools/hook-templates/$h" "$PREFIX/hook-templates/$h" "hook-templates/$h"; done
+  check_file "$SRC_ROOT/tools/migrate-vault-format" "$PREFIX/hook-templates/migrate-vault-format" "hook-templates/migrate-vault-format"
   tmpw="$(mktemp)"; wrapper_content > "$tmpw"
   check_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" "hook-templates/session-start-vault-context.sh"
   rm -f "$tmpw"
@@ -226,6 +227,7 @@ fi
 
 for f in "${COMMAND_SRCS[@]}"; do [[ -f "$f" ]] && install_file "$f" "$PREFIX/commands/$(basename "$f")"; done
 for h in "${HOOKS[@]}"; do install_file "$SRC_ROOT/tools/hook-templates/$h" "$PREFIX/hook-templates/$h" exec; done
+install_file "$SRC_ROOT/tools/migrate-vault-format" "$PREFIX/hook-templates/migrate-vault-format" exec
 tmpw="$(mktemp)"; wrapper_content > "$tmpw"
 install_file "$tmpw" "$PREFIX/hook-templates/session-start-vault-context.sh" exec
 rm -f "$tmpw"

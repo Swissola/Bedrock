@@ -49,6 +49,7 @@ All keys are optional. A missing key takes its default, unknown keys are ignored
 | `unloggedReminderCommits` | *(off)* | A positive whole number turns on the Stop reminder: when the repo has at least this many commits newer than your newest note, `session-start-vault-context --remind` shows a message, at most once per session per hour. Anything else, or leaving it out, means off. It also needs the hook registered as a `Stop` hook, see [`automation.md`](automation.md) | `session-start-vault-context` (`--remind`) |
 | `contextReadsRepoDoc` | `false` | If `true`, `/vault-context` also reads the current repo's doc at `reposPath` | context |
 | `vaultSync` | `git` | How the vault reaches other machines. Changes only the closing reminder (`git` reminds you to commit and push) | log |
+| `vaultFormat` | *(unset)* | The layout the vault uses. `2` means one open-items file per author per repo (see [Format 2](#format-2-and-migrate-vault-format)). Unset means the original layout. Written by `migrate-vault-format`, not by hand | `migrate-vault-format` |
 | `backend` | detected | `rest-api` or `mcpvault`. Normally leave it out: the command works out which `obsidian` MCP server it has from the tools actually available, because it has to know the tool names before it can read this file at all. Set it only to override | all commands, `post-merge` |
 
 Not configurable, on every vault: **secrets are never written into a note**, even if one appears in the conversation.
@@ -98,6 +99,27 @@ The file holds one absolute path per line, so a machine with several vaults list
 ### A different layout
 
 The conventions the assistant sees in the vault come from the vault's own [`CLAUDE.md`](../CLAUDE.md), which describes the team layout. A vault that overrides the layout here should edit its `CLAUDE.md` to match, or the assistant will be told the old layout.
+
+## Format 2 and `migrate-vault-format`
+
+Format 2 keeps each author's open items in one file per repo, `<dailyNotesPath>/open-items-<repo>.md` (so `daily-notes/<author>/open-items-<repo>.md` where the path has `{author}`, flat where it does not), instead of repeating the list in every daily note. The marker `vaultFormat: 2` in this file says a vault has been converted.
+
+`tools/migrate-vault-format` does the conversion. The installer copies it to `~/.claude/hook-templates/`.
+
+```
+bash ~/.claude/hook-templates/migrate-vault-format --dry-run      # report only
+bash ~/.claude/hook-templates/migrate-vault-format                # convert
+```
+
+It takes the vault from `~/.claude/hook-configs/vault-root`, or from `--vault <path>`. For each author and repo it reads the open items from every note dated on that author's latest date for the repo, merges duplicates (keeping the earliest `opened` date; a line with none takes its note's date) and writes the open-items file. Old notes are never changed. An open-items file that already exists is kept, so a second run changes nothing.
+
+- **Backup.** Before writing, it copies the daily-notes folder and `vault-config.md` to `<vault>-backup-format2-<timestamp>`, beside the vault and not inside it, so a synced vault does not sync the copy. A git vault is covered by its history as well.
+- **Marker last.** `vaultFormat: 2` is added only after every file has been written and counted, so a run that fails leaves the old layout readable. It checks that the items it built equal the items it expected, and stops without writing if not.
+- **Conflicts.** A `.sync-conflict` copy of an open-items file, or git conflict markers in one, stops the run with exit code 2. Resolve it first.
+- **Exit codes.** 0 done or already converted, 1 failure (nothing converted), 2 usage error or conflict.
+- **Rollback.** Before any session has been logged in the new format, restore the backup. After that, notes written in the new format are not in the backup, so restoring loses them.
+
+Until the command templates and hooks that read format 2 are released, converting only adds the open-items files and the marker, which the current templates ignore. Once they are, convert a vault and install them in one sitting, because templates for the original layout cannot read a converted vault.
 
 ## Backends
 

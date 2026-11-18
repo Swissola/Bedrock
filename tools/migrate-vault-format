@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+# migrate-vault-format: convert a vault to format 2, the layout with one open-items file per
+# author per repo (see docs/vault-config.md).
+#
+# Usage: migrate-vault-format [--vault <path>] [--dry-run]
+#   --vault    the vault root. Default: the path in ~/.claude/hook-configs/vault-root
+#   --dry-run  report what would be written; write nothing, make no backup
+#
+# For each author and repo it takes the open items from every note dated on that author's latest
+# date for the repo, merges duplicates (keeping the earliest opened date), and writes
+# <dailyNotesPath>/open-items-<repo>.md. Old notes are never touched. A backup of the daily-notes
+# folder and vault-config.md goes beside the vault (outside it, so a synced vault does not sync it).
+# `vaultFormat: 2` is added to vault-config.md last, so a run that fails leaves the old layout intact.
+# An open-items file that already exists is kept as it is, so a second run changes nothing.
+#
+# Exit: 0 done (or already format 2), 1 failure (nothing converted), 2 usage error or a conflict copy
+# of an open-items file that needs resolving first.
+#
+# Settings are read as the session-start hook reads them: dailyNotesPath, filenamePattern, reposPath
+# and repoNameCase, with the same defaults.
+
+set -u
+
+CONFIG_NAME=vault-config.md
+OPEN_SECTION="## Open Questions / Next Steps"
+
+usage() { sed -n '2,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0; }
+
+DRY=0
+VAULT_ROOT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --vault) [[ $# -ge 2 ]] || { echo "--vault needs a path" >&2; exit 2; }; VAULT_ROOT="$2"; shift 2 ;;
+    --dry-run) DRY=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$VAULT_ROOT" && -f "$HOME/.claude/hook-configs/vault-root" ]]; then
+  VAULT_ROOT="$(head -n 1 "$HOME/.claude/hook-configs/vault-root" | tr -d '\r')"
+fi
+if [[ -z "$VAULT_ROOT" || ! -d "$VAULT_ROOT" ]]; then
+  echo "No vault folder found. Pass --vault <path>." >&2
+  exit 2
+fi
+VAULT_ROOT="${VAULT_ROOT%/}"
+CONFIG_FILE="$VAULT_ROOT/$CONFIG_NAME"
+
+# --- settings (the same reading as the session-start hook) --------------------
+
+# A config whose frontmatter has no closing `---` is unreadable, and is refused here instead of ignored,
+# because this script writes to it.
+config_value() {
+  local key="$1"
+  [[ -f "$CONFIG_FILE" ]] || return 0
+  tr -d '\r' < "$CONFIG_FILE" | awk -v k="$key" '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { closed = 1; exit }
+    { lines[++n] = $0 }
+    END {
+      if (!closed) exit
+      for (i = 1; i <= n; i++) if (index(lines[i], k ":") == 1) {
+        v = substr(lines[i], length(k) + 2)
+        sub(/^[ \t]+/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+        if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+        print v; exit
+      }
+    }'
+}
+
+safe_rel() {
+  local rel="$1"
+  case "$rel" in ""|/*|[A-Za-z]:*|*..*) return 1 ;; esac
+  return 0
+}
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  if [[ "$(tr -d '\r' < "$CONFIG_FILE" | awk 'NR == 1 { if ($0 != "---") exit; next } $0 == "---" { print "closed"; exit }')" != closed ]]; then
+    echo "$CONFIG_NAME has no readable frontmatter (it must open and close with ---). Fix it first; nothing was changed." >&2
+    exit 1
+  fi
+fi
+
+MARKER="$(config_value vaultFormat)"
+case "$MARKER" in
+  2) echo "Vault is already format 2: nothing to do."; exit 0 ;;
+  ""|1) ;;
+  *) echo "vaultFormat is '$MARKER', which this script does not know. Nothing was changed." >&2; exit 2 ;;
+esac
+
+REPO_CASE="$(config_value repoNameCase)"
+REPOS_PATH="$(config_value reposPath)"
+safe_rel "$REPOS_PATH" || REPOS_PATH="repos/{repo}/index.md"
+DAILY_PATH="$(config_value dailyNotesPath)"
+safe_rel "$DAILY_PATH" || DAILY_PATH="daily-notes/{author}"
+DAILY_BASE="${DAILY_PATH%%\{*}"
+DAILY_BASE="${DAILY_BASE%/}"
+[[ -n "$DAILY_BASE" ]] || DAILY_BASE="daily-notes"
+DAILY_DIR="$VAULT_ROOT/$DAILY_BASE"
+HAS_AUTHOR=0
+case "$DAILY_PATH" in *"{author}"*) HAS_AUTHOR=1 ;; esac
+NAME_PATTERN="$(config_value filenamePattern)"
+[[ -n "$NAME_PATTERN" ]] || NAME_PATTERN="{date}-{repo}-{topic}"
+
+lower() { local text="$1"; printf '%s' "$text" | tr '[:upper:]' '[:lower:]'; return 0; }
+case_repo() { local name="$1"; if [[ "$REPO_CASE" == keep ]]; then printf '%s' "$name"; else lower "$name"; fi; return 0; }
+
+# The filename glob for notes about repo $1, as the hook builds it: {date} a date-shaped glob, other
+# placeholders wildcards, glob characters in the repo name escaped.
+glob_for() {
+  local repo="$1" repo_glob g
+  repo_glob="$(printf '%s' "$repo" | sed 's/[][*?\\]/\\&/g')"
+  g="${NAME_PATTERN//\{repo\}/$repo_glob}"
+  g="${g//\{date\}/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]}"
+  g="$(printf '%s' "$g" | sed -E 's/\{[A-Za-z]+\}/*/g')"
+  printf '%s.md' "$g"
+  return 0
+}
+
+# The repos the vault documents, one per line, found by listing the part of reposPath before {repo}.
+known_repos() {
+  local base after entry name
+  [[ "$REPOS_PATH" == *"{repo}"* ]] || return 0
+  base="${REPOS_PATH%%\{repo\}*}"
+  after="${REPOS_PATH#*\{repo\}}"
+  for entry in "$VAULT_ROOT/$base"*; do
+    entry="${entry##*/}"
+    case "$after" in
+      /*) [[ -e "$VAULT_ROOT/$base$entry$after" ]] || continue; name="$entry" ;;
+      *) [[ -z "$after" || "$entry" == *"$after" ]] || continue; name="${entry%"$after"}" ;;
+    esac
+    [[ -n "$name" ]] && case_repo "$name" && echo
+  done
+  return 0
+}
+
+# --- conflicts -----------------------------------------------------------------
+
+CONFLICTS=""
+if [[ -d "$DAILY_DIR" ]]; then
+  CONFLICTS="$(find "$DAILY_DIR" -type f -name 'open-items-*sync-conflict*' 2>/dev/null)"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && grep -q '^<<<<<<< ' "$f" 2>/dev/null && CONFLICTS="$CONFLICTS
+$f"
+  done <<EOF
+$(find "$DAILY_DIR" -type f -name 'open-items-*.md' 2>/dev/null)
+EOF
+fi
+CONFLICTS="$(printf '%s\n' "$CONFLICTS" | sed '/^$/d')"
+if [[ -n "$CONFLICTS" ]]; then
+  echo "An open-items file is in conflict. Resolve it first; nothing was changed:" >&2
+  printf '%s\n' "$CONFLICTS" | sed 's/^/  /' >&2
+  exit 2
+fi
+
+# --- index the notes ------------------------------------------------------------
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+INDEX_FILE="$WORK/index"
+MANIFEST_FILE="$WORK/manifest"
+ALL_FILE="$WORK/all"
+UNIQUE_FILE="$WORK/unique"
+REPORT_FILE="$WORK/report"
+TAB="$(printf '\t')"
+DATE_START_RE='^([0-9]{4}-[0-9]{2}-[0-9]{2})'
+
+# Longest repo name first, so a shorter one never claims a longer one's notes.
+KNOWN_SORTED="$(known_repos | sed '/^$/d' | awk '{ print length "\t" $0 }' | sort -rn | cut -f2-)"
+
+fm_repo() {
+  local note="$1"
+  tr -d '\r' < "$note" | awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    /^repo:/ { v = substr($0, 6); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
+  return 0
+}
+
+if [[ "$REPO_CASE" != keep ]]; then shopt -s nocasematch; fi
+: > "$INDEX_FILE"
+if [[ -d "$DAILY_DIR" ]]; then
+  while IFS= read -r note; do
+    [[ -n "$note" ]] || continue
+    name="${note##*/}"
+    case "$name" in open-items-*|*sync-conflict*) continue ;; esac
+    [[ "$name" =~ $DATE_START_RE ]] || continue
+    ndate="${BASH_REMATCH[1]}"
+    rel="${note#"$DAILY_DIR"/}"
+    author=""
+    if [[ "$HAS_AUTHOR" = 1 ]]; then
+      case "$rel" in */*) author="${rel%%/*}" ;; *) continue ;; esac
+    fi
+    repo="$(fm_repo "$note")"
+    if [[ -n "$repo" ]]; then
+      repo="$(case_repo "$repo")"
+    else
+      while IFS= read -r known; do
+        [[ -n "$known" ]] || continue
+        g="$(glob_for "$known")"
+        # The unquoted expansion is deliberate: the glob is the pattern.
+        # shellcheck disable=SC2254
+        case "$name" in $g) repo="$known"; break ;; esac
+      done <<EOF
+$KNOWN_SORTED
+EOF
+    fi
+    [[ -n "$repo" ]] || continue
+    case "$repo" in */*|.*|*..*) continue ;; esac
+    # A lone "." stands for "no author folder": a tab is whitespace to read, which would swallow an empty field.
+    printf '%s\t%s\t%s\t%s\n' "${author:-.}" "$repo" "$ndate" "$note" >> "$INDEX_FILE"
+  done <<EOF
+$(find "$DAILY_DIR" -type f -name '*.md' 2>/dev/null | sort)
+EOF
+fi
+shopt -u nocasematch
+
+# --- items ----------------------------------------------------------------------
+
+# The open items of one note, one per line, markers and the leading "- [ ] " removed.
+open_lines_of() {
+  local note="$1"
+  tr -d '\r' < "$note" | awk -v sec="$OPEN_SECTION" '
+    /^## / { insec = ($0 == sec); next }
+    insec && /^-[ \t]+\[ \][ \t]+/ { sub(/^-[ \t]+\[ \][ \t]+/, ""); print }'
+  return 0
+}
+
+OPENED_RE='opened[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
+SUFFIX_RE='^(.*[^[:space:]])[[:space:]]*\([^()]*(opened[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}|from[[:space:]]+\[\[)[^()]*\)[[:space:]]*$'
+
+# items_of <note> <note date>: "<key><TAB><opened><TAB><text>" per open item. The text has its trailing
+# "(from [[note]], opened DATE)" style parenthetical removed; the key ignores case and spacing.
+items_of() {
+  local note="$1" ndate="$2" line text opened key
+  while IFS= read -r line; do
+    text="$(printf '%s' "$line" | tr '\t' ' ')"
+    text="${text%"${text##*[![:space:]]}"}"
+    opened=""
+    if [[ "$text" =~ $OPENED_RE ]]; then opened="${BASH_REMATCH[1]}"; fi
+    while [[ "$text" =~ $SUFFIX_RE ]]; do text="${BASH_REMATCH[1]}"; done
+    [[ -n "$text" ]] || continue
+    [[ -n "$opened" ]] || opened="$ndate"
+    key="$(lower "$text" | tr -s '[:space:]' ' ')"
+    printf '%s\t%s\t%s\n' "$key" "$opened" "$text"
+  done < <(open_lines_of "$note")
+  return 0
+}
+
+target_for() {  # author repo
+  local author="$1" repo="$2" dir
+  dir="${DAILY_PATH//\{author\}/$author}"
+  dir="${dir//\{repo\}/$repo}"
+  printf '%s/%s/open-items-%s.md' "$VAULT_ROOT" "$dir" "$repo"
+  return 0
+}
+
+: > "$MANIFEST_FILE"
+: > "$REPORT_FILE"
+GROUP_N=0
+while IFS="$TAB" read -r author repo; do
+  [[ -n "$repo" ]] || continue
+  latest="$(awk -F'\t' -v a="$author" -v r="$repo" '$1 == a && $2 == r { print $3 }' "$INDEX_FILE" | sort | tail -n 1)"
+  : > "$ALL_FILE"
+  while IFS="$TAB" read -r a r d p; do
+    [[ "$a" == "$author" && "$r" == "$repo" && "$d" == "$latest" ]] || continue
+    items_of "$p" "$d" >> "$ALL_FILE"
+  done < "$INDEX_FILE"
+  read_n="$(wc -l < "$ALL_FILE" | tr -d ' ')"
+  sort -t "$TAB" -k1,1 -k2,2 "$ALL_FILE" | awk -F'\t' '!seen[$1]++' | sort -t "$TAB" -k2,2 -k1,1 > "$UNIQUE_FILE"
+  written_n="$(wc -l < "$UNIQUE_FILE" | tr -d ' ')"
+  [[ "$author" == . ]] && author=""
+  target="$(target_for "$author" "$repo")"
+  GROUP_N=$((GROUP_N + 1))
+  built="$WORK/built-$GROUP_N.md"
+  {
+    echo '---'
+    echo "repo: $repo"
+    echo "tags: [open-items, $repo]"
+    echo '---'
+    echo
+    echo '## Open'
+    while IFS="$TAB" read -r _k opened text; do
+      [[ -n "$text" ]] && echo "- [ ] $text (opened $opened)"
+    done < "$UNIQUE_FILE"
+    echo
+    echo '## Closed'
+  } > "$built"
+  if [[ "${MIGRATE_FAIL_AFTER_WRITE:-}" = 1 && "$written_n" -gt 0 ]]; then
+    # Test hook only: drop one item after it was built, so the check below has something to catch.
+    awk -v n="$written_n" '/^- \[ \]/ { c++; if (c == n) next } { print }' "$built" > "$built.cut" && mv "$built.cut" "$built"
+  fi
+  kept=""
+  if [[ -e "$target" ]]; then kept=" kept (file exists)"; fi
+  printf 'repo=%s author=%s read=%s written=%s merged=%s%s\n' "$repo" "${author:--}" "$read_n" "$written_n" "$((read_n - written_n))" "$kept" >> "$REPORT_FILE"
+  if [[ -z "$kept" ]]; then printf '%s\t%s\t%s\n' "$built" "$target" "$written_n" >> "$MANIFEST_FILE"; fi
+done <<EOF
+$(cut -f1,2 "$INDEX_FILE" | sort -u)
+EOF
+
+cat "$REPORT_FILE"
+
+if [[ "$DRY" = 1 ]]; then
+  echo "dry-run: nothing written, no backup made."
+  exit 0
+fi
+
+# --- verify, back up, write -------------------------------------------------------
+
+while IFS="$TAB" read -r built target expected; do
+  [[ -n "$built" ]] || continue
+  got="$(grep -c '^- \[ \]' "$built" || true)"
+  if [[ "$got" != "$expected" ]]; then
+    echo "Verification failed for $target: expected $expected open items, built $got. Nothing was written." >&2
+    exit 1
+  fi
+done < "$MANIFEST_FILE"
+
+BACKUP="$VAULT_ROOT-backup-format2-$(date +%Y%m%d-%H%M%S)"
+[[ -e "$BACKUP" ]] && BACKUP="$BACKUP-$$"
+mkdir -p "$BACKUP/$(dirname "$DAILY_BASE")" || { echo "Cannot create the backup folder $BACKUP. Nothing was changed." >&2; exit 1; }
+if [[ -d "$DAILY_DIR" ]]; then
+  cp -R "$DAILY_DIR" "$BACKUP/$DAILY_BASE" || { echo "Backup of $DAILY_BASE failed. Nothing was changed." >&2; exit 1; }
+fi
+if [[ -f "$CONFIG_FILE" ]]; then
+  cp "$CONFIG_FILE" "$BACKUP/$CONFIG_NAME" || { echo "Backup of $CONFIG_NAME failed. Nothing was changed." >&2; exit 1; }
+fi
+echo "backup=$BACKUP"
+
+while IFS="$TAB" read -r built target _expected; do
+  [[ -n "$built" ]] || continue
+  mkdir -p "$(dirname "$target")"
+  if ! cp "$built" "$target"; then echo "Could not write $target. The marker was not set." >&2; exit 1; fi
+done < "$MANIFEST_FILE"
+
+# The marker goes in last. A missing config is created; an existing vaultFormat line is replaced.
+if [[ -f "$CONFIG_FILE" ]]; then
+  awk '
+    NR == 1 { cr = ($0 ~ /\r$/) ? "\r" : ""; print; infm = 1; next }
+    infm { line = $0; sub(/\r$/, "", line) }
+    infm && line == "---" { if (!done) print "vaultFormat: 2" cr; infm = 0; print; next }
+    infm && index(line, "vaultFormat:") == 1 { print "vaultFormat: 2" cr; done = 1; next }
+    { print }' "$CONFIG_FILE" > "$WORK/config.new" || { echo "Could not update $CONFIG_NAME." >&2; exit 1; }
+  cp "$WORK/config.new" "$CONFIG_FILE"
+else
+  printf -- '---\nvaultFormat: 2\n---\n' > "$CONFIG_FILE"
+fi
+echo "vaultFormat: 2 set in $CONFIG_NAME."
+exit 0
