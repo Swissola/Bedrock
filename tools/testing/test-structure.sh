@@ -187,7 +187,7 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
 # The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
 test_vault_command_templates_carry_the_expected_versions() {
   local pair n want v
-  for pair in vault-log:10 vault-context:7 vault-populate:4; do
+  for pair in vault-log:10 vault-context:7 vault-populate:5; do
     n="${pair%%:*}"; want="${pair##*:}"
     v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
     assert_eq "$n.md is at version $want" "$want" "$v"
@@ -231,7 +231,7 @@ test_vault_log_note_template_starts_with_the_handoff() {
 # each has a line ceiling (the version 3 length plus about 40%). Tighten wording before raising one.
 test_vault_command_templates_stay_under_their_line_ceilings() {
   local pair n max lines
-  for pair in vault-log:109 vault-context:51 vault-populate:54; do
+  for pair in vault-log:109 vault-context:51 vault-populate:46; do
     n="${pair%%:*}"; max="${pair##*:}"
     lines="$(wc -l < "$TOOLS_DIR/command-templates/$n.md" | tr -d ' ')"
     assert_eq "$n.md is within $max lines (it has $lines)" "yes" "$([[ "$lines" -le "$max" ]] && echo yes || echo no)"
