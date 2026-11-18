@@ -96,15 +96,20 @@ set -u
 # `--doc-behind` is the same kind of one-line check on the repo doc: how far the code has moved on
 # from the commit the doc was built from. It rides on the same switch, so it never reads stdin either.
 #
+# `--context-behind` is the same check on the repo summary (`context.md`, beside the repo doc): it
+# speaks only once the summary is `contextBehindCommits` (default 10) commits behind the code.
+#
 # `--remind` is for a Stop hook: it reads the event from stdin itself, and prints a JSON systemMessage
 # saying the repo is behind its newest note, at most once per session per hour. Off unless
 # `unloggedReminderCommits` is set in vault-config.md.
 BEHIND_ONLY=0
 DOC_ONLY=0
+CONTEXT_ONLY=0
 REMIND_ONLY=0
 case "${1:-}" in
   --behind) BEHIND_ONLY=1 ;;
   --doc-behind) BEHIND_ONLY=1; DOC_ONLY=1 ;;
+  --context-behind) BEHIND_ONLY=1; CONTEXT_ONLY=1 ;;
   --remind) BEHIND_ONLY=1; REMIND_ONLY=1 ;;
   *) ;;
 esac
@@ -335,6 +340,18 @@ case "$POINTER_MAX_ITEMS" in ""|*[!0-9]*|0) POINTER_MAX_ITEMS=3 ;; esac
 
 TAB="$(printf '\t')"
 
+# The layout marker. Format 2 keeps each author's open items in <dailyNotesPath>/open-items-<repo>.md;
+# a vault without `vaultFormat: 2` has not been converted (see migrate-vault-format).
+VAULT_FORMAT="$(config_value vaultFormat)"
+
+# An open-items file is not a daily note: it is rewritten every session, so it must never count as
+# the latest note or move the "behind the repo" reference.
+is_open_items_file() {
+  local name="$1"
+  case "$name" in open-items-*) return 0 ;; esac
+  return 1
+}
+
 # Modification time in seconds, GNU or BSD stat.
 if stat -c %Y / >/dev/null 2>&1; then STAT_FLAVOUR=gnu; else STAT_FLAVOUR=bsd; fi
 mtime_of() {
@@ -351,6 +368,7 @@ latest_in() {
   local dir="$1" f name d best="" tied="" m best_m=-1 best_f=""
   while IFS= read -r f; do
     name="${f##*/}"
+    is_open_items_file "$name" && continue
     belongs_to_repo "$name" || continue
     d="0000-00-00"
     if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
@@ -445,6 +463,7 @@ older_fallback() {
   [[ -d "$DAILY_DIR" ]] || return 0
   while IFS= read -r f; do
     name="${f##*/}"
+    is_open_items_file "$name" && continue
     is_older_note "$name" || continue
     d="0000-00-00"
     if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
@@ -559,7 +578,8 @@ render_note() {
   elif [[ "$mine" = 1 ]]; then label="Your latest note"
   elif [ -n "$who" ]; then label="Latest note from $who"
   else label="Most recent daily note"; fi
-  ctx_raw=$(extract_section "$note" "## Context for Future Sessions")
+  ctx_raw=$(extract_section "$note" "## Handoff")
+  [[ -n "$ctx_raw" ]] || ctx_raw=$(extract_section "$note" "## Context for Future Sessions")
   next_raw=$(extract_section "$note" "## Open Questions / Next Steps")
   tags=$(note_tags "$note")
 
@@ -647,9 +667,9 @@ TODAY_N="$(day_number "$TODAY")"
 OPEN_ITEM_RE='^-[[:space:]]+\[ \][[:space:]]+(.*)$'
 OPENED_RE='opened[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
 
-# The open items of one note, one per line: "<age in days><TAB><1 if stale><TAB>
-# <owner><TAB><text>". Only "- [ ]" lines in the Open Questions section count. The
-# age runs from the "opened YYYY-MM-DD" on the line, else from the note's own date.
+# The open items of one open-items file, one per line: "<age in days><TAB><1 if stale><TAB>
+# <owner><TAB><text>". Only "- [ ]" lines in the Open section count. The age runs from the
+# "opened YYYY-MM-DD" on the line; a line with none counts as opened today.
 open_items_of() {
   local note="$1" owner="$2" name fdate="" line text ref n age stale
   name="${note##*/}"
@@ -669,17 +689,57 @@ open_items_of() {
       [[ "$age" -gt "$STALE_DAYS" ]] && stale=1
     fi
     printf '%s%s%s%s%s%s%s\n' "$age" "$TAB" "$stale" "$TAB" "${owner:-unknown}" "$TAB" "$text"
-  done < <(extract_section "$note" "## Open Questions / Next Steps")
+  done < <(extract_section "$note" "## Open")
   return 0
 }
 
-# The open items across every contributor's latest note, loaded or not: one per line as
+# Where a contributor's open-items file for this repo lives: dailyNotesPath with {author} (and
+# {repo}) filled in, then open-items-<repo>.md. A flat dailyNotesPath has no author, so $1 is empty.
+open_items_file_for() {
+  local who="$1" dir
+  dir="${DAILY_PATH//\{author\}/$who}"
+  dir="${dir//\{repo\}/$REPO_NAME}"
+  printf '%s/%s/open-items-%s.md' "$VAULT_ROOT" "$dir" "$REPO_NAME"
+  return 0
+}
+
+# True if the open-items file is in conflict: a Syncthing conflict copy beside it, or merge markers
+# in it. Its items are then not listed, because they cannot be trusted.
+open_items_conflict() {
+  local file="$1" dir base
+  dir="${file%/*}"
+  base="${file##*/}"
+  base="${base%.md}"
+  compgen -G "$dir/$base.sync-conflict-*" >/dev/null && return 0
+  grep -q '^<<<<<<< ' "$file" 2>/dev/null && return 0
+  return 1
+}
+
+# One line per contributor whose open-items file is in conflict, or nothing.
+conflict_lines() {
+  local _d _m path who file
+  while IFS="$TAB" read -r _d _m path who; do
+    [[ -n "$path" ]] || continue
+    file="$(open_items_file_for "$who")"
+    [[ -f "$file" ]] || continue
+    open_items_conflict "$file" && echo "Open items for ${who:-this vault} are in conflict (a sync-conflict copy or merge markers): not listed until it is resolved."
+  done <<EOF
+$ALL_SORTED
+EOF
+  return 0
+}
+
+# The open items across every contributor's open-items file for this repo: one per line as
 # open_items_of prints them, stale first, then oldest first.
 sorted_open_items() {
-  local _d _m path who items
+  local _d _m path who items file
   items="$(
     while IFS="$TAB" read -r _d _m path who; do
-      [[ -n "$path" ]] && open_items_of "$path" "$who"
+      [[ -n "$path" ]] || continue
+      file="$(open_items_file_for "$who")"
+      [[ -f "$file" ]] || continue
+      open_items_conflict "$file" && continue
+      open_items_of "$file" "$who"
     done <<EOF
 $ALL_SORTED
 EOF
@@ -761,47 +821,86 @@ remind_line() {
   return 0
 }
 
+# The source-commit in a file's frontmatter, as written, or nothing. Used only if it looks like a hash,
+# and never shown as written.
+source_commit_of() {
+  tr -d '\r' < "$1" | awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    index($0, "source-commit:") == 1 { sub(/^source-commit:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }'
+  return 0
+}
+
+# How far HEAD has moved on from a source-commit, for the two checks below. Sets SRC_STATE to one of
+# none (no source-commit recorded), odd (not a hash: ignored), unknown (not in this repo's history),
+# or ok with SRC_COMMITS set to the count. Silent otherwise: outside git, SRC_STATE is left empty.
+source_state() {
+  local file="$1" dir="${CLAUDE_PROJECT_DIR:-.}"
+  SRC_STATE=""; SRC_COMMITS=""; SRC_SHA=""
+  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  SRC_SHA="$(source_commit_of "$file")"
+  if [[ -z "$SRC_SHA" ]]; then SRC_STATE=none; return 0; fi
+  if [[ ! "$SRC_SHA" =~ ^[0-9a-f]{7,40}$ ]]; then SRC_STATE=odd; return 0; fi
+  if ! git -C "$dir" cat-file -e "$SRC_SHA^{commit}" 2>/dev/null; then SRC_STATE=unknown; return 0; fi
+  SRC_COMMITS="$(git -C "$dir" rev-list --count "$SRC_SHA..HEAD" 2>/dev/null)" || return 0
+  [[ "$SRC_COMMITS" =~ ^[0-9]+$ ]] && SRC_STATE=ok
+  return 0
+}
+
 # One line saying how far the code has moved on from the commit the repo doc was built from, or
 # nothing. Off unless `repoDocBehindCommits` in vault-config.md is a positive whole number, so a vault
-# that has not asked for it hears nothing. The doc's source-commit is used only if it looks like a
-# hash, and is never shown. Counts only, never a commit subject, as for behind_line. Silent with no
-# repo doc, outside git, or when the doc is current or under the threshold.
+# that has not asked for it hears nothing. Counts only, never a commit subject, as for behind_line.
+# Silent with no repo doc, outside git, or when the doc is current or under the threshold.
 doc_behind_line() {
-  local threshold dir src commits files noun_c="commits" noun_f="files"
+  local threshold files noun_c="commits" noun_f="files"
   threshold="$(config_value repoDocBehindCommits)"
   [[ "$threshold" =~ ^[1-9][0-9]*$ ]] || return 0
   [[ -f "$INDEX_FILE" ]] || return 0
-  dir="${CLAUDE_PROJECT_DIR:-.}"
-  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
-  src="$(tr -d '\r' < "$INDEX_FILE" | awk '
-    NR == 1 { if ($0 != "---") exit; next }
-    $0 == "---" { exit }
-    index($0, "source-commit:") == 1 { sub(/^source-commit:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }')"
-  if [[ -z "$src" ]]; then
-    echo "Repo doc: no source-commit recorded, so it has not been checked against the repo."
-    return 0
-  fi
-  [[ "$src" =~ ^[0-9a-f]{7,40}$ ]] || return 0
-  if ! git -C "$dir" cat-file -e "$src^{commit}" 2>/dev/null; then
-    echo "Repo doc: its source-commit is not in this repo's history, so it needs a full refresh."
-    return 0
-  fi
-  commits="$(git -C "$dir" rev-list --count "$src..HEAD" 2>/dev/null)" || return 0
-  [[ "$commits" =~ ^[1-9][0-9]*$ && "$commits" -ge "$threshold" ]] || return 0
-  files="$(git -C "$dir" diff --name-only "$src..HEAD" 2>/dev/null | grep -c .)" || files=0
-  [[ "$commits" -eq 1 ]] && noun_c="commit"
+  source_state "$INDEX_FILE"
+  case "$SRC_STATE" in
+    none) echo "Repo doc: no source-commit recorded, so it has not been checked against the repo."; return 0 ;;
+    unknown) echo "Repo doc: its source-commit is not in this repo's history, so it needs a full refresh."; return 0 ;;
+    ok) ;;
+    *) return 0 ;;
+  esac
+  [[ "$SRC_COMMITS" -ge 1 && "$SRC_COMMITS" -ge "$threshold" ]] || return 0
+  files="$(git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only "$SRC_SHA..HEAD" 2>/dev/null | grep -c .)" || files=0
+  [[ "$SRC_COMMITS" -eq 1 ]] && noun_c="commit"
   [[ "$files" -eq 1 ]] && noun_f="file"
-  echo "Repo doc: $commits $noun_c and $files $noun_f since its source-commit. Consider /vault-populate."
+  echo "Repo doc: $SRC_COMMITS $noun_c and $files $noun_f since its source-commit. Consider /vault-populate."
+  return 0
+}
+
+# The same for the repo summary, `context.md` beside the repo doc (the file name of reposPath replaced).
+# On by default at 10 commits; a setting that is not a positive whole number means 10. Silent when
+# there is no summary yet: /vault-populate has not been run for format 2, which is not an error.
+context_behind_line() {
+  local threshold ctx noun="commits" rel_dir=""
+  threshold="$(config_value contextBehindCommits)"
+  [[ "$threshold" =~ ^[1-9][0-9]*$ ]] || threshold=10
+  [[ "$INDEX_REL" == */* ]] && rel_dir="${INDEX_REL%/*}/"
+  ctx="$VAULT_ROOT/${rel_dir}context.md"
+  [[ -f "$ctx" ]] || return 0
+  source_state "$ctx"
+  case "$SRC_STATE" in
+    none) echo "Repo summary: no source-commit recorded. Run /vault-populate."; return 0 ;;
+    unknown) echo "Repo summary: its source-commit is not in this repo's history. Run /vault-populate."; return 0 ;;
+    ok) ;;
+    *) return 0 ;;
+  esac
+  [[ "$SRC_COMMITS" -ge "$threshold" ]] || return 0
+  echo "Repo summary: $SRC_COMMITS $noun behind the code since ${SRC_SHA:0:7}. Run /vault-populate."
   return 0
 }
 
 print_open_items() {
   local items total age stale owner text flag
   items="$(sorted_open_items)"
+  conflict_lines
   [[ -n "$items" ]] || return 0
   total="$(printf '%s\n' "$items" | grep -c .)"
   echo
-  echo "## Open items for $REPO_NAME (from each contributor's latest note; stale means open more than $STALE_DAYS days)"
+  echo "## Open items for $REPO_NAME (from each contributor's open-items file; stale means open more than $STALE_DAYS days)"
   printf '%s\n' "$items" | head -n "$MAX_ITEMS" | while IFS="$TAB" read -r age stale owner text; do
     flag="${age}d"
     [[ "$stale" = 1 ]] && flag="${age}d, stale"
@@ -833,6 +932,7 @@ print_pointer() {
 $SELECTED
 EOF
     behind_line
+    conflict_lines
     items="$(sorted_open_items)"
     if [[ -n "$items" ]]; then
       total="$(printf '%s\n' "$items" | grep -c .)"
@@ -858,7 +958,13 @@ EOF
 if [[ "$BEHIND_ONLY" = 1 ]]; then
   if [[ "$REMIND_ONLY" = 1 ]]; then remind_line
   elif [[ "$DOC_ONLY" = 1 ]]; then doc_behind_line
+  elif [[ "$CONTEXT_ONLY" = 1 ]]; then context_behind_line
   else behind_line; fi
+  exit 0
+fi
+
+if [[ "$VAULT_FORMAT" != 2 ]]; then
+  echo "Vault uses the old layout (no vaultFormat: 2 in vault-config.md). Update the command templates, then run migrate-vault-format."
   exit 0
 fi
 

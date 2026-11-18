@@ -13,7 +13,26 @@
 set -u
 # Tests must not depend on the machine's git identity: every hook run sees an empty global config.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
-HOOK_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-start-vault-context"
+REAL_HOOK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-start-vault-context"
+# Every test runs the hook through a thin wrapper that first marks the fixture vault as format 2
+# (the layout this hook reads), unless a test sets HOOK_TEST_NO_MARKER=1 to check the unconverted case.
+# The marker is added to an existing frontmatter block, or a config holding only the marker is created;
+# a config whose frontmatter is unreadable is left alone.
+WRAP_DIR="$(mktemp -d)"
+HOOK_SCRIPT="$WRAP_DIR/hook-wrapper"
+cat > "$HOOK_SCRIPT" <<WRAPEOF
+#!/usr/bin/env bash
+v="\${VAULT_ROOT:-}"
+if [[ -n "\$v" && -z "\${HOOK_TEST_NO_MARKER:-}" && -d "\$v" ]]; then
+  cfg="\$v/vault-config.md"
+  if [[ ! -f "\$cfg" ]]; then
+    printf -- '---\nvaultFormat: 2\n---\n' > "\$cfg"
+  elif ! tr -d '\r' < "\$cfg" | grep -q '^vaultFormat:' && tr -d '\r' < "\$cfg" | awk 'NR == 1 { if (\$0 != "---") exit 1; next } \$0 == "---" { f = 1; exit } END { exit !f }'; then
+    awk 'NR == 1 { cr = (\$0 ~ /\r\$/) ? "\r" : ""; print; infm = 1; next } infm { l = \$0; sub(/\r\$/, "", l) } infm && l == "---" { print "vaultFormat: 2" cr; infm = 0 } { print }' "\$cfg" > "\$cfg.tmp" && mv "\$cfg.tmp" "\$cfg"
+  fi
+fi
+exec bash "$REAL_HOOK" "\$@"
+WRAPEOF
 PASS=0
 FAIL=0
 EXIT_ZERO="EXIT=0"
@@ -227,7 +246,8 @@ test_unclosed_frontmatter_is_ignored() {
   mkdir -p "$vault/repos/widget"; echo "$DOC_MARKER" > "$vault/repos/widget/index.md"
   write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
   out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
-  assert_contains "unclosed frontmatter: config ignored, defaults used" "$DOC_MARKER" "$out"
+  assert_contains "unclosed frontmatter: config ignored, so no format marker is read and the vault reads as unconverted" "Vault uses the old layout" "$out"
+  assert_not_contains "...and nothing else is printed" "$DOC_MARKER" "$out"
   rm -rf "$(dirname "$repo")" "$vault"
   return $?
 }
@@ -456,6 +476,7 @@ CLEANUP_DIRS=()
 cleanup() {
   local d
   for d in "${CLEANUP_DIRS[@]:-}"; do [[ -n "$d" ]] && rm -rf "$d" 2>/dev/null; done
+  rm -rf "$WRAP_DIR" 2>/dev/null
   return 0
 }
 trap cleanup EXIT
@@ -633,7 +654,7 @@ test_the_hook_never_writes_to_the_vault() {
   local repo vault before after
   repo=$(fx_repo widget); vault=$(fx_vault)
   write_note "$vault/daily-notes/alice/2026-10-05-widget-a.md" A
-  printf -- '---\nreposPath: repos/{repo}/index.md\n---\n' > "$vault/vault-config.md"
+  printf -- '---\nreposPath: repos/{repo}/index.md\nvaultFormat: 2\n---\n' > "$vault/vault-config.md"
   before=$(cd "$vault" && find . -type f -exec cksum {} + | sort; cd "$vault" && find . | sort)
   run_hook "$repo" "$vault" "$STARTUP_EVENT" >/dev/null
   after=$(cd "$vault" && find . -type f -exec cksum {} + | sort; cd "$vault" && find . | sort)
@@ -1304,13 +1325,25 @@ test_the_tag_line_is_shown_for_each_loaded_note
 
 # ------------------------------------------------------------- open-item list
 
-# A note holding a context section and an Open Questions section whose lines come
-# from stdin: args vault author date repo topic mtime.
+# A note with a handoff, and the author's open-items file for the repo built from the lines on
+# stdin: args vault author date repo topic mtime. An open item with no opened date gets the note's
+# date, which is how the old layout aged it; an item that has one keeps it. Other lines are dropped.
 fx_open_note() {
   local vault="$1" author="$2" date="$3" repo="$4" topic="$5" mtime="$6"
   local f="$vault/daily-notes/$author/$date-$repo-$topic.md"
+  local items="$vault/daily-notes/$author/open-items-$repo.md" line
   mkdir -p "$(dirname "$f")"
-  { printf '## Context for Future Sessions\nctx-%s\n\n## Open Questions / Next Steps\n' "$author"; cat; } > "$f"
+  printf '## Handoff\nctx-%s\n' "$author" > "$f"
+  {
+    printf -- '---\nrepo: %s\n---\n\n## Open\n' "$repo"
+    while IFS= read -r line; do
+      case "$line" in
+        '- [ ] '*) case "$line" in *opened*) printf '%s\n' "$line" ;; *) printf '%s (opened %s)\n' "$line" "$date" ;; esac ;;
+        *) ;;
+      esac
+    done
+    printf '\n## Closed\n'
+  } > "$items"
   # In UTC, so the time a test gives is the time the hook reads whatever the machine's zone.
   TZ=UTC touch -t "$mtime" "$f"
   return 0
@@ -1392,8 +1425,8 @@ test_the_list_is_capped_with_an_and_n_more_line() {
 test_odd_item_lines_never_crash_or_read_stale_by_accident() {
   local repo vault out
   repo=$(fx_repo widget); vault=$(fx_vault)
-  mkdir -p "$vault/daily-notes/bob"
-  printf '## Context for Future Sessions\r\nctx\r\n\r\n## Open Questions / Next Steps\r\n- [ ] CRLFITEM   \r\n- [X] UPPERCLOSED\r\n' > "$vault/daily-notes/bob/2026-10-30-widget-b.md"
+  fx_open_note "$vault" bob 2026-10-30 widget b 202610300900 < /dev/null
+  printf -- '---\r\nrepo: widget\r\n---\r\n\r\n## Open\r\n- [ ] CRLFITEM (opened 2026-10-30)   \r\n\r\n## Closed\r\n- [X] UPPERCLOSED\r\n' > "$vault/daily-notes/bob/open-items-widget.md"
   fx_open_note "$vault" carol 2026-10-30 widget c 202610300900 <<'EOF'
 - [ ] BADDATE (opened 2026-13-45)
 - [ ] NOSUCHDAY (opened 2026-02-31)
@@ -2148,6 +2181,125 @@ test_doc_behind_flag_is_not_confused_with_a_session_source() {
   return 0
 }
 
+# --- `--context-behind`: how far the repo summary (context.md) has fallen behind the code
+
+# doc_fixture, plus a context.md beside the repo doc: its source-commit is the first commit, or `$1`,
+# or absent when `$1` is "none". Prints "repo vault".
+ctx_fixture() {
+  local repo vault src="${1:-}"
+  read -r repo vault <<< "$(doc_fixture)"
+  [[ -n "$src" ]] || src=$(git -C "$repo" rev-parse --short HEAD)
+  if [[ "$src" = none ]]; then printf -- '---\nrepo: widget\n---\n\n# widget\n' > "$vault/repos/widget/context.md"
+  else printf -- '---\nrepo: widget\nsource-commit: %s\n---\n\n# widget\n' "$src" > "$vault/repos/widget/context.md"; fi
+  echo "$repo $vault"
+  return 0
+}
+
+# `$2` more commits on top of the first, one a day.
+add_commits() {
+  local repo="$1" n="$2" i
+  for ((i = 1; i <= n; i++)); do fx_commit "$repo" "2026-10-$(printf '%02d' $((i + 1)))T09:00:00+0000" "c$i"; done
+  return 0
+}
+
+run_context_behind() {
+  local repo="$1" vault="$2"; shift 2
+  ( cd "$repo" && env VAULT_ROOT="$vault" TZ=UTC "$@" bash "$HOOK_SCRIPT" --context-behind 2>&1 < /dev/null )
+  return 0
+}
+
+set_context_threshold() {
+  local vault="$1" value="$2"
+  printf -- '---\ncontextBehindCommits: %s\n---\n' "$value" > "$vault/vault-config.md"
+  return 0
+}
+
+test_context_behind_flag_is_silent_below_the_default_of_ten() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 9
+  assert_eq "nine commits behind, default ten: nothing" "" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_prints_one_line_at_the_threshold() {
+  local repo vault out sha
+  read -r repo vault <<< "$(ctx_fixture)"
+  sha=$(git -C "$repo" rev-parse --short HEAD)
+  add_commits "$repo" 10
+  out=$(run_context_behind "$repo" "$vault")
+  assert_eq "ten commits behind: one line, the count and the short hash, no commit subject" "Repo summary: 10 commits behind the code since ${sha:0:7}. Run /vault-populate." "$out"
+  return 0
+}
+
+test_context_behind_flag_setting_overrides_the_default() {
+  local repo vault out
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 3
+  set_context_threshold "$vault" 3
+  out=$(run_context_behind "$repo" "$vault")
+  assert_contains "three behind at a threshold of three" "Repo summary: 3 commits behind" "$out"
+  set_context_threshold "$vault" 4
+  assert_eq "three behind at a threshold of four: nothing" "" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_falls_back_to_ten_for_a_bad_setting() {
+  local repo vault value
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 9
+  for value in 0 -1 two 1.5 ""; do
+    set_context_threshold "$vault" "$value"
+    assert_eq "contextBehindCommits '$value' means ten, so nine behind is silent" "" "$(run_context_behind "$repo" "$vault")"
+  done
+  fx_commit "$repo" 2026-11-01T09:00:00+0000 tenth
+  set_context_threshold "$vault" two
+  assert_contains "and ten behind speaks" "Repo summary: 10 commits behind" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_says_when_there_is_no_source_commit() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture none)"
+  assert_eq "a summary never stamped is reported" "Repo summary: no source-commit recorded. Run /vault-populate." "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_says_when_the_source_commit_is_not_in_this_repo() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture 1234567)"
+  assert_eq "an unknown commit is reported" "Repo summary: its source-commit is not in this repo's history. Run /vault-populate." "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_is_silent_without_a_summary_or_a_git_repo_or_a_hash() {
+  local repo vault marker plain
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 10
+  rm "$vault/repos/widget/context.md"
+  assert_eq "no context.md: nothing, it has not been populated yet" "" "$(run_context_behind "$repo" "$vault")"
+  marker="$(fx_dir)/pwned"
+  printf -- '---\nrepo: widget\nsource-commit: abc1234; touch %s\n---\n' "$marker" > "$vault/repos/widget/context.md"
+  assert_eq "a source-commit that is not a hash is ignored" "" "$(run_context_behind "$repo" "$vault")"
+  assert_eq "and nothing in it was run" "no" "$([[ -e "$marker" ]] && echo yes || echo no)"
+  read -r repo vault <<< "$(ctx_fixture)"
+  plain="$(fx_dir)/widget"; mkdir -p "$plain"
+  assert_eq "not a git repo: nothing, no error" "" "$(run_context_behind "$plain" "$vault" CLAUDE_PROJECT_DIR="$plain")"
+  return 0
+}
+
+test_context_behind_flag_follows_the_repos_path() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 10
+  mkdir -p "$vault/Projects/widget"
+  mv "$vault/repos/widget/index.md" "$vault/Projects/widget/overview.md"
+  mv "$vault/repos/widget/context.md" "$vault/Projects/widget/context.md"
+  printf -- '---\nreposPath: Projects/{repo}/overview.md\n---\n' > "$vault/vault-config.md"
+  assert_contains "context.md is found beside the configured repo doc" "Repo summary: 10 commits behind" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
 # --- `--remind`: the Stop hook that says the repo is behind its newest note
 
 REMIND_JSON='{"session_id":"s1","hook_event_name":"Stop","stop_hook_active":false}'
@@ -2280,6 +2432,14 @@ test_doc_behind_flag_says_when_the_source_commit_is_not_in_this_repo
 test_doc_behind_flag_never_passes_odd_text_to_git
 test_doc_behind_flag_needs_a_repo_doc_and_a_git_repo
 test_doc_behind_flag_is_not_confused_with_a_session_source
+test_context_behind_flag_is_silent_below_the_default_of_ten
+test_context_behind_flag_prints_one_line_at_the_threshold
+test_context_behind_flag_setting_overrides_the_default
+test_context_behind_flag_falls_back_to_ten_for_a_bad_setting
+test_context_behind_flag_says_when_there_is_no_source_commit
+test_context_behind_flag_says_when_the_source_commit_is_not_in_this_repo
+test_context_behind_flag_is_silent_without_a_summary_or_a_git_repo_or_a_hash
+test_context_behind_flag_follows_the_repos_path
 test_remind_flag_prints_a_system_message_with_counts_only
 test_remind_flag_is_silent_below_the_threshold
 test_remind_flag_is_off_unless_the_setting_is_a_positive_whole_number
@@ -2322,5 +2482,126 @@ test_pointer_lists_only_the_top_open_items_stale_first
 test_pointer_names_other_contributors_notes_too
 test_pointer_with_no_notes_says_so
 test_context_mode_full_loads_the_contents_and_a_bad_value_falls_back_to_the_pointer
+
+# ------------------------------------------------------------------ format 2
+# Open items live in <dailyNotesPath>/open-items-<repo>.md, one file per author; a note's handoff
+# replaces its context section; a vault without `vaultFormat: 2` is told to convert.
+
+OPEN_ITEMS_FILE=open-items-widget.md
+OLD_LAYOUT_TEXT="Vault uses the old layout"
+
+test_with_only_an_open_items_file_there_are_no_notes() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  printf -- '---\nfilenamePattern: "{date}-{topic}"\n---\n' > "$vault/vault-config.md"
+  mkdir -p "$vault/daily-notes/alice"
+  printf -- '---\nrepo: widget\n---\n\n## Open\n- [ ] LONE-ITEM (opened 2026-10-05)\n\n## Closed\n' > "$vault/daily-notes/alice/$OPEN_ITEMS_FILE"
+  out=$(run_default_mode "$repo" "$vault" CONTEXT_TODAY=2026-10-10)
+  assert_contains "an open-items file is not a daily note: the vault has no notes" "(No daily notes in the vault yet.)" "$out"
+  assert_not_contains "...and is not named as the latest note" "$OPEN_ITEMS_FILE" "$(printf '%s\n' "$out" | grep -i 'latest note')"
+  return 0
+}
+
+test_a_newer_open_items_file_does_not_move_the_behind_reference() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_alice_note "$vault" 2026-10-08 202610080900
+  TZ=UTC touch -t 202610101200 "$vault/daily-notes/alice/$OPEN_ITEMS_FILE"
+  fx_commit "$repo" 2026-10-09T12:00:00+0000
+  fx_commit "$repo" 2026-10-10T11:00:00+0000
+  out=$(run_behind_flag "$repo" "$vault")
+  assert_eq "--behind counts from the note, not from the open-items file rewritten later" "$BEHIND_TWO_LINE" "$out"
+  return 0
+}
+
+test_the_handoff_is_shown_with_all_three_lines() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  mkdir -p "$vault/daily-notes/alice"
+  printf '## What Was Done\nHISTORY-H\n\n## Handoff\nState: STATE-LINE\nCheck first: CHECK-LINE\nDetail: DETAIL-LINE\n\n## Opened and Closed\nOPENED-CLOSED-TEXT\n' > "$vault/daily-notes/alice/2026-10-05-widget-a.md"
+  out=$(run_hook "$repo" "$vault" "$STARTUP_EVENT")
+  assert_contains "the state line" "State: STATE-LINE" "$out"
+  assert_contains "the check-first line" "Check first: CHECK-LINE" "$out"
+  assert_contains "the detail line" "Detail: DETAIL-LINE" "$out"
+  assert_not_contains "the history section is not loaded" "HISTORY-H" "$out"
+  return 0
+}
+
+test_a_vault_without_the_marker_gets_the_old_layout_line_and_nothing_else() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" alice 2026-10-08 widget a 202610080900 <<'EOF'
+- [ ] ALICE-ITEM
+EOF
+  out=$(run_default_mode "$repo" "$vault" CONTEXT_TODAY=2026-10-10 HOOK_TEST_NO_MARKER=1)
+  assert_eq "pointer mode: exactly the one line" "$OLD_LAYOUT_TEXT (no vaultFormat: 2 in vault-config.md). Update the command templates, then run migrate-vault-format." "$out"
+  out=$(run_hook_env "$repo" "$vault" "$STARTUP_EVENT" CONTEXT_TODAY=2026-10-10 HOOK_TEST_NO_MARKER=1)
+  assert_contains "full mode: the same line" "$OLD_LAYOUT_TEXT" "$out"
+  assert_not_contains "...with no repo doc and no items" "ALICE-ITEM" "$out"
+  assert_not_contains "...and no repo doc" "$DOC_MARKER" "$out"
+  fx_commit "$repo" 2026-10-09T12:00:00+0000
+  fx_commit "$repo" 2026-10-10T12:00:00+0000
+  out=$(run_behind_flag "$repo" "$vault" HOOK_TEST_NO_MARKER=1)
+  assert_eq "--behind still answers in an unconverted vault" "$BEHIND_TWO_LINE" "$out"
+  return 0
+}
+
+test_a_conflict_copy_or_merge_markers_stop_that_authors_items_being_listed() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  fx_open_note "$vault" alice 2026-10-05 widget a 202610050900 <<'EOF'
+- [ ] ALICE-ITEM
+EOF
+  fx_open_note "$vault" bob 2026-10-06 widget b 202610060900 <<'EOF'
+- [ ] BOB-ITEM
+EOF
+  fx_open_note "$vault" carol 2026-10-07 widget c 202610070900 <<'EOF'
+- [ ] CAROL-ITEM
+EOF
+  echo stale > "$vault/daily-notes/alice/open-items-widget.sync-conflict-20261010-120000-ABCDEFG.md"
+  printf '<<<<<<< HEAD\n- [ ] CAROL-ITEM\n=======\n>>>>>>> other\n' >> "$vault/daily-notes/carol/$OPEN_ITEMS_FILE"
+  out=$(run_default_mode "$repo" "$vault" CONTEXT_TODAY=2026-10-10)
+  assert_not_contains "a sync-conflict copy: alice's item is not listed" "ALICE-ITEM" "$out"
+  assert_not_contains "merge markers: carol's item is not listed" "CAROL-ITEM" "$out"
+  assert_contains "bob's file is fine, so his item is listed" "- bob (4d): BOB-ITEM" "$out"
+  assert_contains "alice's conflict is reported" "Open items for alice are in conflict" "$out"
+  assert_contains "carol's conflict is reported" "Open items for carol are in conflict" "$out"
+  return 0
+}
+
+test_repo_name_case_keep_finds_a_mixed_case_open_items_file() {
+  local repo vault out
+  repo=$(fx_repo Widget); vault=$(fx_dir)
+  mkdir -p "$vault/repos/Widget"; echo "$DOC_MARKER" > "$vault/repos/Widget/index.md"
+  printf -- '---\nrepoNameCase: keep\n---\n' > "$vault/vault-config.md"
+  fx_open_note "$vault" alice 2026-10-05 Widget a 202610050900 <<'EOF'
+- [ ] MIXED-CASE-ITEM
+EOF
+  out=$(run_default_mode "$repo" "$vault" CONTEXT_TODAY=2026-10-10)
+  assert_contains "open-items-Widget.md is found" "- alice (5d): MIXED-CASE-ITEM" "$out"
+  return 0
+}
+
+test_a_flat_vault_reads_open_items_from_the_flat_folder() {
+  local repo vault out
+  repo=$(fx_repo widget); vault=$(fx_vault)
+  printf -- '---\ndailyNotesPath: Inbox/daily-notes\n---\n' > "$vault/vault-config.md"
+  mkdir -p "$vault/Inbox/daily-notes"
+  printf '## Handoff\nFLAT-HANDOFF\n' > "$vault/Inbox/daily-notes/2026-10-05-widget-a.md"
+  printf -- '---\nrepo: widget\n---\n\n## Open\n- [ ] FLAT-ITEM (opened 2026-10-05)\n\n## Closed\n' > "$vault/Inbox/daily-notes/$OPEN_ITEMS_FILE"
+  out=$(run_default_mode "$repo" "$vault" CONTEXT_TODAY=2026-10-10)
+  assert_contains "the flat folder's open-items file is read" "FLAT-ITEM" "$out"
+  assert_contains "...and the note beside it is the latest note" "Inbox/daily-notes/2026-10-05-widget-a.md" "$out"
+  return 0
+}
+
+test_with_only_an_open_items_file_there_are_no_notes
+test_a_newer_open_items_file_does_not_move_the_behind_reference
+test_the_handoff_is_shown_with_all_three_lines
+test_a_vault_without_the_marker_gets_the_old_layout_line_and_nothing_else
+test_a_conflict_copy_or_merge_markers_stop_that_authors_items_being_listed
+test_repo_name_case_keep_finds_a_mixed_case_open_items_file
+test_a_flat_vault_reads_open_items_from_the_flat_folder
+
 echo "--- $PASS passed, $FAIL failed ---"
 [[ "$FAIL" -eq 0 ]]

@@ -291,6 +291,9 @@ fi
 
 echo
 echo "Done. Commands load in a NEW Claude Code session; hook templates are copied, not enabled."
+if [[ "$CHECK" != "1" ]]; then
+  echo "Vault format: these templates read and write vault format 2 only. A vault with no 'vaultFormat: 2' in vault-config.md must be converted first, or the session-start hook shows one old-layout line in place of its context: bash \"$PREFIX/hook-templates/migrate-vault-format\" --vault <vault> --dry-run to preview, then without --dry-run."
+fi
 echo "Per-repo hooks still need copying into that repo's .git/hooks, see docs/automation.md: post-merge (also as post-rewrite, so a pull --rebase is covered), pre-commit, and pre-push."
 [[ "$STATUSLINE" = "1" ]] && [[ "$DRY" != "1" ]] && echo "The status line appears in a NEW Claude Code session (see docs/statusline.md)."
 exit "$NEED_ATTENTION"
