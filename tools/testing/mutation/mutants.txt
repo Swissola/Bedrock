@@ -201,3 +201,5 @@ migrate-vault-format@@mv8@@tools/migrate-vault-format@@s/sort -rn | cut -f2-/sor
 migrate-vault-format@@mv9@@tools/migrate-vault-format@@s/^if \[\[ "\$DRY" = 1 \]\]; then$/if false; then/@@a dry run goes on to back up and write
 migrate-vault-format@@mv10@@tools/migrate-vault-format@@s/tr -d '..' < "\$note" | awk -v sec/cat "$note" | awk -v sec/@@carriage returns from Windows notes reach the open-items file@@not-observable-on-windows
 migrate-vault-format@@mv11@@tools/migrate-vault-format@@s/infm \&\& index(line, "vaultFormat:") == 1 { print "vaultFormat: 2" cr; done = 1; next }//@@an existing vaultFormat line is left and a second one is added
+migrate-vault-format@@mv12@@tools/migrate-vault-format@@s/^if \[\[ "\$(config_value contextReadsRepoDoc)" = true \]\]; then$/if false; then/@@a vault that still loads the whole repo doc is not told
+migrate-vault-format@@mv13@@tools/migrate-vault-format@@s/^if tr -d .\\r. < "\$CONFIG_FILE" | grep -qE /if false \&\& tr -d X < "$CONFIG_FILE" | grep -qE /@@old bodySections are not pointed out

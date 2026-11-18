@@ -363,6 +363,25 @@ test_an_existing_marker_value_is_replaced_not_duplicated() {
   return 0
 }
 
+test_old_settings_that_undo_format_2_are_pointed_out_and_left_alone() {
+  local v before
+  v="$(new_vault)"
+  mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  run_migrate "$v"
+  assert_eq "a default config: no setting notes" "0" "$(printf '%s\n' "$OUT" | grep -c '^note:')"
+  v="$(new_vault)"
+  mkdir -p "$v/repos/widget"; echo doc > "$v/repos/widget/index.md"
+  printf -- '%s\n' "$ONE_ITEM" | note_file "$v/$NOTES_DIR/alice/2026-11-05-widget-a.md" ""
+  printf -- '---\ncontextReadsRepoDoc: true\nbodySections:\n  - What Was Done\n  - Context for Future Sessions\n  - Open Questions / Next Steps\n---\nProse.\n' > "$v/$CONFIG_FILE"
+  before="$(grep -v '^vaultFormat:' "$v/$CONFIG_FILE")"
+  run_migrate "$v"
+  assert_contains "contextReadsRepoDoc: true is pointed out" "note: contextReadsRepoDoc is true" "$OUT"
+  assert_contains "old bodySections are pointed out" "note: bodySections in $CONFIG_FILE still lists" "$OUT"
+  assert_eq "neither setting was changed" "$before" "$(grep -v '^vaultFormat:' "$v/$CONFIG_FILE")"
+  return 0
+}
+
 test_bad_usage_exits_2() {
   OUT="$(bash "$SCRIPT" --nonsense 2>&1)"; ST=$?
   assert_eq "usage: unknown option exits 2" "2" "$ST"
@@ -391,6 +410,7 @@ test_an_existing_open_items_file_is_kept
 test_an_unreadable_config_stops_before_anything_is_written
 test_a_missing_config_is_created_with_the_marker
 test_an_existing_marker_value_is_replaced_not_duplicated
+test_old_settings_that_undo_format_2_are_pointed_out_and_left_alone
 test_bad_usage_exits_2
 
 echo "--- $PASS passed, $FAIL failed ---"

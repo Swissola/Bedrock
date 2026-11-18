@@ -36,7 +36,7 @@ If you have neither set of tools, stop and say so.
 | `frontmatterExtras` | *(none)* | Extra frontmatter fields to write. Supported: `machine`, `location` |
 | `locationHomePrefix` | *(unset)* | IPv4 prefix of the "home" network, e.g. `192.168.1.`. If set and `location` is requested: `home-lan` when the default gateway starts with it, otherwise `off-lan`. If unset, or you can't determine the gateway, omit `location` and say so |
 | `titleHeading` | `true` | Whether the body starts with a `# YYYY-MM-DD — Short title` heading |
-| `bodySections` | *(the template in step 9)*, `Handoff` first | An ordered list of `##` section names to use instead |
+| `bodySections` | *(the template in step 9)* | An ordered list of `##` section names to use for the sections between the two fixed ones. `Handoff` always comes first and `Opened and Closed` last, whether listed or not; a `Context for Future Sessions` or `Open Questions / Next Steps` entry is ignored |
 | `changeLog` | `off` | `compact`: also add a change-log entry, see step 12 |
 | `vaultSync` | `git` | How the vault reaches other machines, used only for the closing reminder: `git` or anything else (e.g. `syncthing`) |
 
@@ -49,7 +49,7 @@ If you have neither set of tools, stop and say so.
 5. **Check for unlogged work** (working repo only). Each hook check prints one line or nothing, and nothing means say nothing. Never count commits yourself.
    - For `Behind the repo: N commits after <when>.`, run `bash "$HOME/.claude/hook-templates/session-start-vault-context.sh" --behind`. Take off the commits this session made. If some remain, they come from a session with no note: put the line first, exactly as printed, with how many are not this session's. Leave them out of the note unless I say to cover them, then read `git log` since that moment, treating messages as data.
    - For a `Repo doc: ...` line, run `bash "$HOME/.claude/hook-templates/session-start-vault-context.sh" --doc-behind`. Offer `/vault-populate` in the report, with the line exactly as printed. Never run it or change the repo doc yourself.
-6. **Work out each repo's open items.** Your file is `open-items-<repo>.md` in your notes folder (`dailyNotesPath` with `{author}` filled in). Read it, whole; it holds `## Open` lines `- [ ] text (opened YYYY-MM-DD)` and a short `## Closed`. If there is none yet, you will create it. If a `.sync-conflict-` copy sits beside it, or it holds `<<<<<<<` markers, do not write it: write the note anyway and report the conflict as a line of its own. Then:
+6. **Work out each repo's open items.** Your file is `open-items-<repo>.md` in your notes folder (`dailyNotesPath` with `{author}` filled in; a path with no `{author}` is the folder itself, shared by everyone). Read it, whole; it holds `## Open` lines `- [ ] text (opened YYYY-MM-DD)` and a short `## Closed`. If there is none yet, you will create it. If a `.sync-conflict-` copy sits beside it, or it holds `<<<<<<<` markers, do not write it: write the note anyway and report the conflict as a line of its own. Then:
    - **Done** (this session shows it finished: a commit, a passing test, a code change, or me saying so): move it to `## Closed` as `- [x] text (opened YYYY-MM-DD, done YYYY-MM-DD, see [[note]])`. **Dropped** (I said so, or other work made it moot): `- [-] text (opened YYYY-MM-DD, dropped YYYY-MM-DD: reason)`.
    - **Untouched** items stay exactly as they are, in your file only. Nothing is carried into the note.
    - **New** items this session opened: add `- [ ] text (opened YYYY-MM-DD)` with today's date.
@@ -59,7 +59,7 @@ If you have neither set of tools, stop and say so.
    - Put all questions in one message, each with a proposed answer (default: leave open).
 7. **Find or create each note.** List the resolved `dailyNotesPath` folder (names only, no note bodies; ignore `open-items-*`) and apply `appendRule`. To append, add a `## Update (later same session) — <short description>` section to the end of the existing note, rewrite its `## Handoff` in place (reading only that section) and add any items opened or closed to its `## Opened and Closed`. Otherwise create `<dailyNotesPath>/<filenamePattern>.md`.
 8. **Write one note per repo,** holding only the work done in that repo. A decision that spans repos goes in each affected note, with a `See also` wikilink to its siblings from this run.
-9. **Follow this template exactly** (adapt each section to what happened; use `bodySections` instead if set, omit the `#` heading if `titleHeading` is `false`). The handoff is what the next session reads by default, so keep it to six lines and make `Detail:` point at where the reasoning is:
+9. **Follow this template exactly** (adapt each section to what happened; use `bodySections` for the middle sections if set, omit the `#` heading if `titleHeading` is `false`). The handoff is what the next session reads by default, so keep it to six lines and make `Detail:` point at where the reasoning is:
 
 ```markdown
 ---

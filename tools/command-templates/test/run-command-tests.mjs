@@ -855,6 +855,18 @@ const scenarios = [
     check('context.md was written', walk(vault).includes('repos/widget/context.md'), walk(vault).join(', '));
     check('the doc itself was not written', read(vault, DOC) === doc && !r.calls.some((c) => (c.op === 'write' || c.op === 'patch') && c.path === DOC), r.calls.map((c) => c.name + ':' + c.path).join(','));
   } },
+  { name: 'log: a config whose bodySections lists the old sections still gets Handoff first and Opened and Closed last', run() {
+    const { repo } = mkRepo('widget');
+    const cfg = '---\nbodySections:\n  - What Was Done\n  - Decisions Made & Why\n  - Context for Future Sessions\n  - Open Questions / Next Steps\n---\n';
+    const vault = mkVault({ 'vault-config.md': cfg, 'daily-notes/test-user/.keep': '' });
+    const r = runCommand({ vault, repo, template: 'vault-log', args: 'old-sections', system: SESSION });
+    const note = notesOf(r).find((f) => /-widget-old-sections\.md$/.test(f));
+    const s = note ? sections(read(vault, note)) : [];
+    check('a note was written', !!note, notesOf(r).join(', '));
+    check('Handoff is first', s[0] === 'Handoff', s.join('|'));
+    check('Opened and Closed is last', s[s.length - 1] === 'Opened and Closed', s.join('|'));
+    check('the two old sections are not written', !s.includes('Context for Future Sessions') && !s.includes('Open Questions / Next Steps'), s.join('|'));
+  } },
 ];
 
 console.log(`Backend: ${backend}  model: ${model}  repeat: ${repeat}\n`);

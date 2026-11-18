@@ -347,4 +347,13 @@ else
   printf -- '---\nvaultFormat: 2\n---\n' > "$CONFIG_FILE"
 fi
 echo "vaultFormat: 2 set in $CONFIG_NAME."
+
+# Two settings from before format 2 that quietly undo its saving or its note layout. Said once, at the end,
+# and never changed here: the config is the owner's.
+if [[ "$(config_value contextReadsRepoDoc)" = true ]]; then
+  echo "note: contextReadsRepoDoc is true, so /vault-context still loads the whole repo doc. Set it to false to read the short context.md instead."
+fi
+if tr -d '\r' < "$CONFIG_FILE" | grep -qE '^[[:space:]]*-[[:space:]]+"?(Context for Future Sessions|Open Questions / Next Steps)'; then
+  echo "note: bodySections in $CONFIG_NAME still lists Context for Future Sessions or Open Questions / Next Steps. /vault-log ignores those two and always writes Handoff first and Opened and Closed last, so you can remove them."
+fi
 exit 0
