@@ -1339,6 +1339,7 @@ fx_open_note() {
     while IFS= read -r line; do
       case "$line" in
         '- [ ] '*) case "$line" in *opened*) printf '%s\n' "$line" ;; *) printf '%s (opened %s)\n' "$line" "$date" ;; esac ;;
+        *) ;;
       esac
     done
     printf '\n## Closed\n'
@@ -2287,7 +2288,7 @@ test_context_behind_flag_is_silent_without_a_summary_or_a_git_repo_or_a_hash() {
   return 0
 }
 
-test_context_behind_flag_follows_reposPath() {
+test_context_behind_flag_follows_the_repos_path() {
   local repo vault
   read -r repo vault <<< "$(ctx_fixture)"
   add_commits "$repo" 10
@@ -2438,7 +2439,7 @@ test_context_behind_flag_falls_back_to_ten_for_a_bad_setting
 test_context_behind_flag_says_when_there_is_no_source_commit
 test_context_behind_flag_says_when_the_source_commit_is_not_in_this_repo
 test_context_behind_flag_is_silent_without_a_summary_or_a_git_repo_or_a_hash
-test_context_behind_flag_follows_reposPath
+test_context_behind_flag_follows_the_repos_path
 test_remind_flag_prints_a_system_message_with_counts_only
 test_remind_flag_is_silent_below_the_threshold
 test_remind_flag_is_off_unless_the_setting_is_a_positive_whole_number

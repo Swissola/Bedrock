@@ -695,7 +695,7 @@ const scenarios = [
     runCommand({ vault, repo, template: 'vault-log', args: 'second', system: `TEST HARNESS: synthetic second session today in repo widget. Nothing touched EARLIER-ITEM. You found one new follow-up for the next session: NEW-FOLLOWUP.` });
     const t = read(vault, today); const oi = read(vault, oiPath('test-user'));
     check('the earlier item is still open in the open-items file', /^- \[ \] EARLIER-ITEM/m.test(openOf(oi)), oi);
-    check('the new follow-up is open there too, with today\'s date', new RegExp(`^- \\[ \\] .*NEW-FOLLOWUP.*opened ${TODAY}`, 'm').test(openOf(oi)), oi);
+    check('the new follow-up is open there too, with today\'s date', new RegExp(String.raw`^- \[ \] .*NEW-FOLLOWUP.*opened ${TODAY}`, 'm').test(openOf(oi)), oi);
     check('the note carries no checkbox list', !/^- \[[ x>-]\]/m.test(t), t.slice(-400));
   } },
   { name: 'log: closes done, drops dropped, and leaves untouched items where they are', run() {
@@ -793,7 +793,7 @@ const scenarios = [
     const r = runCommand({ vault, repo, template: 'vault-log', args: 'two-open', system: `TEST HARNESS: synthetic session in repo widget. You finished the work behind ITEM-FINISHED (commit abc1234, tests pass). You also found two follow-ups for the next session: NEW-ONE and NEW-TWO.` });
     const oi = read(vault, oiPath('test-user'));
     check('the finished item is in Closed', /^- \[x\] ITEM-FINISHED/m.test(closedOf(oi)) && !/ITEM-FINISHED/.test(openOf(oi)), oi);
-    check('both new items are open, dated today', ['NEW-ONE', 'NEW-TWO'].every((k) => new RegExp(`^- \\[ \\] .*${k}.*opened ${TODAY}`, 'm').test(openOf(oi))), oi);
+    check('both new items are open, dated today', ['NEW-ONE', 'NEW-TWO'].every((k) => new RegExp(String.raw`^- \[ \] .*${k}.*opened ${TODAY}`, 'm').test(openOf(oi))), oi);
     const fresh = notesOf(r).find((f) => f.includes('-widget-two-open'));
     const t = fresh ? read(vault, fresh) : '';
     check('a new note was written with a handoff first', /^## Handoff$/m.test(t) && sections(t)[0] === 'Handoff', sections(t).join('|'));
@@ -860,7 +860,7 @@ const scenarios = [
     const cfg = '---\nbodySections:\n  - What Was Done\n  - Decisions Made & Why\n  - Context for Future Sessions\n  - Open Questions / Next Steps\n---\n';
     const vault = mkVault({ 'vault-config.md': cfg, 'daily-notes/test-user/.keep': '' });
     const r = runCommand({ vault, repo, template: 'vault-log', args: 'old-sections', system: SESSION });
-    const note = notesOf(r).find((f) => /-widget-old-sections\.md$/.test(f));
+    const note = notesOf(r).find((f) => f.endsWith('-widget-old-sections.md'));
     const s = note ? sections(read(vault, note)) : [];
     check('a note was written', !!note, notesOf(r).join(', '));
     check('Handoff is first', s[0] === 'Handoff', s.join('|'));
