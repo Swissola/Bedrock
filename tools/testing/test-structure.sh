@@ -234,6 +234,7 @@ test_vault_populate_documents_context_only_and_the_documented_repo_exception() {
   local f="$TOOLS_DIR/command-templates/vault-populate.md"
   assert_eq "the argument hint offers --context-only" "1" "$(sed -n '1,/^---$/p' "$f" | tr -d '\r' | grep -c '^argument-hint:.*--context-only')"
   assert_eq "the steps say what --context-only skips and writes" "yes" "$(grep -qF 'skip steps 4 and 5, read nothing from the repo, write only `context.md`' "$f" && echo yes || echo no)"
+  assert_eq "--context-only still goes through step 7, the re-read and the rule against secrets" "yes" "$(grep -qF 'apply step 7 to it in full' "$f" && echo yes || echo no)"
   assert_eq "a vault-looking repo with its own doc is let through" "yes" "$(grep -qF 'unless the repo already has a doc at `reposPath`' "$f" && echo yes || echo no)"
   return 0
 }
