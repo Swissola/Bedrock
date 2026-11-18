@@ -20,15 +20,18 @@ jobs:
             os: ubuntu-latest
             bash: bash
             path_prefix: ""
+          # Both macOS variants run on the Intel image. GitHub's arm64 macOS pool (macos-15) is often
+          # short of capacity and cancels jobs it cannot place, after about 15 minutes with no steps run;
+          # the system bash 3.2 job was cancelled that way four times in one day. The Intel pool has been
+          # reliable, and /bin/bash is 3.2 on both architectures.
+          #
           # macOS's own /bin/bash is 3.2, what a user's Terminal runs. Putting /bin first
           # makes the `bash` the hooks and tests launch resolve to it too.
           - name: macos (system bash 3.2)
-            os: macos-15
+            os: macos-15-intel
             bash: /bin/bash
             path_prefix: "/bin:"
-          # GNU timeout from coreutils is installed as `gtimeout`. Runs on the Intel image: GitHub's
-          # arm64 macOS pool is often short of capacity and cancels jobs it cannot place, and the
-          # Intel pool is separate, so the two variants no longer compete for the same runners.
+          # GNU timeout from coreutils is installed as `gtimeout`.
           - name: macos (gtimeout)
             os: macos-15-intel
             bash: bash
