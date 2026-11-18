@@ -7,7 +7,7 @@ tags: [runbook, workflow]
 
 > **Scope:** for anyone using the vault regularly. It is a checklist to return to, to make the vault part of how you actually work, once the MCP connection is set up (see [`docs/mcp-setup.md`](../docs/mcp-setup.md)) and you know the basic conventions (see [`using-the-vault.md`](using-the-vault.md)). It is not a one-time read, so revisit it, especially early on. It also has four worked examples, including a merge conflict, and a short glossary of git terms.
 
-The vault only pays off if it's part of how you work, not a separate chore. A rough shape that's held up well in practice follows. The **vault** is this repo. A **daily note** is a session log, and the **repo doc** (`repos/<name>/index.md`) is the reference page for one codebase. An **open item** is a `- [ ]` line in a daily note. See [Terms](../README.md#terms).
+The vault only pays off if it's part of how you work, not a separate chore. A rough shape that's held up well in practice follows. The **vault** is this repo. A **daily note** is a session log, and the **repo doc** (`repos/<name>/index.md`) is the reference page for one codebase. An **open item** is a `- [ ]` line in your open-items file for a repo. See [Terms](../README.md#terms).
 
 ## Starting a session
 
@@ -26,7 +26,7 @@ Two optional shortcuts, both described in [`docs/automation.md`](../docs/automat
 
 ## Ending a session
 
-1. **Ask your assistant to *"write today's session as a daily note"*** before you close down. It writes one note per repo you worked in, following the template in [`using-the-vault.md`](using-the-vault.md). First it reconciles open items: it ticks what the session finished, carries untouched ones forward with their original `opened` date, and asks about the rest. The optional `/vault-log` command automates this step, including finding the folder and filename convention and appending to a same-day note for the same repo.
+1. **Ask your assistant to *"write today's session as a daily note"*** before you close down. It writes one note per repo you worked in, following the template in [`using-the-vault.md`](using-the-vault.md). First it works out your open items: it moves what the session finished to `## Closed`, adds the ones the session opened, leaves untouched ones where they are, and asks about the rest. The optional `/vault-log` command automates this step, including finding the folder and filename convention and appending to a same-day note for the same repo.
 2. **Pull anything durable into `repos/` or `runbooks/`.** If a system is now understood or a procedure is worth repeating, ask for it to be written there and cross-linked. Don't leave it stranded in the daily note, where the next person won't think to look.
 3. **Check `git status`, commit, and push before you close down**, in the vault repo. The `post-merge` hook, if you've installed it, auto-commits its own doc updates locally as they happen, so they won't be lost, but it never pushes. If you don't push, nobody else gets the update. Pushing is the only way anyone else sees what changed, because there is no other notification, so an unpushed session might as well not have happened, for everyone else.
 
@@ -112,7 +112,7 @@ This repo pushes straight to `main`, no PR required - see [`using-the-vault.md`]
 ## Weekly-ish housekeeping
 
 - Skim `index.md` and add links for any `repos/` docs that piled up during the week without being wired in.
-- Check the open items (`- [ ]`) in recent daily notes - anything older than `staleOpenItemDays` (30) is flagged stale. Tick off what's resolved, drop what no longer matters, or fold it into the durable doc it affects.
+- Check the open items (`- [ ]`) in your open-items files - anything older than `staleOpenItemDays` (30) is flagged stale. Close what's resolved, drop what no longer matters, or fold it into the durable doc it affects.
 - **If you've installed the `post-merge` hook, skim the week's automated commits** (`git log --oneline --grep "via post-merge hook"`) - this repo doesn't require PR review before anything reaches `main` (see [`using-the-vault.md`](using-the-vault.md)'s push-policy section for why), so this weekly skim is the batch-review backstop, on top of the per-push glance in Example 3 above.
 
 ## Related

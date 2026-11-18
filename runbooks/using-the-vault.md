@@ -85,6 +85,11 @@ date: YYYY-MM-DD
 
 # YYYY-MM-DD — Short title
 
+## Handoff
+State: where things stand now, what is live and what is stale
+Check first: what to verify on return
+Detail: which section of this note or which file holds the reasoning
+
 ## What Was Done
 (numbered list of concrete actions)
 
@@ -97,34 +102,31 @@ date: YYYY-MM-DD
 ## Commands Used
 (anything worth copy-pasting next time)
 
-## Context for Future Sessions
-(state as of now: what's live, what's stale, what to check first)
-
-## Open Questions / Next Steps
-- [ ] checklist of what's unresolved
+## Opened and Closed
+(only the items this session opened or closed, each a link: `opened: text [[open-items-<repo>]]`; nothing carried forward)
 ```
 
 ### Open items
 
-An **open item** is a `- [ ]` line under `## Open Questions / Next Steps`. It is tracked across notes until it is closed. The markers are:
+Each person keeps their open items in one file per repo, `open-items-<repo>.md`, in their own notes folder (`daily-notes/<your-full-name>/open-items-widget-service.md`). It has an `## Open` section, one `- [ ] text (opened YYYY-MM-DD)` line per item, and a `## Closed` section. A daily note does not repeat the list. It starts with a `## Handoff`, which is the one thing the next session reads by default, and ends with `## Opened and Closed`, which links to the items that session opened or closed.
 
 | Marker | Meaning | Written as |
 |---|---|---|
 | `- [ ]` | Open | `- [ ] text (opened YYYY-MM-DD)` |
-| `- [x]` | Done | `- [x] text (done YYYY-MM-DD, see [[note]])` |
-| `- [-]` | Dropped | `- [-] text (dropped YYYY-MM-DD: reason)` |
-| `- [>]` | Carried to a newer note | `- [>] text (carried to [[new note]] YYYY-MM-DD)` |
+| `- [x]` | Done | `- [x] text (opened YYYY-MM-DD, done YYYY-MM-DD, see [[note]])` |
+| `- [-]` | Dropped | `- [-] text (opened YYYY-MM-DD, dropped YYYY-MM-DD: reason)` |
 
-A carried item in the new note reads `- [ ] text (from [[old note]], opened YYYY-MM-DD)`. The opened date stays the original one, so an item's age is never reset by carrying it.
+An item stays in `## Open` until a session finishes or drops it. The file keeps only the 20 most recent closed lines, counted, whatever their age, so a month away from coding changes nothing. An item is never closed or removed because it is old.
 
-`/vault-log` reconciles open items at the end of a session:
+`/vault-log` updates your open-items file at the end of a session, after the note is written:
 
 - It says first when the repo has commits newer than your newest note that this session did not make, meaning an earlier session was never logged. It gives the count only, and leaves those commits out of the note unless you ask for them to be covered.
-- It ticks what the session finished, and closes an item that other work has overtaken as dropped, with `(dropped YYYY-MM-DD: superseded by [[note]])`.
-- Before it carries an untouched item forward, it checks whether a later commit mentions the terms in backticks in the item, and puts any hit to you as possibly done, with the commit hashes. It never ticks from a match, and an item with no backticked term is not searched.
-- It carries untouched items forward silently.
+- It moves what the session finished to `## Closed`, and an item that other work has overtaken as dropped, with the reason. It adds any item the session opened, dated today.
+- Untouched items stay exactly where they are, and nothing is copied into the note.
+- For an untouched item, it checks whether a later commit mentions the terms in backticks in the item, and puts any hit to you as possibly done, with the commit hashes. It never closes from a match, and an item with no backticked term is not searched.
 - It asks you about partly touched ones, and about anything open longer than `staleOpenItemDays` (30 by default). Such an item is called **stale**.
-- It closes another person's item only with evidence, and then changes only that line's marker.
+- It never edits another person's file. If one of their items looks done, it reports it with the evidence and leaves the edit to them.
+- If a Syncthing conflict copy sits beside your file, or it holds merge markers, it does not write the file: the note is still written, and the report says so. Resolve the conflict, then log again.
 
 ### Coming back to the same repo the same day
 
@@ -145,7 +147,7 @@ A blank vault stays blank unless someone deliberately fills it. Waiting for repo
 3. **Ask for a first-pass summary**, for example:
    > "Summarise this repo for a new-starter reference doc: what it does, how it's structured, how it's run/deployed, and anything that would trip up someone new to it. Write it to `repos/<name>/index.md` in the vault, following an existing `repos/<other-name>/index.md` as a structural example if one exists."
 
-   Or run `/vault-populate` if you've installed the commands. You know it worked when `repos/<name>/index.md` exists in the vault.
+   Or run `/vault-populate` if you've installed the commands. You know it worked when `repos/<name>/index.md` exists in the vault. It also writes `repos/<name>/context.md` beside it, a summary under 4 KB with the doc's hand-written rules copied in read-only, which `/vault-context` reads in place of the full doc.
 
 4. **Link it from `index.md`'s Systems/Repos table** in the vault. A doc nobody can find from the hub is barely better than no doc at all.
 

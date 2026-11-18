@@ -36,7 +36,7 @@ All keys are optional. A missing key takes its default, unknown keys are ignored
 | `frontmatterExtras` | none | Extra fields to write. Supported: `machine` (lowercased `hostname`), `location` | log |
 | `locationHomePrefix` | unset | IPv4 prefix of the "home" network, e.g. `"192.168.1."`. With `location` in `frontmatterExtras`: `home-lan` if the default gateway starts with it, otherwise `off-lan`. Unset, or gateway unknown: `location` is omitted and the command says so | log |
 | `titleHeading` | `true` | Whether the body starts with a `# YYYY-MM-DD — Short title` heading | log |
-| `bodySections` | the six sections in the runbook | Ordered list of `##` section names | log |
+| `bodySections` | the sections in the runbook | Ordered list of `##` section names for the sections between the two fixed ones. `Handoff` always comes first and `Opened and Closed` last, whether listed or not, and a `Context for Future Sessions` or `Open Questions / Next Steps` entry is ignored | log |
 | `changeLog` | `off` | `compact`: also add a change-log entry to the current repo's `change-log.md`, if it has one (uncommitted) | log |
 
 ### How the commands and hooks behave
@@ -48,7 +48,7 @@ All keys are optional. A missing key takes its default, unknown keys are ignored
 | `repoDocBehindCommits` | *(off)* | A positive whole number turns on the repo doc check: when the repo has at least this many commits since the `source-commit` in its doc, `/vault-log` reports it and offers `/vault-populate`. A doc with no `source-commit`, or one that is not in the repo's history, is reported whatever the number. Anything else, or leaving it out, means off | log, `session-start-vault-context` (`--doc-behind`) |
 | `contextBehindCommits` | `10` | How many commits the code may move on from the `source-commit` in `context.md` (the repo summary, beside the repo doc) before `/vault-context` reports it and offers `/vault-populate`. Anything that is not a positive whole number means 10. No `context.md` means no report | context, `session-start-vault-context` (`--context-behind`) |
 | `unloggedReminderCommits` | *(off)* | A positive whole number turns on the Stop reminder: when the repo has at least this many commits newer than your newest note, `session-start-vault-context --remind` shows a message, at most once per session per hour. Anything else, or leaving it out, means off. It also needs the hook registered as a `Stop` hook, see [`automation.md`](automation.md) | `session-start-vault-context` (`--remind`) |
-| `contextReadsRepoDoc` | `false` | If `true`, `/vault-context` also reads the current repo's doc at `reposPath` | context |
+| `contextReadsRepoDoc` | `false` | If `true`, `/vault-context` also reads the current repo's whole doc at `reposPath`. Leave it `false` once `context.md` exists: the doc can be 60 KB or more, and `context.md` is the part a session needs | context |
 | `vaultSync` | `git` | How the vault reaches other machines. Changes only the closing reminder (`git` reminds you to commit and push) | log |
 | `vaultFormat` | *(unset)* | The layout the vault uses. `2` means one open-items file per author per repo (see [Format 2](#format-2-and-migrate-vault-format)). Unset means the original layout. Written by `migrate-vault-format`, not by hand | `migrate-vault-format` |
 | `backend` | detected | `rest-api` or `mcpvault`. Normally leave it out: the command works out which `obsidian` MCP server it has from the tools actually available, because it has to know the tool names before it can read this file at all. Set it only to override | all commands, `post-merge` |
@@ -120,7 +120,14 @@ It takes the vault from `~/.claude/hook-configs/vault-root`, or from `--vault <p
 - **Exit codes.** 0 done or already converted, 1 failure (nothing converted), 2 usage error or conflict.
 - **Rollback.** Before any session has been logged in the new format, restore the backup. After that, notes written in the new format are not in the backup, so restoring loses them.
 
-Until the command templates and hooks that read format 2 are released, converting only adds the open-items files and the marker, which the current templates ignore. Once they are, convert a vault and install them in one sitting, because templates for the original layout cannot read a converted vault.
+**Convert and install in one sitting.** The templates and the hook in this release read format 2 only. A vault without `vaultFormat: 2` gets one line from the session-start hook saying it is in the old layout, in place of its context, and `/vault-context` and `/vault-log` stop with an offer to run this script. Templates for the original layout, in turn, cannot read a converted vault. So run `--dry-run`, then convert, then install (`tools/install-claude-config.sh`) without a session in between, and never convert a vault whose installed templates are still old.
+
+After converting, check two settings in `vault-config.md`, which the script points out but never changes:
+
+- `contextReadsRepoDoc: true` makes `/vault-context` load the whole repo doc, which undoes most of the saving. Set it to `false`, and run `/vault-populate` in each repo so its `context.md` exists.
+- A `bodySections` list that names `Context for Future Sessions` or `Open Questions / Next Steps` is harmless, because `/vault-log` ignores those two and always writes `Handoff` first and `Opened and Closed` last, but you can remove them.
+
+**What a converted vault costs to read.** Measured on a converted copy of one real vault, `/vault-context` for a repo with a 54 KB doc loaded 11 KB instead of 66 KB, a `/vault-log` note was 2.7 KB instead of a 10 KB median, and `context.md` was 2.3 KB. These need the session-start pointer in the conversation (without it, add the folder listing) and `context.md` to exist. The first session after converting still reads the old, longer note until one `/vault-log` has written a format 2 note.
 
 ## Backends
 
@@ -154,13 +161,12 @@ bodySections:
   - What Was Done
   - Decisions Made & Why
   - Problems Solved
-  - Context for Future Sessions
-  - Open Questions / Next Steps
 changeLog: compact
 vaultSync: syncthing
 hubNote: none
 reposPath: "Projects/{repo}/index.md"
-contextReadsRepoDoc: true
+contextReadsRepoDoc: false
+vaultFormat: 2
 ---
 ```
 
