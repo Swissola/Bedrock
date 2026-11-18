@@ -91,7 +91,7 @@ cp tools/command-templates/vault-populate.md ~/.claude/commands/vault-populate.m
 |---|---|
 | `/vault-context` | Reads the repo summary (`context.md`), the handoffs of your latest note for this repo and up to three other contributors' latest notes, and each contributor's open items, and says when the repo has moved on from them or the summary has fallen behind the code (see below). It reads the full repo doc only for a topic or `contextReadsRepoDoc: true` |
 | `/vault-log` | Writes the session as one daily note per repo worked in, starting with a handoff, then updates your own open-items file, and says when the working repo has commits from a session that was never logged (see below) |
-| `/vault-populate` | Bootstraps a repo doc for a codebase, and a short `context.md` beside it. It keeps the doc's frontmatter and any `## Hand-written notes` section, patches only the affected sections on `mcpvault`, and skips the rewrite when the repo has not changed since `source-commit` |
+| `/vault-populate` | Bootstraps a repo doc for a codebase, and a short `context.md` beside it (`--context-only` writes just `context.md` from the doc, leaving the doc alone). It also runs in a repo that is itself a vault template, such as Bedrock, once that repo has a doc. It keeps the doc's frontmatter and any `## Hand-written notes` section, patches only the affected sections on `mcpvault`, and skips the rewrite when the repo has not changed since `source-commit` |
 
 An **open item** is a `- [ ]` line in an author's `open-items-<repo>.md` file. One open for longer than `staleOpenItemDays` (30 by default) is **stale**. The full rules are in [`using-the-vault.md`](../runbooks/using-the-vault.md#2-end-of-session-writing-a-daily-note).
 

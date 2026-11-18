@@ -238,6 +238,17 @@ test_vault_populate_documents_context_only_and_the_documented_repo_exception() {
   return 0
 }
 
+# The vault's own CLAUDE.md is loaded whenever Claude Code runs in the vault, so it must describe the
+# layout the templates write: open items in the author's open-items file, the handoff, nothing carried.
+test_the_vault_claude_md_describes_format_2() {
+  local f="$ROOT/CLAUDE.md"
+  assert_eq "CLAUDE.md names the open-items file" "yes" "$(grep -qF 'open-items-<repo>.md' "$f" && echo yes || echo no)"
+  assert_eq "CLAUDE.md names the Handoff section" "yes" "$(grep -qF '## Handoff' "$f" && echo yes || echo no)"
+  assert_eq "CLAUDE.md no longer sends open items to Open Questions / Next Steps" "0" "$(grep -c 'Open Questions / Next Steps' "$f")"
+  assert_eq "CLAUDE.md no longer has a carried-forward marker" "0" "$(grep -cF '[>]' "$f")"
+  return 0
+}
+
 # A command template is a prompt read in full on every run, so its length is a running cost:
 # each has a line ceiling (the version 3 length plus about 40%). Tighten wording before raising one.
 test_vault_command_templates_stay_under_their_line_ceilings() {
@@ -425,6 +436,7 @@ test_vault_command_templates_carry_the_expected_versions
 test_vault_command_templates_stay_under_their_line_ceilings
 test_vault_log_note_template_starts_with_the_handoff
 test_vault_populate_documents_context_only_and_the_documented_repo_exception
+test_the_vault_claude_md_describes_format_2
 test_test_scripts_avoid_bash_4_only_features
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback
 test_every_suite_cleans_up_after_itself_with_a_trap
