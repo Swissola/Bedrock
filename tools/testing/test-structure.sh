@@ -187,7 +187,7 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
 # The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
 test_vault_command_templates_carry_the_expected_versions() {
   local pair n want v
-  for pair in vault-log:9 vault-context:6 vault-populate:4; do
+  for pair in vault-log:9 vault-context:7 vault-populate:4; do
     n="${pair%%:*}"; want="${pair##*:}"
     v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
     assert_eq "$n.md is at version $want" "$want" "$v"
@@ -203,7 +203,7 @@ test_vault_commands_pre_approve_exactly_the_hook_command_they_run() {
   local pair name flag f cmd body_cmd shell n
   # Each pair is a command and the hook flag it runs. The template holds $HOME literally, for the
   # shell to expand when the command runs, so it is escaped here to stay literal.
-  for pair in vault-context:--behind vault-log:--behind vault-log:--doc-behind; do
+  for pair in vault-context:--behind vault-context:--context-behind vault-log:--behind vault-log:--doc-behind; do
     name="${pair%%:*}"; flag="${pair##*:}"
     f="$TOOLS_DIR/command-templates/$name.md"
     cmd="bash \"\$HOME/.claude/hook-templates/session-start-vault-context.sh\" $flag"
@@ -221,7 +221,7 @@ test_vault_commands_pre_approve_exactly_the_hook_command_they_run() {
 # each has a line ceiling (the version 3 length plus about 40%). Tighten wording before raising one.
 test_vault_command_templates_stay_under_their_line_ceilings() {
   local pair n max lines
-  for pair in vault-log:134 vault-context:56 vault-populate:54; do
+  for pair in vault-log:134 vault-context:51 vault-populate:54; do
     n="${pair%%:*}"; max="${pair##*:}"
     lines="$(wc -l < "$TOOLS_DIR/command-templates/$n.md" | tr -d ' ')"
     assert_eq "$n.md is within $max lines (it has $lines)" "yes" "$([[ "$lines" -le "$max" ]] && echo yes || echo no)"
