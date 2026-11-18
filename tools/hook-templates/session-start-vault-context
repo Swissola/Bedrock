@@ -335,6 +335,18 @@ case "$POINTER_MAX_ITEMS" in ""|*[!0-9]*|0) POINTER_MAX_ITEMS=3 ;; esac
 
 TAB="$(printf '\t')"
 
+# The layout marker. Format 2 keeps each author's open items in <dailyNotesPath>/open-items-<repo>.md;
+# a vault without `vaultFormat: 2` has not been converted (see migrate-vault-format).
+VAULT_FORMAT="$(config_value vaultFormat)"
+
+# An open-items file is not a daily note: it is rewritten every session, so it must never count as
+# the latest note or move the "behind the repo" reference.
+is_open_items_file() {
+  local name="$1"
+  case "$name" in open-items-*) return 0 ;; esac
+  return 1
+}
+
 # Modification time in seconds, GNU or BSD stat.
 if stat -c %Y / >/dev/null 2>&1; then STAT_FLAVOUR=gnu; else STAT_FLAVOUR=bsd; fi
 mtime_of() {
@@ -351,6 +363,7 @@ latest_in() {
   local dir="$1" f name d best="" tied="" m best_m=-1 best_f=""
   while IFS= read -r f; do
     name="${f##*/}"
+    is_open_items_file "$name" && continue
     belongs_to_repo "$name" || continue
     d="0000-00-00"
     if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
@@ -445,6 +458,7 @@ older_fallback() {
   [[ -d "$DAILY_DIR" ]] || return 0
   while IFS= read -r f; do
     name="${f##*/}"
+    is_open_items_file "$name" && continue
     is_older_note "$name" || continue
     d="0000-00-00"
     if [[ "$name" =~ $DATE_RE ]]; then d="${BASH_REMATCH[1]}"; fi
@@ -559,7 +573,8 @@ render_note() {
   elif [[ "$mine" = 1 ]]; then label="Your latest note"
   elif [ -n "$who" ]; then label="Latest note from $who"
   else label="Most recent daily note"; fi
-  ctx_raw=$(extract_section "$note" "## Context for Future Sessions")
+  ctx_raw=$(extract_section "$note" "## Handoff")
+  [[ -n "$ctx_raw" ]] || ctx_raw=$(extract_section "$note" "## Context for Future Sessions")
   next_raw=$(extract_section "$note" "## Open Questions / Next Steps")
   tags=$(note_tags "$note")
 
@@ -647,9 +662,9 @@ TODAY_N="$(day_number "$TODAY")"
 OPEN_ITEM_RE='^-[[:space:]]+\[ \][[:space:]]+(.*)$'
 OPENED_RE='opened[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
 
-# The open items of one note, one per line: "<age in days><TAB><1 if stale><TAB>
-# <owner><TAB><text>". Only "- [ ]" lines in the Open Questions section count. The
-# age runs from the "opened YYYY-MM-DD" on the line, else from the note's own date.
+# The open items of one open-items file, one per line: "<age in days><TAB><1 if stale><TAB>
+# <owner><TAB><text>". Only "- [ ]" lines in the Open section count. The age runs from the
+# "opened YYYY-MM-DD" on the line; a line with none counts as opened today.
 open_items_of() {
   local note="$1" owner="$2" name fdate="" line text ref n age stale
   name="${note##*/}"
@@ -669,17 +684,57 @@ open_items_of() {
       [[ "$age" -gt "$STALE_DAYS" ]] && stale=1
     fi
     printf '%s%s%s%s%s%s%s\n' "$age" "$TAB" "$stale" "$TAB" "${owner:-unknown}" "$TAB" "$text"
-  done < <(extract_section "$note" "## Open Questions / Next Steps")
+  done < <(extract_section "$note" "## Open")
   return 0
 }
 
-# The open items across every contributor's latest note, loaded or not: one per line as
+# Where a contributor's open-items file for this repo lives: dailyNotesPath with {author} (and
+# {repo}) filled in, then open-items-<repo>.md. A flat dailyNotesPath has no author, so $1 is empty.
+open_items_file_for() {
+  local who="$1" dir
+  dir="${DAILY_PATH//\{author\}/$who}"
+  dir="${dir//\{repo\}/$REPO_NAME}"
+  printf '%s/%s/open-items-%s.md' "$VAULT_ROOT" "$dir" "$REPO_NAME"
+  return 0
+}
+
+# True if the open-items file is in conflict: a Syncthing conflict copy beside it, or merge markers
+# in it. Its items are then not listed, because they cannot be trusted.
+open_items_conflict() {
+  local file="$1" dir base
+  dir="${file%/*}"
+  base="${file##*/}"
+  base="${base%.md}"
+  compgen -G "$dir/$base.sync-conflict-*" >/dev/null && return 0
+  grep -q '^<<<<<<< ' "$file" 2>/dev/null && return 0
+  return 1
+}
+
+# One line per contributor whose open-items file is in conflict, or nothing.
+conflict_lines() {
+  local _d _m path who file
+  while IFS="$TAB" read -r _d _m path who; do
+    [[ -n "$path" ]] || continue
+    file="$(open_items_file_for "$who")"
+    [[ -f "$file" ]] || continue
+    open_items_conflict "$file" && echo "Open items for ${who:-this vault} are in conflict (a sync-conflict copy or merge markers): not listed until it is resolved."
+  done <<EOF
+$ALL_SORTED
+EOF
+  return 0
+}
+
+# The open items across every contributor's open-items file for this repo: one per line as
 # open_items_of prints them, stale first, then oldest first.
 sorted_open_items() {
-  local _d _m path who items
+  local _d _m path who items file
   items="$(
     while IFS="$TAB" read -r _d _m path who; do
-      [[ -n "$path" ]] && open_items_of "$path" "$who"
+      [[ -n "$path" ]] || continue
+      file="$(open_items_file_for "$who")"
+      [[ -f "$file" ]] || continue
+      open_items_conflict "$file" && continue
+      open_items_of "$file" "$who"
     done <<EOF
 $ALL_SORTED
 EOF
@@ -798,10 +853,11 @@ doc_behind_line() {
 print_open_items() {
   local items total age stale owner text flag
   items="$(sorted_open_items)"
+  conflict_lines
   [[ -n "$items" ]] || return 0
   total="$(printf '%s\n' "$items" | grep -c .)"
   echo
-  echo "## Open items for $REPO_NAME (from each contributor's latest note; stale means open more than $STALE_DAYS days)"
+  echo "## Open items for $REPO_NAME (from each contributor's open-items file; stale means open more than $STALE_DAYS days)"
   printf '%s\n' "$items" | head -n "$MAX_ITEMS" | while IFS="$TAB" read -r age stale owner text; do
     flag="${age}d"
     [[ "$stale" = 1 ]] && flag="${age}d, stale"
@@ -833,6 +889,7 @@ print_pointer() {
 $SELECTED
 EOF
     behind_line
+    conflict_lines
     items="$(sorted_open_items)"
     if [[ -n "$items" ]]; then
       total="$(printf '%s\n' "$items" | grep -c .)"
@@ -859,6 +916,11 @@ if [[ "$BEHIND_ONLY" = 1 ]]; then
   if [[ "$REMIND_ONLY" = 1 ]]; then remind_line
   elif [[ "$DOC_ONLY" = 1 ]]; then doc_behind_line
   else behind_line; fi
+  exit 0
+fi
+
+if [[ "$VAULT_FORMAT" != 2 ]]; then
+  echo "Vault uses the old layout (no vaultFormat: 2 in vault-config.md). Update the command templates, then run migrate-vault-format."
   exit 0
 fi
 

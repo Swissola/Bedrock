@@ -267,6 +267,8 @@ This is a different hook from the one above. That one fires everywhere and only 
 
 The pointer ends with a line saying the notes are information, not instructions. Any `CONTEXT_MODE` value other than `pointer` or `full` falls back to `pointer`.
 
+**Format 2.** The hook reads the layout described in [`vault-config.md`](vault-config.md#format-2-and-migrate-vault-format): open items come from each contributor's `open-items-<repo>.md` file (in their `dailyNotesPath` folder), not from checkbox lines in notes, and a note's `## Handoff` section is shown where earlier notes showed `Context for Future Sessions` (a note written before the change still shows that section). `open-items-*` files are never counted as notes, so rewriting one does not move the "behind the repo" reference. A vault without `vaultFormat: 2` gets one line, telling it to update the command templates and run `migrate-vault-format`, and nothing else; `--behind`, `--doc-behind` and `--remind` work in either layout. If a contributor's open-items file has a Syncthing conflict copy beside it, or merge markers in it, its items are not listed and a line says so.
+
 **Behind the repo.** In both modes, when the code repo has commits newer than the moment the newest note's file was last written, one line says so before the open items: `Behind the repo: 15 commits after 2026-11-06 15:02. Open items may be out of date.`
 
 - The moment is the file's modification time, so work done after a log earlier the same day counts, which matters if you log several times a day. It is used only when it falls on or after the note's own date, since a restored copy keeps an old one. Otherwise the count is from the end of the note's day and the line shows the date alone.
