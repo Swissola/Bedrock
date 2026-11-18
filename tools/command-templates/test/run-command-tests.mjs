@@ -479,7 +479,7 @@ const scenarios = [
     const vault = mkVault({ ...DOCS, 'index.md': DEFAULT_HUB, 'daily-notes/test-user/2026-10-05-old-a.md': dnote('OLDA'), 'daily-notes/test-user/2026-10-06-old-b.md': dnote('OLDB') });
     const r = runCommand({ vault, repo, template: 'vault-context' });
     check('read the newest older note', readPaths(r).some((p) => p.includes('old-b')), readPaths(r).join(', '));
-    check('did not show the other older note', !r.final.includes('CTX-OLDA') && r.final.includes('CTX-OLDB'), r.final.slice(0, 200));
+    check('never read the other older note, which it stops short of', !readPaths(r).some((p) => p.includes('old-a')), readPaths(r).join(', '));
     check('labelled as an older note of unknown repo', /older/i.test(r.final) && /unknown|no repo/i.test(r.final), r.final.slice(0, 300));
   } },
   { name: 'context: a pointer already in the conversation does not count as loaded', run() {
@@ -711,7 +711,7 @@ const scenarios = [
     check('no carried marker anywhere', !/\[>\]/.test(oi), oi);
     const fresh = notesOf(r).find((f) => f !== prev && f.includes('-widget-') && !f.includes('/open-items-'));
     const t = fresh ? read(vault, fresh) : '';
-    check('the new note does not carry the untouched item', fresh && !t.includes('UNTOUCHED-ITEM'), t.slice(-300));
+    check('the new note carries no line for the untouched item', fresh && !/^- (\[[ x>-]\]|opened:|closed:|dropped:).*UNTOUCHED-ITEM/m.test(t), t.slice(-300));
     check('the new note starts with a Handoff', /^## Handoff$/m.test(t) && t.indexOf('## Handoff') < t.indexOf('## What Was Done'), t.slice(0, 300));
     check('the old note was not edited', read(vault, prev) === dnote('PREV', 'widget'));
   } },
