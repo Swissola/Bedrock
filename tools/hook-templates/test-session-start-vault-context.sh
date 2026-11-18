@@ -2180,6 +2180,125 @@ test_doc_behind_flag_is_not_confused_with_a_session_source() {
   return 0
 }
 
+# --- `--context-behind`: how far the repo summary (context.md) has fallen behind the code
+
+# doc_fixture, plus a context.md beside the repo doc: its source-commit is the first commit, or `$1`,
+# or absent when `$1` is "none". Prints "repo vault".
+ctx_fixture() {
+  local repo vault src="${1:-}"
+  read -r repo vault <<< "$(doc_fixture)"
+  [[ -n "$src" ]] || src=$(git -C "$repo" rev-parse --short HEAD)
+  if [[ "$src" = none ]]; then printf -- '---\nrepo: widget\n---\n\n# widget\n' > "$vault/repos/widget/context.md"
+  else printf -- '---\nrepo: widget\nsource-commit: %s\n---\n\n# widget\n' "$src" > "$vault/repos/widget/context.md"; fi
+  echo "$repo $vault"
+  return 0
+}
+
+# `$2` more commits on top of the first, one a day.
+add_commits() {
+  local repo="$1" n="$2" i
+  for ((i = 1; i <= n; i++)); do fx_commit "$repo" "2026-10-$(printf '%02d' $((i + 1)))T09:00:00+0000" "c$i"; done
+  return 0
+}
+
+run_context_behind() {
+  local repo="$1" vault="$2"; shift 2
+  ( cd "$repo" && env VAULT_ROOT="$vault" TZ=UTC "$@" bash "$HOOK_SCRIPT" --context-behind 2>&1 < /dev/null )
+  return 0
+}
+
+set_context_threshold() {
+  local vault="$1" value="$2"
+  printf -- '---\ncontextBehindCommits: %s\n---\n' "$value" > "$vault/vault-config.md"
+  return 0
+}
+
+test_context_behind_flag_is_silent_below_the_default_of_ten() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 9
+  assert_eq "nine commits behind, default ten: nothing" "" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_prints_one_line_at_the_threshold() {
+  local repo vault out sha
+  read -r repo vault <<< "$(ctx_fixture)"
+  sha=$(git -C "$repo" rev-parse --short HEAD)
+  add_commits "$repo" 10
+  out=$(run_context_behind "$repo" "$vault")
+  assert_eq "ten commits behind: one line, the count and the short hash, no commit subject" "Repo summary: 10 commits behind the code since ${sha:0:7}. Run /vault-populate." "$out"
+  return 0
+}
+
+test_context_behind_flag_setting_overrides_the_default() {
+  local repo vault out
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 3
+  set_context_threshold "$vault" 3
+  out=$(run_context_behind "$repo" "$vault")
+  assert_contains "three behind at a threshold of three" "Repo summary: 3 commits behind" "$out"
+  set_context_threshold "$vault" 4
+  assert_eq "three behind at a threshold of four: nothing" "" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_falls_back_to_ten_for_a_bad_setting() {
+  local repo vault value
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 9
+  for value in 0 -1 two 1.5 ""; do
+    set_context_threshold "$vault" "$value"
+    assert_eq "contextBehindCommits '$value' means ten, so nine behind is silent" "" "$(run_context_behind "$repo" "$vault")"
+  done
+  fx_commit "$repo" 2026-11-01T09:00:00+0000 tenth
+  set_context_threshold "$vault" two
+  assert_contains "and ten behind speaks" "Repo summary: 10 commits behind" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_says_when_there_is_no_source_commit() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture none)"
+  assert_eq "a summary never stamped is reported" "Repo summary: no source-commit recorded. Run /vault-populate." "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_says_when_the_source_commit_is_not_in_this_repo() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture 1234567)"
+  assert_eq "an unknown commit is reported" "Repo summary: its source-commit is not in this repo's history. Run /vault-populate." "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
+test_context_behind_flag_is_silent_without_a_summary_or_a_git_repo_or_a_hash() {
+  local repo vault marker plain
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 10
+  rm "$vault/repos/widget/context.md"
+  assert_eq "no context.md: nothing, it has not been populated yet" "" "$(run_context_behind "$repo" "$vault")"
+  marker="$(fx_dir)/pwned"
+  printf -- '---\nrepo: widget\nsource-commit: abc1234; touch %s\n---\n' "$marker" > "$vault/repos/widget/context.md"
+  assert_eq "a source-commit that is not a hash is ignored" "" "$(run_context_behind "$repo" "$vault")"
+  assert_eq "and nothing in it was run" "no" "$([[ -e "$marker" ]] && echo yes || echo no)"
+  read -r repo vault <<< "$(ctx_fixture)"
+  plain="$(fx_dir)/widget"; mkdir -p "$plain"
+  assert_eq "not a git repo: nothing, no error" "" "$(run_context_behind "$plain" "$vault" CLAUDE_PROJECT_DIR="$plain")"
+  return 0
+}
+
+test_context_behind_flag_follows_reposPath() {
+  local repo vault
+  read -r repo vault <<< "$(ctx_fixture)"
+  add_commits "$repo" 10
+  mkdir -p "$vault/Projects/widget"
+  mv "$vault/repos/widget/index.md" "$vault/Projects/widget/overview.md"
+  mv "$vault/repos/widget/context.md" "$vault/Projects/widget/context.md"
+  printf -- '---\nreposPath: Projects/{repo}/overview.md\n---\n' > "$vault/vault-config.md"
+  assert_contains "context.md is found beside the configured repo doc" "Repo summary: 10 commits behind" "$(run_context_behind "$repo" "$vault")"
+  return 0
+}
+
 # --- `--remind`: the Stop hook that says the repo is behind its newest note
 
 REMIND_JSON='{"session_id":"s1","hook_event_name":"Stop","stop_hook_active":false}'
@@ -2312,6 +2431,14 @@ test_doc_behind_flag_says_when_the_source_commit_is_not_in_this_repo
 test_doc_behind_flag_never_passes_odd_text_to_git
 test_doc_behind_flag_needs_a_repo_doc_and_a_git_repo
 test_doc_behind_flag_is_not_confused_with_a_session_source
+test_context_behind_flag_is_silent_below_the_default_of_ten
+test_context_behind_flag_prints_one_line_at_the_threshold
+test_context_behind_flag_setting_overrides_the_default
+test_context_behind_flag_falls_back_to_ten_for_a_bad_setting
+test_context_behind_flag_says_when_there_is_no_source_commit
+test_context_behind_flag_says_when_the_source_commit_is_not_in_this_repo
+test_context_behind_flag_is_silent_without_a_summary_or_a_git_repo_or_a_hash
+test_context_behind_flag_follows_reposPath
 test_remind_flag_prints_a_system_message_with_counts_only
 test_remind_flag_is_silent_below_the_threshold
 test_remind_flag_is_off_unless_the_setting_is_a_positive_whole_number

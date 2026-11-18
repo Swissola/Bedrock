@@ -96,15 +96,20 @@ set -u
 # `--doc-behind` is the same kind of one-line check on the repo doc: how far the code has moved on
 # from the commit the doc was built from. It rides on the same switch, so it never reads stdin either.
 #
+# `--context-behind` is the same check on the repo summary (`context.md`, beside the repo doc): it
+# speaks only once the summary is `contextBehindCommits` (default 10) commits behind the code.
+#
 # `--remind` is for a Stop hook: it reads the event from stdin itself, and prints a JSON systemMessage
 # saying the repo is behind its newest note, at most once per session per hour. Off unless
 # `unloggedReminderCommits` is set in vault-config.md.
 BEHIND_ONLY=0
 DOC_ONLY=0
+CONTEXT_ONLY=0
 REMIND_ONLY=0
 case "${1:-}" in
   --behind) BEHIND_ONLY=1 ;;
   --doc-behind) BEHIND_ONLY=1; DOC_ONLY=1 ;;
+  --context-behind) BEHIND_ONLY=1; CONTEXT_ONLY=1 ;;
   --remind) BEHIND_ONLY=1; REMIND_ONLY=1 ;;
   *) ;;
 esac
@@ -816,37 +821,75 @@ remind_line() {
   return 0
 }
 
+# The source-commit in a file's frontmatter, as written, or nothing. Used only if it looks like a hash,
+# and never shown as written.
+source_commit_of() {
+  tr -d '\r' < "$1" | awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    index($0, "source-commit:") == 1 { sub(/^source-commit:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }'
+  return 0
+}
+
+# How far HEAD has moved on from a source-commit, for the two checks below. Sets SRC_STATE to one of
+# none (no source-commit recorded), odd (not a hash: ignored), unknown (not in this repo's history),
+# or ok with SRC_COMMITS set to the count. Silent otherwise: outside git, SRC_STATE is left empty.
+source_state() {
+  local file="$1" dir="${CLAUDE_PROJECT_DIR:-.}"
+  SRC_STATE=""; SRC_COMMITS=""; SRC_SHA=""
+  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  SRC_SHA="$(source_commit_of "$file")"
+  if [[ -z "$SRC_SHA" ]]; then SRC_STATE=none; return 0; fi
+  if [[ ! "$SRC_SHA" =~ ^[0-9a-f]{7,40}$ ]]; then SRC_STATE=odd; return 0; fi
+  if ! git -C "$dir" cat-file -e "$SRC_SHA^{commit}" 2>/dev/null; then SRC_STATE=unknown; return 0; fi
+  SRC_COMMITS="$(git -C "$dir" rev-list --count "$SRC_SHA..HEAD" 2>/dev/null)" || return 0
+  [[ "$SRC_COMMITS" =~ ^[0-9]+$ ]] && SRC_STATE=ok
+  return 0
+}
+
 # One line saying how far the code has moved on from the commit the repo doc was built from, or
 # nothing. Off unless `repoDocBehindCommits` in vault-config.md is a positive whole number, so a vault
-# that has not asked for it hears nothing. The doc's source-commit is used only if it looks like a
-# hash, and is never shown. Counts only, never a commit subject, as for behind_line. Silent with no
-# repo doc, outside git, or when the doc is current or under the threshold.
+# that has not asked for it hears nothing. Counts only, never a commit subject, as for behind_line.
+# Silent with no repo doc, outside git, or when the doc is current or under the threshold.
 doc_behind_line() {
-  local threshold dir src commits files noun_c="commits" noun_f="files"
+  local threshold files noun_c="commits" noun_f="files"
   threshold="$(config_value repoDocBehindCommits)"
   [[ "$threshold" =~ ^[1-9][0-9]*$ ]] || return 0
   [[ -f "$INDEX_FILE" ]] || return 0
-  dir="${CLAUDE_PROJECT_DIR:-.}"
-  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
-  src="$(tr -d '\r' < "$INDEX_FILE" | awk '
-    NR == 1 { if ($0 != "---") exit; next }
-    $0 == "---" { exit }
-    index($0, "source-commit:") == 1 { sub(/^source-commit:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }')"
-  if [[ -z "$src" ]]; then
-    echo "Repo doc: no source-commit recorded, so it has not been checked against the repo."
-    return 0
-  fi
-  [[ "$src" =~ ^[0-9a-f]{7,40}$ ]] || return 0
-  if ! git -C "$dir" cat-file -e "$src^{commit}" 2>/dev/null; then
-    echo "Repo doc: its source-commit is not in this repo's history, so it needs a full refresh."
-    return 0
-  fi
-  commits="$(git -C "$dir" rev-list --count "$src..HEAD" 2>/dev/null)" || return 0
-  [[ "$commits" =~ ^[1-9][0-9]*$ && "$commits" -ge "$threshold" ]] || return 0
-  files="$(git -C "$dir" diff --name-only "$src..HEAD" 2>/dev/null | grep -c .)" || files=0
-  [[ "$commits" -eq 1 ]] && noun_c="commit"
+  source_state "$INDEX_FILE"
+  case "$SRC_STATE" in
+    none) echo "Repo doc: no source-commit recorded, so it has not been checked against the repo."; return 0 ;;
+    unknown) echo "Repo doc: its source-commit is not in this repo's history, so it needs a full refresh."; return 0 ;;
+    ok) ;;
+    *) return 0 ;;
+  esac
+  [[ "$SRC_COMMITS" -ge 1 && "$SRC_COMMITS" -ge "$threshold" ]] || return 0
+  files="$(git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only "$SRC_SHA..HEAD" 2>/dev/null | grep -c .)" || files=0
+  [[ "$SRC_COMMITS" -eq 1 ]] && noun_c="commit"
   [[ "$files" -eq 1 ]] && noun_f="file"
-  echo "Repo doc: $commits $noun_c and $files $noun_f since its source-commit. Consider /vault-populate."
+  echo "Repo doc: $SRC_COMMITS $noun_c and $files $noun_f since its source-commit. Consider /vault-populate."
+  return 0
+}
+
+# The same for the repo summary, `context.md` beside the repo doc (the file name of reposPath replaced).
+# On by default at 10 commits; a setting that is not a positive whole number means 10. Silent when
+# there is no summary yet: /vault-populate has not been run for format 2, which is not an error.
+context_behind_line() {
+  local threshold ctx noun="commits" rel_dir=""
+  threshold="$(config_value contextBehindCommits)"
+  [[ "$threshold" =~ ^[1-9][0-9]*$ ]] || threshold=10
+  [[ "$INDEX_REL" == */* ]] && rel_dir="${INDEX_REL%/*}/"
+  ctx="$VAULT_ROOT/${rel_dir}context.md"
+  [[ -f "$ctx" ]] || return 0
+  source_state "$ctx"
+  case "$SRC_STATE" in
+    none) echo "Repo summary: no source-commit recorded. Run /vault-populate."; return 0 ;;
+    unknown) echo "Repo summary: its source-commit is not in this repo's history. Run /vault-populate."; return 0 ;;
+    ok) ;;
+    *) return 0 ;;
+  esac
+  [[ "$SRC_COMMITS" -ge "$threshold" ]] || return 0
+  echo "Repo summary: $SRC_COMMITS $noun behind the code since ${SRC_SHA:0:7}. Run /vault-populate."
   return 0
 }
 
@@ -915,6 +958,7 @@ EOF
 if [[ "$BEHIND_ONLY" = 1 ]]; then
   if [[ "$REMIND_ONLY" = 1 ]]; then remind_line
   elif [[ "$DOC_ONLY" = 1 ]]; then doc_behind_line
+  elif [[ "$CONTEXT_ONLY" = 1 ]]; then context_behind_line
   else behind_line; fi
   exit 0
 fi
