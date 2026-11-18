@@ -187,7 +187,7 @@ test_the_example_wiki_config_is_valid_json_with_the_keys_the_script_reads() {
 # The vault commands moved to version 4 with per-repo notes (see the design in docs/superpowers/specs).
 test_vault_command_templates_carry_the_expected_versions() {
   local pair n want v
-  for pair in vault-log:9 vault-context:7 vault-populate:4; do
+  for pair in vault-log:10 vault-context:7 vault-populate:4; do
     n="${pair%%:*}"; want="${pair##*:}"
     v="$(grep -o 'bedrock-template: [a-z-]*, version [0-9]*' "$TOOLS_DIR/command-templates/$n.md" | head -n1 | sed -E 's/.*version //')"
     assert_eq "$n.md is at version $want" "$want" "$v"
@@ -217,11 +217,21 @@ test_vault_commands_pre_approve_exactly_the_hook_command_they_run() {
   return 0
 }
 
+# The note template in vault-log starts its body with the handoff: it is the one section the next
+# session reads by default, so it must come first.
+test_vault_log_note_template_starts_with_the_handoff() {
+  local f="$TOOLS_DIR/command-templates/vault-log.md" first
+  first="$(awk '/^```markdown/ { inb = 1; next } /^```/ { inb = 0 } inb && /^## / { print; exit }' "$f" | tr -d '\r')"
+  assert_eq "the note template's first section is Handoff" "## Handoff" "$first"
+  assert_eq "and the template has no carried-forward Context for Future Sessions section" "0" "$(awk '/^```markdown/ { inb = 1; next } /^```/ { inb = 0 } inb' "$f" | grep -c 'Context for Future Sessions')"
+  return 0
+}
+
 # A command template is a prompt read in full on every run, so its length is a running cost:
 # each has a line ceiling (the version 3 length plus about 40%). Tighten wording before raising one.
 test_vault_command_templates_stay_under_their_line_ceilings() {
   local pair n max lines
-  for pair in vault-log:134 vault-context:51 vault-populate:54; do
+  for pair in vault-log:109 vault-context:51 vault-populate:54; do
     n="${pair%%:*}"; max="${pair##*:}"
     lines="$(wc -l < "$TOOLS_DIR/command-templates/$n.md" | tr -d ' ')"
     assert_eq "$n.md is within $max lines (it has $lines)" "yes" "$([[ "$lines" -le "$max" ]] && echo yes || echo no)"
@@ -402,6 +412,7 @@ test_every_command_template_carries_a_version_stamp
 test_vault_commands_pre_approve_exactly_the_hook_command_they_run
 test_vault_command_templates_carry_the_expected_versions
 test_vault_command_templates_stay_under_their_line_ceilings
+test_vault_log_note_template_starts_with_the_handoff
 test_test_scripts_avoid_bash_4_only_features
 test_test_scripts_avoid_gnu_only_commands_without_a_fallback
 test_every_suite_cleans_up_after_itself_with_a_trap
