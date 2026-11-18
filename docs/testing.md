@@ -302,6 +302,13 @@ Full mode:
 | `an_older_note_naming_another_repo_is_skipped_and_never_loaded` | Frontmatter `repo` of another repo rules a note out. |
 | `at_most_five_older_notes_are_opened` | Only the five newest older notes have their frontmatter read. |
 | `a_note_whose_frontmatter_names_this_repo_counts_as_its_own` | Loaded under the normal label, not as an older note. |
+| `a_vault_without_the_marker_gets_the_old_layout_line_and_nothing_else` | No `vaultFormat: 2` in `vault-config.md`: one line telling the user to update the templates and run `migrate-vault-format`, in both modes, and no context. `--behind` still answers. |
+| `with_only_an_open_items_file_there_are_no_notes` | An `open-items-*` file is never counted as a note. |
+| `a_newer_open_items_file_does_not_move_the_behind_reference` | Rewriting an open-items file every session does not change the "behind the repo" count. |
+| `the_handoff_is_shown_with_all_three_lines` | A note's `## Handoff` is shown whole, and an older note still shows `Context for Future Sessions`. |
+| `a_conflict_copy_or_merge_markers_stop_that_authors_items_being_listed` | A `.sync-conflict` copy or `<<<<<<<` markers: that author's items are not listed, a line says so, and the others are unaffected. |
+| `repo_name_case_keep_finds_a_mixed_case_open_items_file` and `a_flat_vault_reads_open_items_from_the_flat_folder` | The open-items file is found with `repoNameCase: keep` and in a flat `dailyNotesPath`. |
+| `context_behind_flag_*` (eight tests) | `--context-behind`: silent below the default of ten commits, one line at ten with the count and the short hash, `contextBehindCommits` overrides it and a bad value means ten, a missing or unknown `source-commit` is reported once, and it is silent with no `context.md`, a value that is not a hash, or a folder outside git. `context.md` is found beside the repo doc by `reposPath`. |
 
 ### `tools/testing/test-install-claude-config.sh`: the installer
 
@@ -364,6 +371,7 @@ Further scenarios:
 | `a_conflict_copy_of_an_open_items_file_stops_the_run`, `a_failed_verification_sets_no_marker_and_writes_nothing` | A `.sync-conflict` copy exits 2; a count mismatch exits 1; neither writes a file or the marker. |
 | `old_notes_are_left_untouched`, `an_existing_open_items_file_is_kept` | Old notes stay byte-identical; a hand-edited open-items file is never overwritten. |
 | `an_unreadable_config_stops_before_anything_is_written`, `a_missing_config_is_created_with_the_marker`, `an_existing_marker_value_is_replaced_not_duplicated`, `bad_usage_exits_2` | Config handling and exit codes. |
+| `old_settings_that_undo_format_2_are_pointed_out_and_left_alone` | `contextReadsRepoDoc: true` and a `bodySections` that still names the two old sections each get one `note:` at the end of a run, a default config gets none, and neither setting is changed. |
 
 ### `tools/testing/test-setup-mcp.sh`: `setup-mcp.sh`
 
@@ -448,6 +456,16 @@ Checks that no single suite can make:
 - the test scripts use nothing that the macOS system bash (3.2) lacks, and none of the GNU-only commands (`touch -d`, `readlink -f`, `date -d` without a fallback, `sed -i` without a suffix) that would fail there;
 - every suite cleans up from an exit trap;
 - `shellcheck`, if installed, reports no findings at warning level or above. Locally it is advisory; set `STRUCTURE_SHELLCHECK_STRICT=1` to make it a gate, which CI does on the Ubuntu job (shellcheck comes preinstalled there). Warning level is clean across every script (checked with shellcheck 0.11.0). You can run it without installing anything: `docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:stable -S warning -x tools/hook-templates/pre-push` (and so on for each script).
+
+### The command-template harness: `tools/command-templates/test/run-command-tests.mjs`
+
+Manual, and every scenario is a real model call, so it is not in `run-all-tests.sh` or CI. Fixture vaults are format 2 by default (a `vaultFormat: 2` marker is added to every fixture's `vault-config.md` unless a scenario opts out), with `## Handoff` notes and `open-items-<repo>.md` files. The scenarios added for format 2 check, from the files actually written and the tool calls actually made:
+
+- `/vault-context`: reads `context.md`, the handoffs and the open-items file and not the hub note or the full repo doc; an unconverted vault gets the old-layout message and nothing is read but the config; `--context-behind` is run and its line is passed on with the count only.
+- `/vault-log`: only your own open-items file changes; a finished item moves to `## Closed` and a dropped one is marked; an untouched item stays in `## Open` and is not copied into the note; another author's file is byte for byte unchanged and their finished item is reported; a 60-day break closes nothing and the stale item is put to the user; a conflicted file is not written but the note is; the 20 most recent closed lines are kept; a `bodySections` that names the old sections still gives `Handoff` first and `Opened and Closed` last.
+- `/vault-populate`: `context.md` is written beside the doc, under 4 KB, with the hand-written rules copied and the rest of each rule left out; an up-to-date doc with no `context.md` writes only `context.md`.
+
+The two `--context-behind` scenarios run the installed hook, so without an `ANTHROPIC_API_KEY` (which sends the harness to a throwaway home) they are skipped unless the hook under `~/.claude` matches the repo's.
 
 ## Adding a hook or a suite
 

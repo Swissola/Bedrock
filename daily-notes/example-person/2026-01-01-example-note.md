@@ -9,6 +9,11 @@ date: 2026-01-01
 
 > **This is an example, not a real session log.** It exists to show the template referenced in [[runbooks/using-the-vault]] filled in with sample content. Delete this folder once your team has its own real notes — see [[runbooks/adopting-for-a-new-team]].
 
+## Handoff
+State: this is an example note showing the format 2 shape, with sample content only.
+Check first: nothing, it is not a real session.
+Detail: [[runbooks/using-the-vault]] describes each section.
+
 ## What Was Done
 
 1. Cloned this template and connected it to Obsidian via the `obsidian` MCP server.
@@ -29,11 +34,7 @@ git clone <your-repo-url>
 ./tools/setup-mcp.sh
 ```
 
-## Context for Future Sessions
+## Opened and Closed
 
-This is what a filled-in daily note looks like. Real ones will be written by your AI assistant at your prompting — see [[runbooks/using-the-vault]].
-
-## Open Questions / Next Steps
-
-- [ ] Replace this example with your team's own first real daily note.
-- [ ] Review the generated widget-service doc with a teammate (from [[2025-12-20-widget-service-first-draft]], opened 2025-12-20)
+- opened: replace this example with your team's own first real daily note, see [[open-items-widget-service]]
+- opened: review the generated widget-service doc with a teammate, see [[open-items-widget-service]]

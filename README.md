@@ -19,8 +19,10 @@ These words are used in the same sense on every page.
 | **Daily note** | A log of one work session in one repo, written by the assistant when you ask. It lives in `daily-notes/<author>/` and is history, not reference. |
 | **Repo doc** | The vault's reference page for one codebase, `repos/<name>/index.md`: how that system works now. Not a log. |
 | **Runbook** | A step-by-step procedure for a recurring task, in `runbooks/`. |
-| **Open item** | A `- [ ]` line under `## Open Questions / Next Steps` in a daily note, with the date it was opened. `/vault-log` closes, drops or carries each one forward. |
-| **Stale** | An open item older than `staleOpenItemDays` (30 by default). It is always put to you and always listed first. |
+| **Open item** | A `- [ ]` line in your open-items file for a repo (`open-items-<repo>.md`, beside your daily notes), with the date it was opened. `/vault-log` moves the ones a session finished to `## Closed`; the rest stay where they are. |
+| **Stale** | An open item older than `staleOpenItemDays` (30 by default). It is always put to you and always listed first, and age alone never closes or removes it. |
+| **Handoff** | The first section of a daily note, at most six lines: where things stand, what to check first, and where the detail is. It is what the next session reads by default. |
+| **Repo summary** | `repos/<name>/context.md`, under 4 KB: what the repo is, its layout, and its rules. `/vault-context` reads it in place of the full repo doc. |
 | **MCP server** | The connection that lets Claude Code read and write the vault. Here it is named `obsidian`. |
 | **MCP backend** | What provides that `obsidian` server: the Obsidian Local REST API plugin (needs Obsidian open) or MCPVault (reads the files directly). See [Backends](docs/vault-config.md#backends). |
 | **Slash command** | A named prompt in Claude Code: `/vault-context`, `/vault-log`, `/vault-populate`. |
@@ -51,7 +53,7 @@ It is worth being plain about what it is not. It is not real-time multi-user edi
 
 **`daily-notes/` is a session log. `repos/` and `runbooks/` are the current-state reference.** Anything worth knowing next time without reading old sessions belongs in the latter, linked from the daily note that produced it.
 
-Open work is tracked in the daily notes themselves. When you log a session, the assistant closes, drops or carries forward each open item, and puts any stale one to you.
+Open work is tracked in one open-items file per person per repo, not repeated in every daily note. When you log a session, the assistant moves the items it finished to `## Closed`, adds the ones the session opened, leaves the rest alone, and puts any stale one to you. A vault on the older layout is converted once with `migrate-vault-format` (see [Format 2](docs/vault-config.md#format-2-and-migrate-vault-format)).
 
 ## Quick start
 
