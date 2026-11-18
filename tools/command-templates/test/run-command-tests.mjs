@@ -919,7 +919,7 @@ const scenarios = [
     const KEY = 'sk-test-FAKE-0123456789abcdefSECRET';
     const doc = `---\nrepo: widget\nlast-populated: 2026-01-01\ntags: [repo-doc, widget]\n---\n\n# widget\n\nA tiny echo service. Run it with python app.py.\n\n## Hand-written notes\n- **The deploy token is ${KEY}.** Use it only from the build box.\n- **Never edit generated files.** They are rebuilt on every run.\n`;
     const vault = mkVault({ 'index.md': DEFAULT_HUB, [DOC]: doc });
-    const r = runCommand({ vault, repo, template: 'vault-populate', args: '--context-only' });
+    runCommand({ vault, repo, template: 'vault-populate', args: '--context-only' });
     const ctx = fs.existsSync(path.join(vault, 'repos/widget/context.md')) ? read(vault, 'repos/widget/context.md') : '';
     check('context.md was written', ctx.length > 0, walk(vault).join(', '));
     check('the token is not in context.md', !ctx.includes(KEY) && !ctx.includes('sk-test-FAKE'), ctx.slice(-300));
