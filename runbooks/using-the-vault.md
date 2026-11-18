@@ -147,7 +147,7 @@ A blank vault stays blank unless someone deliberately fills it. Waiting for repo
 3. **Ask for a first-pass summary**, for example:
    > "Summarise this repo for a new-starter reference doc: what it does, how it's structured, how it's run/deployed, and anything that would trip up someone new to it. Write it to `repos/<name>/index.md` in the vault, following an existing `repos/<other-name>/index.md` as a structural example if one exists."
 
-   Or run `/vault-populate` if you've installed the commands. You know it worked when `repos/<name>/index.md` exists in the vault. It also writes `repos/<name>/context.md` beside it, a summary under 4 KB with the doc's hand-written rules copied in read-only, which `/vault-context` reads in place of the full doc.
+   Or run `/vault-populate` if you've installed the commands. You know it worked when `repos/<name>/index.md` exists in the vault. Add `--context-only` to write only the summary from an existing doc, without surveying the repo or touching the doc (useful when converting a vault whose docs you do not want regenerated). It also writes `repos/<name>/context.md` beside it, a summary under 4 KB with the doc's hand-written rules copied in read-only, which `/vault-context` reads in place of the full doc.
 
 4. **Link it from `index.md`'s Systems/Repos table** in the vault. A doc nobody can find from the hub is barely better than no doc at all.
 
